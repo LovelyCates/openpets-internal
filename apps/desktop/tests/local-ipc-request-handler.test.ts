@@ -40,12 +40,70 @@ function makeDeps(overrides: Partial<LocalIpcRequestHandlerDeps> = {}): LocalIpc
     applyExternalPetReaction: () => ({ shown: true }),
     applyExternalPetSay: () => ({ shown: true }),
     applyExternalPetShowMedia: () => ({ shown: true }),
+    updateTokenRate: () => undefined,
     broadcastLanPetActivity: () => undefined,
     recordOpenPetsActivity: () => undefined,
     debug: () => undefined,
     logError: () => undefined,
     ...overrides,
   };
+}
+
+{
+  const received: unknown[] = [];
+  const response = await handle(request("pet.tokenRate", {
+    leaseId: "lease-1",
+    sessionId: "ses_123",
+    tokensPerSecond: 28.5,
+    source: "estimated",
+  }), {
+    getLease: () => lease,
+    updateTokenRate: (sessionId, leaseId, target, reading) => received.push({ sessionId, leaseId, target, reading }),
+  });
+  assert.equal(response.ok, true);
+  assert.deepEqual(received, [{
+    sessionId: "ses_123",
+    leaseId: "lease-1",
+    target: { kind: "explicit", petId: "agent-pet" },
+    reading: { tokensPerSecond: 28.5, outputTokens: undefined, source: "estimated" },
+  }]);
+
+  const finalReceived: unknown[] = [];
+  const final = await handle(request("pet.tokenRate", {
+    sessionId: "ses_123",
+    tokensPerSecond: null,
+    outputTokens: 420,
+    source: "reported",
+  }), {
+    updateTokenRate: (sessionId, leaseId, target, reading) => { finalReceived.push({ sessionId, leaseId, target, reading }); },
+  });
+  assert.equal(final.ok, true);
+  assert.deepEqual(finalReceived[0], {
+    sessionId: "ses_123",
+    leaseId: undefined,
+    target: { kind: "default" },
+    reading: { tokensPerSecond: null, outputTokens: 420, source: "reported" },
+  });
+}
+
+{
+  for (const badParams of [
+    { sessionId: "bad\nvalue", tokensPerSecond: 12, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: 10_001, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: -1, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: null, outputTokens: 12, source: "estimated" },
+  ]) {
+    const response = await handle(request("pet.tokenRate", badParams));
+    assert.equal(response.ok, false);
+    assert.equal(response.error?.code, "invalid_params");
+  }
+  const stale = await handle(request("pet.tokenRate", {
+    leaseId: "missing",
+    sessionId: "ses_1",
+    tokensPerSecond: 12,
+    source: "estimated",
+  }));
+  assert.equal(stale.error?.code, "unknown_lease");
 }
 
 function request(method: string, params?: unknown, id = "request-1"): string {

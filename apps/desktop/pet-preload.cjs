@@ -286,6 +286,52 @@ ipcRenderer.on("openpets:pet-gaze", (_event, payload) => {
   }
 });
 
+let latestTokenRateDisplay;
+
+function applyTokenRateDisplay() {
+  if (latestTokenRateDisplay === undefined) return;
+  const hitbox = document.querySelector(".stage .pet-hitbox");
+  if (!hitbox) return;
+  let badge = hitbox.querySelector("[data-opencode-token-rate]");
+  if (latestTokenRateDisplay === null || (!latestTokenRateDisplay.rateText && !latestTokenRateDisplay.outputText)) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.className = "opencode-token-rate";
+    badge.setAttribute("data-opencode-token-rate", "");
+    hitbox.prepend(badge);
+  }
+  badge.replaceChildren();
+  if (latestTokenRateDisplay.rateText) {
+    const rate = document.createElement("span");
+    rate.className = "opencode-token-rate-speed";
+    rate.textContent = latestTokenRateDisplay.rateText;
+    badge.appendChild(rate);
+  }
+  if (latestTokenRateDisplay.outputText) {
+    const total = document.createElement("span");
+    total.className = "opencode-token-rate-total";
+    total.textContent = latestTokenRateDisplay.outputText;
+    badge.appendChild(total);
+  }
+}
+
+ipcRenderer.on("openpets:pet-token-rate", (_event, display) => {
+  if (display !== null && (
+    !display || typeof display !== "object" || Array.isArray(display)
+    || typeof display.rateText !== "string" || display.rateText.length > 64
+    || typeof display.outputText !== "string" || display.outputText.length > 64
+  )) return;
+  latestTokenRateDisplay = display;
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", applyTokenRateDisplay, { once: true });
+  } else {
+    applyTokenRateDisplay();
+  }
+});
+
 ipcRenderer.on("openpets:pet-content-state", (_event, state) => {
   if (!state || typeof state.bodyHtml !== "string" || state.bodyHtml.length > 64 * 1024 || typeof state.documentHtml !== "string" || state.documentHtml.length > 2 * 1024 * 1024 || !allowedReactionStates.has(state.reactionState)) {
     return;
@@ -310,6 +356,7 @@ ipcRenderer.on("openpets:pet-content-state", (_event, state) => {
         }
       }
       nativeActivityPlayer.refreshStage();
+      applyTokenRateDisplay();
       bodyCoordinator.setFlipped(document.documentElement.dataset.flipX === "true");
       bodyCoordinator.refresh();
       updateOnPetTalkButton(latestVoiceSnapshot);

@@ -17,6 +17,11 @@ const transientPresentations = new Map<string, PetTransientPresentation>();
 const dismissedAgentPets = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 
+export function getAgentPetWindow(petId: string): BrowserWindow | null {
+  const window = agentPetWindows.get(petId);
+  return window && !window.isDestroyed() ? window : null;
+}
+
 export function showAgentPet(petId: string): boolean {
   if (dismissedAgentPets.has(petId)) {
     info("pet.agent", "show skipped", { petId, reason: "dismissed", activeWindows: agentPetWindows.size });

@@ -150,6 +150,7 @@ export const es419: Partial<Messages> = {
   "session.stopsIn": "Se apaga en {time}",
 
   "pet.paused": "En pausa",
+  "pet.tokenRate.output": "Salida",
   "pet.status.thinking": "Pensando",
   "pet.status.working": "Trabajando",
   "pet.status.editing": "Editando",

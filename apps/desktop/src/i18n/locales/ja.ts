@@ -150,6 +150,7 @@ export const ja: Partial<Messages> = {
   "session.stopsIn": "{time} 後にフェードアウト",
 
   "pet.paused": "一時停止中",
+  "pet.tokenRate.output": "出力",
   "pet.status.thinking": "思考中",
   "pet.status.working": "作業中",
   "pet.status.editing": "編集中",

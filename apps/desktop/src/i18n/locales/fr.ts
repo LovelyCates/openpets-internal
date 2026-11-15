@@ -88,6 +88,7 @@ export const fr: Partial<Messages> = {
 
   // --- Pet window (main process, src/pet-window.ts) ---
   "pet.paused": "En pause",
+  "pet.tokenRate.output": "Sortie",
   "pet.status.thinking": "Réflexion",
   "pet.status.working": "Au travail",
   "pet.status.editing": "Modification",

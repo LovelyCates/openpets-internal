@@ -97,6 +97,7 @@ export const en = {
 
   // --- Pet window (main process, src/pet-window.ts) ---
   "pet.paused": "Paused",
+  "pet.tokenRate.output": "Output",
   "pet.status.thinking": "Thinking",
   "pet.status.working": "Working",
   "pet.status.editing": "Editing",

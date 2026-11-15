@@ -49,8 +49,8 @@ local-ipc.ts → local-ipc-request-handler.ts → parseIpcRequest() → handleRe
 └── lease.acquire/heartbeat/release
     └── lease-manager.ts
         ├── resolveTarget() (default vs explicit pet)
-        ├── onFirstExplicitLease → agent-pet-controller.showAgentPet()
-        └── onLastExplicitLease → agent-pet-controller.closeAgentPetIfOpen()
+        ├── onFirstExplicitLease → clear prior usage, then agent-pet-controller.showAgentPet()
+        └── onLastExplicitLease → clear confinement, then close immediately or briefly retain a fresh reported OpenCode count
     └── local-ipc-confinement.ts → confinement-poller.ts → window-tracker.ts
 └── Logging via logger.ts (ipc, lease scopes)
 ```
@@ -90,6 +90,17 @@ pet-window.ts
 ├── ../pet-session/orb-renderer.cjs (WebGL night-sky orb)
 ├── pet-chat-markdown.ts (Electron-free chat escaping and supported markdown subset)
 └── pet-chat-view-state.ts (Electron-free Talk, snapshot ordering, naming, draft derivation, and empty-conversation-only prompt suggestions)
+
+OpenCode token usage display:
+`local-ipc-protocol.ts` validates the bounded `pet.tokenRate` payload →
+`local-ipc-request-handler.ts` resolves its lease target →
+`opencode-token-rate.ts` owns short-lived per-session readings and expiry →
+`local-ipc.ts` sends the formatted badge directly to the target pet window →
+`pet-preload.cjs` updates only the badge DOM. `pet-window-render.ts` supplies
+initial badge markup when a pet window loads, and `pet-window-styles.ts` keeps
+the badge separate from the shared pinned plugin HUD slot. Lease release clears
+estimates immediately; a fresh reported count can hold an existing explicit pet
+window open for no more than eight seconds. A new lease cancels that hold.
 pet-window-interaction.ts
 └── mouse passthrough, drag, renderer lifecycle recovery/watchdog, IPC bridge, and speech completion subscriptions
 

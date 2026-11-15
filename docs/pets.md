@@ -320,6 +320,23 @@ reaction into something visible:
    (`waving`/`success`/`error`/`celebrating`) falls back to idle so terminal
    reactions stay bounded.
 
+The internal OpenCode integration can also show a small token usage badge to
+the lower right of the active default or agent pet, below its speech bubble.
+Streaming speed is marked as an estimate;
+reported output-token counts are shown without inventing a final speed. The
+desktop stores only bounded numeric readings and short session identifiers in
+memory. Estimates disappear after roughly five seconds without a new event;
+reported counts remain for up to eight seconds, then disappear. Releasing an
+agent pet lease clears estimates immediately. If an existing agent pet window
+shows a fresh reported count, it remains visible for the rest of that brief
+period before closing. A new lease for that pet cancels the pending close and
+clears the previous session's count. This badge has its own display path and
+does not replace the single pinned plugin HUD used by System Resources or
+Virtual Pet. Updates go
+directly to the existing pet renderer DOM, leaving its sprite animation and
+chat surface intact. The owners are `opencode-token-rate.ts`, `local-ipc.ts`,
+`pet-window-render.ts`, `pet-window-styles.ts`, and `pet-preload.cjs`.
+
 The waiting animation cycle is a global preference in Control Center → Settings
 → Reactions. **Normal** keeps the default `1010` ms cycle and **Relaxed** uses
 `2200` ms. The renderer derives a fresh sprite-state table for the selected

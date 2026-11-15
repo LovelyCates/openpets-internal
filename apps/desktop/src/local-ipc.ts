@@ -3,10 +3,10 @@ import net from "node:net";
 
 import { app, Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, getAgentPetWindow, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, getDefaultPetWindowForPlugins, isDefaultPetVisible } from "./default-pet-controller.js";
 import { LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -22,21 +22,36 @@ import { broadcastLanPetActivity } from "./lan-controller.js";
 import { createLocalIpcRequestHandler } from "./local-ipc-request-handler.js";
 import { handleLocalIpcSocket } from "./local-ipc-transport.js";
 import { createLocalIpcConfinementCoordinator, type LocalIpcConfinementCoordinator } from "./local-ipc-confinement.js";
+import { formatOpenCodeTokenRate, openCodeTokenRateStore } from "./opencode-token-rate.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
+let tokenRateCleanupTimer: NodeJS.Timeout | null = null;
+const tokenRateFinalHoldTimers = new Map<string, NodeJS.Timeout>();
 /** leaseId → window-tracking unsubscribe function (for confined agent pets). */
 let confinementCoordinator: LocalIpcConfinementCoordinator;
 const leaseManager = new LeaseManager({
   resolveTarget: resolveLeaseTarget,
   getDefaultPetId: () => getCurrentDefaultPet().id,
   getPetDisplayName: (petId, targetKind) => targetKind === "default" ? getCurrentDefaultPet().displayName : getPetDisplayName(petId),
-  onFirstExplicitLease: showAgentPet,
+  onFirstExplicitLease: handleFirstExplicitLease,
   onLastExplicitLease: handleLastExplicitLease,
-  onLeaseReleased: (lease) => confinementCoordinator.stopLease(lease.leaseId),
+  onLeaseReleased: (lease) => {
+    confinementCoordinator.stopLease(lease.leaseId);
+    openCodeTokenRateStore.clearLease(lease.leaseId);
+  },
   onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
   isPetEligible,
+});
+
+openCodeTokenRateStore.subscribe((target) => {
+  const window = target.kind === "default"
+    ? getDefaultPetWindowForPlugins()
+    : getAgentPetWindow(target.petId);
+  if (!window || window.webContents.isDestroyed()) return;
+  const display = formatOpenCodeTokenRate(openCodeTokenRateStore.read(target), t("pet.tokenRate.output"));
+  window.webContents.send("openpets:pet-token-rate", display);
 });
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
@@ -112,6 +127,7 @@ const handleRawRequest = createLocalIpcRequestHandler({
   applyExternalPetReaction,
   applyExternalPetSay,
   applyExternalPetShowMedia,
+  updateTokenRate: (sessionId, leaseId, target, reading) => openCodeTokenRateStore.update(sessionId, leaseId, target, reading),
   broadcastLanPetActivity,
   recordOpenPetsActivity,
   debug: (message, fields) => debug("ipc", message, fields),
@@ -151,6 +167,8 @@ export async function startLocalIpcServer(): Promise<void> {
     leaseManager.checkPidLiveness();
   }, 5_000);
   leaseCleanupTimer.unref?.();
+  tokenRateCleanupTimer = setInterval(() => openCodeTokenRateStore.sweepExpired(), 1_000);
+  tokenRateCleanupTimer.unref?.();
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }
@@ -163,6 +181,14 @@ export function stopLocalIpcServer(): void {
   info("ipc", "server stopping", { hadServer: Boolean(server), discoveryPath: discovery ? getDiscoveryFilePath() : undefined, endpoint: discovery?.endpoint });
   if (leaseCleanupTimer) clearInterval(leaseCleanupTimer);
   leaseCleanupTimer = null;
+  if (tokenRateCleanupTimer) clearInterval(tokenRateCleanupTimer);
+  tokenRateCleanupTimer = null;
+  for (const [petId, timer] of tokenRateFinalHoldTimers) {
+    clearTimeout(timer);
+    clearAgentPetLeaseState(petId);
+  }
+  tokenRateFinalHoldTimers.clear();
+  openCodeTokenRateStore.clearAll();
   removeDiscoveryFile(discovery);
 
   if (server) {
@@ -315,13 +341,36 @@ function isPrivateOrLocalAddress(address: string): boolean {
   return false;
 }
 
+function handleFirstExplicitLease(petId: string): void {
+  const pendingHold = tokenRateFinalHoldTimers.get(petId);
+  if (pendingHold) {
+    clearTimeout(pendingHold);
+    tokenRateFinalHoldTimers.delete(petId);
+  }
+  openCodeTokenRateStore.clearTarget({ kind: "explicit", petId });
+  showAgentPet(petId);
+}
+
 function handleLastExplicitLease(petId: string): void {
   info("ipc", "last explicit lease ended", { petId });
-  try {
+  confinementCoordinator.clearPetConfinement(petId);
+
+  const holdMs = getAgentPetWindow(petId)
+    ? openCodeTokenRateStore.reportedFinalRemainingMs({ kind: "explicit", petId })
+    : 0;
+  if (holdMs <= 0) {
     clearAgentPetLeaseState(petId);
-  } finally {
-    confinementCoordinator.clearPetConfinement(petId);
+    return;
   }
+
+  const timer = setTimeout(() => {
+    tokenRateFinalHoldTimers.delete(petId);
+    if (leaseManager.countExplicitLeases(petId) === 0) {
+      clearAgentPetLeaseState(petId);
+    }
+  }, Math.ceil(holdMs));
+  timer.unref?.();
+  tokenRateFinalHoldTimers.set(petId, timer);
 }
 
 function isBenignSocketCloseError(error: NodeJS.ErrnoException): boolean {

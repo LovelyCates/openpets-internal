@@ -74,6 +74,15 @@ export interface OpenPetsPetListItem {
   readonly broken: boolean;
 }
 
+/** A bounded, local-only OpenCode usage update. No prompt or tool content is sent. */
+export interface OpenPetsTokenRateUpdate {
+  readonly sessionId: string;
+  readonly tokensPerSecond: number | null;
+  readonly outputTokens?: number;
+  readonly source: "estimated" | "reported";
+  readonly leaseId?: string;
+}
+
 export interface OpenPetsClient {
   readonly transport?: "local" | "remote";
   hello(): Promise<unknown>;
@@ -87,6 +96,7 @@ export interface OpenPetsClient {
   react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string }): Promise<unknown>;
   say(message: string, options?: { readonly reaction?: OpenPetsReaction; readonly leaseId?: string }): Promise<unknown>;
   showMedia(path: string, options?: { readonly message?: string; readonly reaction?: OpenPetsReaction; readonly durationMs?: number; readonly clickUrl?: string; readonly leaseId?: string }): Promise<unknown>;
+  tokenRate?(update: OpenPetsTokenRateUpdate): Promise<unknown>;
 }
 
 export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenPetsClient {
@@ -144,6 +154,55 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       }
       return sendDiscoveredRequest("pet.showMedia", { path: trimmedPath, message: mediaOptions?.message, reaction: mediaOptions?.reaction === undefined ? undefined : validateReaction(mediaOptions.reaction), durationMs: mediaOptions?.durationMs, clickUrl: mediaOptions?.clickUrl, leaseId: mediaOptions?.leaseId }, options);
     },
+    tokenRate: async (update) => {
+      if (remote) return unsupportedRemote();
+      return sendDiscoveredRequest("pet.tokenRate", validateTokenRateUpdate(update), options);
+    },
+  };
+}
+
+export function validateTokenRateUpdate(value: OpenPetsTokenRateUpdate): OpenPetsTokenRateUpdate {
+  if (!value || typeof value !== "object") {
+    throw new OpenPetsClientError("invalid_params", "Token rate update is invalid.");
+  }
+  if (typeof value.sessionId !== "string" || !/^[A-Za-z0-9._:-]{1,80}$/.test(value.sessionId)) {
+    throw new OpenPetsClientError("invalid_params", "Token rate session id is invalid.");
+  }
+  if (value.tokensPerSecond !== null && (
+    typeof value.tokensPerSecond !== "number"
+    || !Number.isFinite(value.tokensPerSecond)
+    || value.tokensPerSecond < 0
+    || value.tokensPerSecond > 10_000
+  )) {
+    throw new OpenPetsClientError("invalid_params", "Token rate is outside supported bounds.");
+  }
+  if (value.outputTokens !== undefined && (
+    !Number.isSafeInteger(value.outputTokens)
+    || value.outputTokens < 0
+    || value.outputTokens > 1_000_000_000
+  )) {
+    throw new OpenPetsClientError("invalid_params", "Output token count is outside supported bounds.");
+  }
+  if (value.source !== "estimated" && value.source !== "reported") {
+    throw new OpenPetsClientError("invalid_params", "Token rate source is invalid.");
+  }
+  if (value.tokensPerSecond === null && value.outputTokens !== undefined && value.source !== "reported") {
+    throw new OpenPetsClientError("invalid_params", "Final output token count must be reported.");
+  }
+  if (value.leaseId !== undefined && (
+    typeof value.leaseId !== "string"
+    || value.leaseId.length < 1
+    || value.leaseId.length > 120
+    || /[\x00-\x1F\x7F]/.test(value.leaseId)
+  )) {
+    throw new OpenPetsClientError("invalid_params", "Token rate lease id is invalid.");
+  }
+  return {
+    sessionId: value.sessionId,
+    tokensPerSecond: value.tokensPerSecond,
+    source: value.source,
+    ...(value.outputTokens === undefined ? {} : { outputTokens: value.outputTokens }),
+    ...(value.leaseId === undefined ? {} : { leaseId: value.leaseId }),
   };
 }
 

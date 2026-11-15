@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 
 import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
-import { createOpenPetsClient, parsePetInstallResult, parsePetListResult } from "../src/index.js";
+import { createOpenPetsClient, parsePetInstallResult, parsePetListResult, validateTokenRateUpdate } from "../src/index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
 import { maxRemoteMessageBytes, parseRemoteEndpoint, validateRemoteMessage, validateRemoteToken } from "../src/remote-protocol.js";
 
@@ -73,6 +73,16 @@ assert.deepEqual(parsePetListResult({ ok: true, defaultPetId: "builtin", pets: [
 assertRejects(() => parsePetListResult({ ok: true, pets: [{ id: "fixer" }], defaultPetId: "builtin" }));
 assert.deepEqual(parsePetInstallResult({ ok: true, petId: "fixer", displayName: "Fixer", installed: true }), { ok: true, petId: "fixer", displayName: "Fixer", installed: true });
 assertRejects(() => parsePetInstallResult({ ok: true, petId: "fixer" }));
+assert.deepEqual(validateTokenRateUpdate({ sessionId: "opencode:session-1", tokensPerSecond: 52.4, source: "estimated" }), {
+  sessionId: "opencode:session-1",
+  tokensPerSecond: 52.4,
+  source: "estimated",
+});
+assertRejects(() => validateTokenRateUpdate({ sessionId: "../secret", tokensPerSecond: 12, source: "estimated" }));
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: Number.NaN, source: "estimated" }));
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: 20_000, source: "estimated" }));
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: null, outputTokens: -1, source: "reported" }));
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: null, outputTokens: 10, source: "estimated" }));
 
 console.log("Client protocol validation passed.");
 
@@ -109,6 +119,7 @@ try {
   assert.equal(remoteClient.transport, "remote");
   assert.deepEqual(await remoteClient.status(), { ok: true, appRunning: true });
   await assert.rejects(remoteClient.listPets(), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
+  await assert.rejects(remoteClient.tokenRate!({ sessionId: "session-1", tokensPerSecond: 30, source: "estimated" }), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
 } finally {
   if (previousDiscovery === undefined) delete process.env.OPENPETS_DISCOVERY_FILE;
   else process.env.OPENPETS_DISCOVERY_FILE = previousDiscovery;

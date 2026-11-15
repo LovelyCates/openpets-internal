@@ -183,6 +183,9 @@ export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudSca
       display: none !important;
     }
     .pet-hitbox { position: absolute; left: 50%; bottom: ${Math.max(0, petBottom - petWindowHitPadding)}px; z-index: 1; width: ${scaledWidth + petWindowHitPadding * 2}px; height: ${scaledHeight + petWindowHitPadding * 2}px; display: grid; place-items: center; transform: translateX(-50%); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
+    .opencode-token-rate { position: absolute; top: 60%; right: 2px; z-index: 6; display: inline-flex; flex-direction: column; gap: 1px; max-width: 125px; padding: 3px 6px; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 9px; background: rgba(15, 23, 42, 0.88); color: #f8fafc; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25); font: 700 10px/12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; transform: translateY(-50%); pointer-events: none; -webkit-app-region: no-drag; }
+    .opencode-token-rate-speed { color: #a7f3d0; }
+    .opencode-token-rate-total { font-size: 9px; color: #cbd5e1; }
     .pet-shell { position: relative; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
     html[data-flip-x="true"] .pet-shell { transform: scaleX(-1); }
     /* Wayland native drag starts on the CSS drag region without consulting the

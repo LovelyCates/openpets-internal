@@ -13,7 +13,7 @@ export const maxMediaDurationMs = 30_000;
 export const defaultMediaDurationMs = 8_000;
 export const allowedMediaExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"] as const;
 
-export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pets.install-local";
+export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pet.tokenRate" | "pets.install-local";
 
 export interface OpenPetsIpcRequest {
   readonly id: string;
@@ -48,7 +48,7 @@ export function parseIpcRequest(raw: string, expectedToken: string): OpenPetsIpc
   if (typeof parsed.id !== "string" || parsed.id.length < 1 || parsed.id.length > 120) throw new IpcProtocolError("invalid_request", "IPC request id is invalid.");
   if (parsed.version !== openPetsIpcVersion) throw new IpcProtocolError("invalid_version", "Unsupported IPC protocol version.");
   if (parsed.token !== expectedToken) throw new IpcProtocolError("invalid_token", "Invalid IPC token.");
-  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pet.showMedia" && parsed.method !== "pets.install-local") {
+  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pet.showMedia" && parsed.method !== "pet.tokenRate" && parsed.method !== "pets.install-local") {
     throw new IpcProtocolError("unknown_method", "Unknown IPC method.");
   }
 
@@ -93,6 +93,41 @@ export function validateOptionalLeaseId(value: unknown): string | undefined {
     throw new IpcProtocolError("invalid_params", "Invalid lease id.");
   }
   return value;
+}
+
+export type ValidatedTokenRate = {
+  readonly leaseId?: string;
+  readonly sessionId: string;
+  readonly tokensPerSecond: number | null;
+  readonly outputTokens?: number;
+  readonly source: "estimated" | "reported";
+};
+
+export function validateTokenRateParams(value: unknown): ValidatedTokenRate {
+  if (!isRecord(value)) throw new IpcProtocolError("invalid_params", "Token rate params must be an object.");
+  const leaseId = validateOptionalLeaseId(value.leaseId);
+  if (typeof value.sessionId !== "string" || !/^[A-Za-z0-9._:-]{1,80}$/.test(value.sessionId)) {
+    throw new IpcProtocolError("invalid_params", "Invalid token rate session id.");
+  }
+  if (value.tokensPerSecond !== null && (typeof value.tokensPerSecond !== "number" || !Number.isFinite(value.tokensPerSecond) || value.tokensPerSecond < 0 || value.tokensPerSecond > 10_000)) {
+    throw new IpcProtocolError("invalid_params", "Invalid tokens-per-second value.");
+  }
+  if (value.outputTokens !== undefined && (typeof value.outputTokens !== "number" || !Number.isSafeInteger(value.outputTokens) || value.outputTokens < 0 || value.outputTokens > 1_000_000_000)) {
+    throw new IpcProtocolError("invalid_params", "Invalid output token count.");
+  }
+  if (value.source !== "estimated" && value.source !== "reported") {
+    throw new IpcProtocolError("invalid_params", "Invalid token rate source.");
+  }
+  if (value.tokensPerSecond === null && value.outputTokens !== undefined && value.source !== "reported") {
+    throw new IpcProtocolError("invalid_params", "Final token count must be reported.");
+  }
+  return {
+    ...(leaseId ? { leaseId } : {}),
+    sessionId: value.sessionId,
+    tokensPerSecond: value.tokensPerSecond,
+    ...(value.outputTokens !== undefined ? { outputTokens: value.outputTokens } : {}),
+    source: value.source,
+  };
 }
 
 export function validateRequestedPetId(value: unknown): string | undefined {

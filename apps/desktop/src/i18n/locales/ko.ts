@@ -150,6 +150,7 @@ export const ko: Partial<Messages> = {
   "session.stopsIn": "{time} 후 페이드아웃",
 
   "pet.paused": "일시정지됨",
+  "pet.tokenRate.output": "출력",
   "pet.status.thinking": "생각 중",
   "pet.status.working": "작업 중",
   "pet.status.editing": "편집 중",

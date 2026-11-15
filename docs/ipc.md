@@ -93,13 +93,21 @@ shapes before returning.
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
 | `pet.showMedia` | Show a local image inside a pet's speech bubble |
+| `pet.tokenRate` | Update the short-lived OpenCode token rate badge on a pet |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
 `installLocalPet()`, `acquireLease()`, `heartbeatLease()`, `releaseLease()`,
-`react()`, `say()`, `showMedia()`) wrap these. `installLocalPet()` requires an
+`react()`, `say()`, `showMedia()`, `tokenRate()`) wrap these. `installLocalPet()` requires an
 absolute path and an explicit `zip`/`folder` kind. `react()`/`say()`/
-`showMedia()` accept an optional `leaseId` to target a specific pet.
+`showMedia()` and `tokenRate()` accept an optional `leaseId` to target a specific pet.
+
+`pet.tokenRate` is local-only and carries only a bounded opaque session id,
+an estimated token rate or a reported output-token count, and an optional
+lease id. It carries no prompt, model response, file path, or tool argument.
+The host validates numeric bounds and the lease before updating a separate
+short-lived badge; a null rate without an output count clears that session.
+The method is absent from the remote-control protocol.
 
 Experimental multi-pet LAN mode converts only default-target `working`,
 `editing`, `running`, and `testing` reactions into a coarse authenticated

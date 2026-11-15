@@ -385,7 +385,42 @@ function createOpenPetsClient(options = {}) {
         throw new OpenPetsClientError("invalid_params", "Media path must be absolute.");
       }
       return sendDiscoveredRequest("pet.showMedia", { path: trimmedPath, message: mediaOptions?.message, reaction: mediaOptions?.reaction === void 0 ? void 0 : validateReaction(mediaOptions.reaction), durationMs: mediaOptions?.durationMs, clickUrl: mediaOptions?.clickUrl, leaseId: mediaOptions?.leaseId }, options);
+    },
+    tokenRate: async (update) => {
+      if (remote)
+        return unsupportedRemote();
+      return sendDiscoveredRequest("pet.tokenRate", validateTokenRateUpdate(update), options);
     }
+  };
+}
+function validateTokenRateUpdate(value) {
+  if (!value || typeof value !== "object") {
+    throw new OpenPetsClientError("invalid_params", "Token rate update is invalid.");
+  }
+  if (typeof value.sessionId !== "string" || !/^[A-Za-z0-9._:-]{1,80}$/.test(value.sessionId)) {
+    throw new OpenPetsClientError("invalid_params", "Token rate session id is invalid.");
+  }
+  if (value.tokensPerSecond !== null && (typeof value.tokensPerSecond !== "number" || !Number.isFinite(value.tokensPerSecond) || value.tokensPerSecond < 0 || value.tokensPerSecond > 1e4)) {
+    throw new OpenPetsClientError("invalid_params", "Token rate is outside supported bounds.");
+  }
+  if (value.outputTokens !== void 0 && (!Number.isSafeInteger(value.outputTokens) || value.outputTokens < 0 || value.outputTokens > 1e9)) {
+    throw new OpenPetsClientError("invalid_params", "Output token count is outside supported bounds.");
+  }
+  if (value.source !== "estimated" && value.source !== "reported") {
+    throw new OpenPetsClientError("invalid_params", "Token rate source is invalid.");
+  }
+  if (value.tokensPerSecond === null && value.outputTokens !== void 0 && value.source !== "reported") {
+    throw new OpenPetsClientError("invalid_params", "Final output token count must be reported.");
+  }
+  if (value.leaseId !== void 0 && (typeof value.leaseId !== "string" || value.leaseId.length < 1 || value.leaseId.length > 120 || /[\x00-\x1F\x7F]/.test(value.leaseId))) {
+    throw new OpenPetsClientError("invalid_params", "Token rate lease id is invalid.");
+  }
+  return {
+    sessionId: value.sessionId,
+    tokensPerSecond: value.tokensPerSecond,
+    source: value.source,
+    ...value.outputTokens === void 0 ? {} : { outputTokens: value.outputTokens },
+    ...value.leaseId === void 0 ? {} : { leaseId: value.leaseId }
   };
 }
 function parsePetInstallResult(value) {
@@ -633,6 +668,150 @@ function sanitizeOpenCodeExcludedReactions(excludeReactions) {
   return [...new Set(recognized)];
 }
 
+// src/opencode-token-rate.ts
+var sessionIdPattern = /^[A-Za-z0-9._:-]{1,80}$/;
+var estimateWindowMs = 3e3;
+var minEstimateDurationMs = 1e3;
+var usageDuringStreamGraceMs = 1500;
+var reportedDisplayMs = 8e3;
+var maxDeltaChars = 32768;
+var maxReportedTokens = 1e9;
+var maxFallbackSessionIds = 16;
+function createOpenCodeTokenRateTracker(now = Date.now) {
+  let activeSessionId;
+  let startedAt;
+  let lastDeltaAt = 0;
+  let lastEstimatedAt = 0;
+  let reportedAt;
+  let samples = [];
+  const fallbackSessionIds = /* @__PURE__ */ new Map();
+  const fallbackPrefix = Math.floor(Math.random() * 4294967296).toString(36).padStart(7, "0");
+  let fallbackSequence = 0;
+  const readSessionId = (value) => {
+    if (typeof value !== "string") return void 0;
+    if (sessionIdPattern.test(value)) return value;
+    if (!value || value.length > 256) return void 0;
+    const existing = fallbackSessionIds.get(value);
+    if (existing) return existing;
+    const safeId = `oc-${fallbackPrefix}-${++fallbackSequence}`;
+    fallbackSessionIds.set(value, safeId);
+    if (fallbackSessionIds.size > maxFallbackSessionIds) {
+      const oldest = fallbackSessionIds.keys().next().value;
+      if (oldest !== void 0) fallbackSessionIds.delete(oldest);
+    }
+    return safeId;
+  };
+  const clear = () => {
+    const sessionId = activeSessionId;
+    activeSessionId = void 0;
+    startedAt = void 0;
+    lastDeltaAt = 0;
+    lastEstimatedAt = 0;
+    reportedAt = void 0;
+    samples = [];
+    return sessionId ? { sessionId, tokensPerSecond: null, source: "estimated" } : void 0;
+  };
+  const estimate = (sessionId, delta) => {
+    if (!delta || delta.length > maxDeltaChars) return void 0;
+    const at = now();
+    if (!Number.isFinite(at)) return void 0;
+    if (activeSessionId !== sessionId || startedAt === void 0) {
+      activeSessionId = sessionId;
+      startedAt = at;
+      lastDeltaAt = 0;
+      lastEstimatedAt = 0;
+      reportedAt = void 0;
+      samples = [];
+    }
+    lastDeltaAt = at;
+    samples.push({ at, tokens: delta.length / 4 });
+    const cutoff = Math.max(startedAt, at - estimateWindowMs);
+    samples = samples.filter((sample) => sample.at >= cutoff);
+    const durationMs = at - cutoff;
+    if (durationMs < minEstimateDurationMs || lastEstimatedAt && at - lastEstimatedAt < minEstimateDurationMs) return void 0;
+    const tokenCount = samples.reduce((sum, sample) => sum + sample.tokens, 0);
+    lastEstimatedAt = at;
+    return {
+      sessionId,
+      tokensPerSecond: Math.round(Math.min(1e4, tokenCount * 1e3 / durationMs) * 10) / 10,
+      source: "estimated"
+    };
+  };
+  const reported = (sessionId, outputTokens) => {
+    activeSessionId = sessionId;
+    startedAt = void 0;
+    lastDeltaAt = 0;
+    lastEstimatedAt = 0;
+    reportedAt = now();
+    samples = [];
+    return { sessionId, tokensPerSecond: null, outputTokens, source: "reported" };
+  };
+  return {
+    ingest(event) {
+      const item = isRecord4(event) ? event : void 0;
+      const type = typeof item?.type === "string" ? item.type : void 0;
+      const data = isRecord4(item?.data) ? item.data : void 0;
+      const properties = isRecord4(item?.properties) ? item.properties : void 0;
+      if (type === "session.text.delta" || type === "session.reasoning.delta") {
+        const sessionId = readSessionId(data?.sessionID);
+        return sessionId && typeof data?.delta === "string" ? estimate(sessionId, data.delta) : void 0;
+      }
+      if (type === "session.usage.updated" || type === "session.step.ended") {
+        const sessionId = readSessionId(data?.sessionID);
+        const outputTokens = readOutputTokens(data?.tokens);
+        if (type === "session.usage.updated" && sessionId === activeSessionId && lastDeltaAt && now() - lastDeltaAt < usageDuringStreamGraceMs) {
+          return void 0;
+        }
+        return sessionId && outputTokens !== void 0 ? reported(sessionId, outputTokens) : void 0;
+      }
+      if (type === "message.part.delta" && properties?.field === "text") {
+        const sessionId = readSessionId(properties.sessionID);
+        return sessionId && typeof properties.delta === "string" ? estimate(sessionId, properties.delta) : void 0;
+      }
+      if (type === "message.part.updated") {
+        const part = isRecord4(properties?.part) ? properties.part : void 0;
+        const sessionId = readSessionId(part?.sessionID);
+        if (part?.type !== "text" && part?.type !== "reasoning" || !sessionId) return void 0;
+        return typeof properties?.delta === "string" ? estimate(sessionId, properties.delta) : void 0;
+      }
+      if (type === "message.updated") {
+        const info = isRecord4(properties?.info) ? properties.info : void 0;
+        if (info?.role !== "assistant") return void 0;
+        const sessionId = readSessionId(info.sessionID);
+        const time = isRecord4(info.time) ? info.time : void 0;
+        const metadata = isRecord4(info.metadata) ? info.metadata : void 0;
+        const metadataTime = isRecord4(metadata?.time) ? metadata.time : void 0;
+        if (typeof time?.completed !== "number" && typeof metadataTime?.completed !== "number" && typeof info.finish !== "string") return void 0;
+        const assistant = isRecord4(metadata?.assistant) ? metadata.assistant : void 0;
+        const outputTokens = readOutputTokens(info.tokens) ?? readOutputTokens(assistant?.tokens);
+        return sessionId && outputTokens !== void 0 ? reported(sessionId, outputTokens) : void 0;
+      }
+      if (type === "session.idle" || type === "session.execution.succeeded" || type === "session.execution.failed" || type === "session.error") {
+        const eventSessionId = readSessionId(data?.sessionID ?? properties?.sessionID);
+        if (eventSessionId && eventSessionId !== activeSessionId) return void 0;
+        if (type === "session.idle" || type === "session.execution.succeeded") {
+          const age = reportedAt === void 0 ? void 0 : now() - reportedAt;
+          if (age !== void 0 && age >= 0 && age <= reportedDisplayMs) {
+            clear();
+            return void 0;
+          }
+        }
+        return clear();
+      }
+      return void 0;
+    },
+    clear
+  };
+}
+function readOutputTokens(value) {
+  const tokens = isRecord4(value) ? value : void 0;
+  const output = tokens?.output;
+  return typeof output === "number" && Number.isSafeInteger(output) && output >= 0 && output <= maxReportedTokens ? output : void 0;
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/opencode-plugin-runtime.ts
 var speechCooldownMs = 2e4;
 var permissionCooldownMs = 3e3;
@@ -650,8 +829,11 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
 `);
   });
   const excludedReactions = buildExcludedReactionsSet(options.excludeReactions);
+  const tokenRateTracker = createOpenCodeTokenRateTracker(options.now);
   let client;
   let lease;
+  let tokenRateSessionSent;
+  let tokenRateFinalReported = false;
   let closed = false;
   let cleanupPromise;
   let dispatchTail = Promise.resolve();
@@ -695,8 +877,42 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
       debugLog(`OpenPets OpenCode plugin ignored error: ${sanitizeDebugError(error)}`);
     }
   };
-  const getLeaseId = async (hit, requestedPetId) => {
-    if (closed) return void 0;
+  const dispatchTokenRate = async (update, allowDuringCleanup = false) => {
+    if (closed && !allowDuringCleanup) return;
+    try {
+      client ??= clientFactory();
+      if (!client.tokenRate) return;
+      const leaseId = pet ? await getLeaseId(client, pet, allowDuringCleanup) : void 0;
+      if (closed && !allowDuringCleanup) return;
+      await client.tokenRate({ ...update, leaseId });
+      tokenRateSessionSent = update.tokensPerSecond === null && update.outputTokens === void 0 ? void 0 : update.sessionId;
+      tokenRateFinalReported = update.source === "reported" && update.outputTokens !== void 0;
+    } catch (error) {
+      debugLog(`OpenPets OpenCode token rate ignored error: ${sanitizeDebugError(error)}`);
+    }
+  };
+  const runTokenRate = (update) => {
+    if (closed || !update) return;
+    try {
+      if (update.tokensPerSecond === null) {
+        const pending = enqueue(() => dispatchTokenRate(update, true));
+        activeWork.add(pending);
+        void pending.finally(() => activeWork.delete(pending));
+        return;
+      }
+      schedule(() => {
+        if (closed) return Promise.resolve();
+        const pending = enqueue(() => dispatchTokenRate(update));
+        activeWork.add(pending);
+        void pending.finally(() => activeWork.delete(pending));
+        return pending;
+      });
+    } catch (error) {
+      debugLog(`OpenPets OpenCode token rate scheduling ignored error: ${sanitizeDebugError(error)}`);
+    }
+  };
+  const getLeaseId = async (hit, requestedPetId, allowDuringCleanup = false) => {
+    if (closed && !allowDuringCleanup) return void 0;
     if (lease && (!lease.expiresAt || lease.expiresAt - Date.now() > 2e3)) return lease.leaseId;
     const previous = lease;
     let next;
@@ -710,7 +926,7 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
     if (previous && previous.leaseId !== next.leaseId) {
       await releaseLease(hit, previous.leaseId);
     }
-    if (closed) return void 0;
+    if (closed && !allowDuringCleanup) return void 0;
     return next.leaseId;
   };
   const releaseLease = async (hit, leaseId) => {
@@ -725,13 +941,25 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
     await dispatchTail;
     const activeLease = lease;
     const activeClient = client;
+    const displayedSession = tokenRateSessionSent;
+    const leaveFinalUntilExpiry = tokenRateFinalReported;
     lease = void 0;
+    tokenRateSessionSent = void 0;
+    tokenRateFinalReported = false;
+    if (displayedSession && !leaveFinalUntilExpiry && activeClient?.tokenRate) {
+      try {
+        await activeClient.tokenRate({ sessionId: displayedSession, tokensPerSecond: null, source: "estimated", leaseId: activeLease?.leaseId });
+      } catch (error) {
+        debugLog(`OpenPets OpenCode token rate cleanup ignored error: ${sanitizeDebugError(error)}`);
+      }
+    }
     if (!activeLease || !activeClient) return;
     await releaseLease(activeClient, activeLease.leaseId);
   };
   return {
     event(event) {
       try {
+        runTokenRate(tokenRateTracker.ingest(event));
         run(classifyOpenCodeBusEvent(event));
       } catch (error) {
         debugLog(`OpenPets OpenCode event ignored error: ${sanitizeDebugError(error)}`);
@@ -745,7 +973,7 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
       run({ reaction: classifyOpenCodeToolReaction(tool, input) });
     },
     toolAfter(event) {
-      if (!isRecord4(event) || event.status !== "error") return;
+      if (!isRecord5(event) || event.status !== "error") return;
       const tool = typeof event.tool === "string" ? event.tool : "";
       if (tool && shouldIgnoreOpenPetsTool(tool)) return;
       run({ reaction: "error", speechCategory: "error" });
@@ -757,6 +985,7 @@ function createOpenPetsOpenCodeRuntime(options = {}) {
     cleanup() {
       if (cleanupPromise) return cleanupPromise;
       closed = true;
+      tokenRateTracker.clear();
       cleanupPromise = finishCleanup();
       return cleanupPromise;
     }
@@ -809,17 +1038,17 @@ function buildExcludedReactionsSet(excludeReactions) {
 }
 var emptySet = /* @__PURE__ */ new Set();
 function isTestLikeToolArgs(args) {
-  const command = isRecord4(args) && typeof args.command === "string" ? args.command.slice(0, 300) : "";
+  const command = isRecord5(args) && typeof args.command === "string" ? args.command.slice(0, 300) : "";
   return /\b(test|vitest|jest|pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test)\b/i.test(command);
 }
 function getEventType(event) {
-  if (!isRecord4(event)) return void 0;
+  if (!isRecord5(event)) return void 0;
   if (typeof event.type === "string") return event.type;
   return void 0;
 }
 function getEventPermissions(event) {
-  if (!isRecord4(event)) return [];
-  const data = isRecord4(event.data) ? event.data : void 0;
+  if (!isRecord5(event)) return [];
+  const data = isRecord5(event.data) ? event.data : void 0;
   const permissions = typeof data?.action === "string" ? [data.action] : [];
   if (Array.isArray(data?.resources)) {
     permissions.push(...data.resources.filter((resource) => typeof resource === "string"));
@@ -829,7 +1058,7 @@ function getEventPermissions(event) {
 function readThrottleState(path) {
   try {
     const parsed = JSON.parse(readFileSync2(path, "utf8"));
-    if (!isRecord4(parsed)) return {};
+    if (!isRecord5(parsed)) return {};
     const state = {};
     for (const [key, value] of Object.entries(parsed)) {
       if ((key === "thinking" || key === "success" || key === "error" || key === "permission" || key.startsWith("reaction:")) && typeof value === "number" && Number.isFinite(value)) state[key] = value;
@@ -865,7 +1094,7 @@ function safeUid() {
     return "user";
   }
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null;
 }
 
@@ -874,20 +1103,26 @@ function createOpenPetsOpenCodeV1Hooks(runtime = createOpenPetsOpenCodeRuntime()
   return {
     async event(input) {
       const event = input?.event;
-      if (!isRecord5(event) || typeof event.type !== "string") return;
+      if (!isRecord6(event) || typeof event.type !== "string") return;
+      if (event.type === "message.part.updated" || event.type === "message.part.delta" || event.type === "message.updated") {
+        runtime.event(event);
+        return;
+      }
+      const properties = isRecord6(event.properties) ? event.properties : void 0;
+      const sessionID = typeof properties?.sessionID === "string" ? properties.sessionID : void 0;
+      const sessionData = sessionID ? { data: { sessionID } } : {};
       if (event.type === "session.error") {
-        runtime.event({ type: "session.execution.failed" });
+        runtime.event({ type: "session.execution.failed", ...sessionData });
         return;
       }
       if (event.type === "session.idle") {
-        runtime.event({ type: "session.idle" });
+        runtime.event({ type: "session.idle", ...sessionData });
         return;
       }
       if (event.type !== "session.status") return;
-      const properties = isRecord5(event.properties) ? event.properties : void 0;
-      const status = properties && isRecord5(properties.status) ? properties.status : void 0;
+      const status = properties && isRecord6(properties.status) ? properties.status : void 0;
       if (status?.type === "busy") runtime.prompt();
-      if (status?.type === "idle") runtime.event({ type: "session.idle" });
+      if (status?.type === "idle") runtime.event({ type: "session.idle", ...sessionData });
     },
     async "chat.message"() {
       runtime.prompt();
@@ -900,7 +1135,7 @@ function createOpenPetsOpenCodeV1Hooks(runtime = createOpenPetsOpenCodeRuntime()
     }
   };
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

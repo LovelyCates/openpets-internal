@@ -156,6 +156,7 @@ export const zhHans: Partial<Messages> = {
   "session.stopsIn": "{time} 后渐弱停止",
 
   "pet.paused": "已暂停",
+  "pet.tokenRate.output": "输出",
   "pet.status.thinking": "思考中",
   "pet.status.working": "工作中",
   "pet.status.editing": "编辑中",

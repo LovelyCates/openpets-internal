@@ -6,6 +6,7 @@ import { createOpenPetsClient, type OpenPetsClient, type OpenPetsReaction } from
 import { pickHookSpeech, type HookSpeechCategory, validateHookSpeech } from "@open-pets/agent-events";
 
 import { sanitizeOpenCodeExcludedReactions, validateOpenPetsPetArg } from "./opencode-previews.js";
+import { createOpenCodeTokenRateTracker, type OpenCodeTokenRateUpdate } from "./opencode-token-rate.js";
 
 export interface OpenCodePluginOptions {
   readonly pet?: string;
@@ -52,8 +53,11 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
   const debug = options.debug === true || process.env.OPENPETS_DEBUG === "1";
   const debugLog = options.debugLog ?? ((message) => { if (debug) process.stderr.write(`${message}\n`); });
   const excludedReactions = buildExcludedReactionsSet(options.excludeReactions);
+  const tokenRateTracker = createOpenCodeTokenRateTracker(options.now);
   let client: OpenPetsClient | undefined;
   let lease: { readonly leaseId: string; readonly expiresAt?: number } | undefined;
+  let tokenRateSessionSent: string | undefined;
+  let tokenRateFinalReported = false;
   let closed = false;
   let cleanupPromise: Promise<void> | undefined;
   let dispatchTail: Promise<void> = Promise.resolve();
@@ -102,8 +106,48 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
     }
   };
 
-  const getLeaseId = async (hit: OpenPetsClient, requestedPetId: string): Promise<string | undefined> => {
-    if (closed) return undefined;
+  const dispatchTokenRate = async (update: OpenCodeTokenRateUpdate, allowDuringCleanup = false): Promise<void> => {
+    if (closed && !allowDuringCleanup) return;
+    try {
+      client ??= clientFactory();
+      if (!client.tokenRate) return;
+      const leaseId = pet ? await getLeaseId(client, pet, allowDuringCleanup) : undefined;
+      if (closed && !allowDuringCleanup) return;
+      await client.tokenRate({ ...update, leaseId });
+      tokenRateSessionSent = update.tokensPerSecond === null && update.outputTokens === undefined
+        ? undefined
+        : update.sessionId;
+      tokenRateFinalReported = update.source === "reported" && update.outputTokens !== undefined;
+    } catch (error) {
+      debugLog(`OpenPets OpenCode token rate ignored error: ${sanitizeDebugError(error)}`);
+    }
+  };
+
+  const runTokenRate = (update: OpenCodeTokenRateUpdate | undefined): void => {
+    if (closed || !update) return;
+    try {
+      if (update.tokensPerSecond === null) {
+        // Terminal reports and clears must finish before a short-lived OpenCode
+        // process unloads the plugin. Only live estimates are cancellable.
+        const pending = enqueue(() => dispatchTokenRate(update, true));
+        activeWork.add(pending);
+        void pending.finally(() => activeWork.delete(pending));
+        return;
+      }
+      schedule(() => {
+        if (closed) return Promise.resolve();
+        const pending = enqueue(() => dispatchTokenRate(update));
+        activeWork.add(pending);
+        void pending.finally(() => activeWork.delete(pending));
+        return pending;
+      });
+    } catch (error) {
+      debugLog(`OpenPets OpenCode token rate scheduling ignored error: ${sanitizeDebugError(error)}`);
+    }
+  };
+
+  const getLeaseId = async (hit: OpenPetsClient, requestedPetId: string, allowDuringCleanup = false): Promise<string | undefined> => {
+    if (closed && !allowDuringCleanup) return undefined;
     if (lease && (!lease.expiresAt || lease.expiresAt - Date.now() > 2_000)) return lease.leaseId;
     const previous = lease;
     let next: { readonly leaseId: string; readonly expiresAt?: number };
@@ -117,7 +161,7 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
     if (previous && previous.leaseId !== next.leaseId) {
       await releaseLease(hit, previous.leaseId);
     }
-    if (closed) return undefined;
+    if (closed && !allowDuringCleanup) return undefined;
     return next.leaseId;
   };
 
@@ -134,7 +178,18 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
     await dispatchTail;
     const activeLease = lease;
     const activeClient = client;
+    const displayedSession = tokenRateSessionSent;
+    const leaveFinalUntilExpiry = tokenRateFinalReported;
     lease = undefined;
+    tokenRateSessionSent = undefined;
+    tokenRateFinalReported = false;
+    if (displayedSession && !leaveFinalUntilExpiry && activeClient?.tokenRate) {
+      try {
+        await activeClient.tokenRate({ sessionId: displayedSession, tokensPerSecond: null, source: "estimated", leaseId: activeLease?.leaseId });
+      } catch (error) {
+        debugLog(`OpenPets OpenCode token rate cleanup ignored error: ${sanitizeDebugError(error)}`);
+      }
+    }
     if (!activeLease || !activeClient) return;
     await releaseLease(activeClient, activeLease.leaseId);
   };
@@ -142,6 +197,7 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
   return {
     event(event) {
       try {
+        runTokenRate(tokenRateTracker.ingest(event));
         run(classifyOpenCodeBusEvent(event));
       } catch (error) {
         debugLog(`OpenPets OpenCode event ignored error: ${sanitizeDebugError(error)}`);
@@ -166,6 +222,7 @@ export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOpti
     cleanup() {
       if (cleanupPromise) return cleanupPromise;
       closed = true;
+      tokenRateTracker.clear();
       cleanupPromise = finishCleanup();
       return cleanupPromise;
     },

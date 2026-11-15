@@ -31,6 +31,7 @@ import { createPetWindowCss, createCodexV2GazeCss, createInstalledSpriteStateCss
 import { getPetWindowPinnedLift, getPetWindowSpriteBottomInset, petBottom, petWindowHitPadding } from "./pet-window-shape.js";
 import { defaultPetWindowSize } from "./display.js";
 import type { PetContentRender, PetPluginBubbles, PetStatusBadgeReaction, PetTransientDisplay } from "./pet-window-types.js";
+import { formatOpenCodeTokenRate, openCodeTokenRateStore, type OpenCodeTokenRateDisplay } from "./opencode-token-rate.js";
 
 export { escapeCssUrl } from "./pet-window-styles.js";
 
@@ -61,7 +62,7 @@ export function createBuiltInPetRender(paused: boolean, display: PetTransientDis
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
-  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording);
+  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, getOpenCodeTokenRateForPet(petRole, petId));
   const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge);
   const waitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
   const hudScale = getAppStateSnapshot().preferences.hudScale as HudScaleValue;
@@ -220,7 +221,7 @@ export async function createInstalledPetRender(
       hitPadding: motionPetHitPadding,
       flipped,
     };
-    const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" data-motion-body data-motion-layout="${escapeHtml(JSON.stringify(layoutInput))}" role="img" aria-label="${escapeHtml(displayName)}"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, voiceActive, voiceActive && display?.canSubmitRecording === true);
+    const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" data-motion-body data-motion-layout="${escapeHtml(JSON.stringify(layoutInput))}" role="img" aria-label="${escapeHtml(displayName)}"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, voiceActive, voiceActive && display?.canSubmitRecording === true, getOpenCodeTokenRateForPet(petRole, petId));
     return createInstalledMotionRender({
       motion, outfitId, displayName, assetName: assetDisplayName, bodyHtml, layoutInput,
       reactionState: getEffectiveReactionSpriteState(display?.reaction, badge),
@@ -239,7 +240,7 @@ export async function createInstalledPetRender(
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
-  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording);
+  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, getOpenCodeTokenRateForPet(petRole, petId));
   const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge);
   const waitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
   const hudScale = getAppStateSnapshot().preferences.hudScale as HudScaleValue;
@@ -313,6 +314,7 @@ export function createPetBodyMarkup(
   petRole: "default" | "agent" = "default",
   isVoiceActive = false,
   canSubmitRecording = false,
+  tokenRate: OpenCodeTokenRateDisplay | null = null,
 ): string {
   const launcherSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   const talkSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
@@ -347,16 +349,32 @@ export function createPetBodyMarkup(
   const assistantButtons = (petRole === "default" && !hasMessageOrBubble && (chatButton || talkButton))
     ? `<div class="openpets-pet-buttons">${chatButton}${talkButton}</div>`
     : "";
+  const tokenRateBadge = createOpenCodeTokenRateMarkup(tokenRate);
   return `<div class="stage${hasPinned ? " has-pinned" : ""}${hasMessageOrBubble ? " has-bubble" : ""}" aria-label="${stageLabel}" data-pet-role="${petRole}">
     ${pinnedBubble}
     ${bubble}
     <div class="pet-hitbox" aria-hidden="true">
+      ${tokenRateBadge}
       ${assistantButtons}
       <div class="pet-shell">
         ${spriteMarkup}
       </div>
     </div>
   </div>`;
+}
+
+function getOpenCodeTokenRateForPet(petRole: "default" | "agent", petId: string): OpenCodeTokenRateDisplay | null {
+  return openCodeTokenRateStore.read(petRole === "default"
+    ? { kind: "default" }
+    : { kind: "explicit", petId });
+}
+
+function createOpenCodeTokenRateMarkup(reading: OpenCodeTokenRateDisplay | null): string {
+  const display = formatOpenCodeTokenRate(reading, t("pet.tokenRate.output"));
+  if (!display) return "";
+  const rate = display.rateText ? `<span class="opencode-token-rate-speed">${escapeHtml(display.rateText)}</span>` : "";
+  const total = display.outputText ? `<span class="opencode-token-rate-total">${escapeHtml(display.outputText)}</span>` : "";
+  return `<div class="opencode-token-rate" data-opencode-token-rate>${rate}${total}</div>`;
 }
 
 export function getReactionSpriteState(reaction: OpenPetsReaction | undefined): UniversalSpriteState {

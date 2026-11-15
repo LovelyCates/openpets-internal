@@ -1,5 +1,6 @@
 import { createStaleLeaseStatus, type LeaseSnapshot } from "./lease-manager.js";
-import { errorResponse, IpcProtocolError, isRecord, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest, type OpenPetsReaction, type OpenPetsIpcResponse } from "./local-ipc-protocol.js";
+import { errorResponse, IpcProtocolError, isRecord, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, validateTokenRateParams, type OpenPetsIpcRequest, type OpenPetsReaction, type OpenPetsIpcResponse } from "./local-ipc-protocol.js";
+import type { OpenCodeTokenRateReading, OpenCodeTokenRateTarget } from "./opencode-token-rate.js";
 
 export interface LocalIpcPet {
   readonly id: string;
@@ -62,6 +63,7 @@ export interface LocalIpcRequestHandlerDeps {
   readonly applyExternalPetReaction: (reaction: OpenPetsReaction) => LocalIpcAppliedEffect;
   readonly applyExternalPetSay: (message: string, reaction?: OpenPetsReaction) => LocalIpcAppliedEffect;
   readonly applyExternalPetShowMedia: (options: LocalIpcMediaOptions) => LocalIpcAppliedEffect;
+  readonly updateTokenRate: (sessionId: string, leaseId: string | undefined, target: OpenCodeTokenRateTarget, reading: OpenCodeTokenRateReading) => void;
   readonly broadcastLanPetActivity: (reaction: OpenPetsReaction) => void;
   readonly recordOpenPetsActivity: (activity: LocalIpcActivity) => void;
   readonly debug: (message: string, fields?: Record<string, unknown>) => void;
@@ -198,6 +200,20 @@ async function handleRequest(request: OpenPetsIpcRequest, deps: LocalIpcRequestH
     const leaseId = validateRequiredLeaseId(params.leaseId);
     deps.debug("lease release requested", { requestId: request.id, leaseId });
     return deps.releaseLease(leaseId);
+  }
+
+  if (request.method === "pet.tokenRate") {
+    const params = validateTokenRateParams(request.params);
+    const lease = getLeaseTarget(params.leaseId, deps);
+    const target: OpenCodeTokenRateTarget = lease?.targetKind === "explicit"
+      ? { kind: "explicit", petId: lease.actualTargetPetId }
+      : { kind: "default" };
+    deps.updateTokenRate(params.sessionId, params.leaseId, target, {
+      tokensPerSecond: params.tokensPerSecond,
+      outputTokens: params.outputTokens,
+      source: params.source,
+    });
+    return { ok: true };
   }
 
   if (request.method === "pet.react") {

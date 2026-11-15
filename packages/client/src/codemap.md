@@ -18,11 +18,13 @@ Main client implementation (193 lines). `createOpenPetsClient()` factory, all cl
 - `releaseLease(leaseId)` - Release acquired lease
 - `react(reaction, options?)` - Send reaction (lease-aware)
 - `say(message, options?)` - Display message (lease-aware, optional reaction)
+- `tokenRate(update)` - Send bounded OpenCode token-rate or reported output-token updates to the local pet badge; unavailable in remote mode
 
 **Result Parsers:**
 - `parsePetListResult()` - Validates pet list response
 - `parsePetInstallResult()` - Validates install response
 - `validatePetId()` - Pet ID format validation (regex: `^[a-z0-9][a-z0-9_-]{0,63}$`)
+- `validateTokenRateUpdate()` - Reject unsafe session identifiers and out-of-range numeric telemetry before local IPC
 
 **Socket Management:**
 - Node.js `net.createConnection()` for TCP/Unix sockets/Windows named pipes

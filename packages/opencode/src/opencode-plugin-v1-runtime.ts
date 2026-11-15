@@ -13,19 +13,25 @@ export function createOpenPetsOpenCodeV1Hooks(runtime: OpenCodePluginRuntime = c
     async event(input) {
       const event = input?.event;
       if (!isRecord(event) || typeof event.type !== "string") return;
+      if (event.type === "message.part.updated" || event.type === "message.part.delta" || event.type === "message.updated") {
+        runtime.event(event);
+        return;
+      }
+      const properties = isRecord(event.properties) ? event.properties : undefined;
+      const sessionID = typeof properties?.sessionID === "string" ? properties.sessionID : undefined;
+      const sessionData = sessionID ? { data: { sessionID } } : {};
       if (event.type === "session.error") {
-        runtime.event({ type: "session.execution.failed" });
+        runtime.event({ type: "session.execution.failed", ...sessionData });
         return;
       }
       if (event.type === "session.idle") {
-        runtime.event({ type: "session.idle" });
+        runtime.event({ type: "session.idle", ...sessionData });
         return;
       }
       if (event.type !== "session.status") return;
-      const properties = isRecord(event.properties) ? event.properties : undefined;
       const status = properties && isRecord(properties.status) ? properties.status : undefined;
       if (status?.type === "busy") runtime.prompt();
-      if (status?.type === "idle") runtime.event({ type: "session.idle" });
+      if (status?.type === "idle") runtime.event({ type: "session.idle", ...sessionData });
     },
     async "chat.message"() {
       runtime.prompt();

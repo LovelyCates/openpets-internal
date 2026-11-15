@@ -150,6 +150,7 @@ export const ptBR: Partial<Messages> = {
   "session.stopsIn": "Desliga em {time}",
 
   "pet.paused": "Pausado",
+  "pet.tokenRate.output": "Saída",
   "pet.status.thinking": "Pensando",
   "pet.status.working": "Trabalhando",
   "pet.status.editing": "Editando",

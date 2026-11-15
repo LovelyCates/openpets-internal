@@ -232,6 +232,17 @@ Ships both a config manager and a runtime plugin.
   Tool-hook failures and terminal execution failures are separate error
   signals. If a failed tool also ends the execution, both can emit error
   feedback; recoverable tool failures do not necessarily end the execution.
+- **Local token display**: the V1/V2 adapters count streaming text and
+  reasoning deltas without sending their content to OpenPets. The companion
+  displays an approximate output token/s rate, updated at most once per second;
+  a completed step/message can replace it with OpenCode's reported output-token
+  count. Successful idle clears a live estimate, while a freshly reported final
+  count remains visible until the desktop's eight-second expiry. Failure clears
+  either display, and plugin unload clears live estimates while leaving a final
+  reported count to expire. Historical V1
+  `message.part.updated` events and newer `message.part.delta` events are both
+  recognized; a modified internal 1.x fork must be checked against its exact
+  event payloads before relying on this display.
 - **Windows detection**: the desktop app checks user and global Scoop shim
   directories before falling back to `opencode` / `opencode.cmd` on `PATH`, so
   a Scoop installation is detectable even when Electron inherited an older

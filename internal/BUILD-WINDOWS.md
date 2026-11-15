@@ -83,6 +83,18 @@ pwsh -NoProfile -File .\internal\Install-OpenCodeIntegration.ps1 -MajorVersion 1
 
 已有其他 OpenCode 配置或未知 OpenPets 文件时，安装器在写入前拒绝并输出对应 MCP JSON 片段，供人工合并。重复执行同主版本安装时，仅在原安装记录及三个受管理文件的 SHA-256 都匹配时更新，并为旧文件留 `.bak-<id>` 备份；发现人工修改就拒绝覆盖。OpenCode 1.x 的内网 fork 可能改变插件 API，安装后仍需在其准确版本上验证事件和 MCP。
 
+安装后先启动 OpenPets Internal，再从已安装插件的项目里启动 OpenCode。以下三条路径分别负责不同功能：
+
+| 功能 | 接入路径 | 使用方式 |
+| --- | --- | --- |
+| 思考、编辑、运行测试、等待、成功和失败动画 | V1/V2 项目插件监听 OpenCode 事件，经本机 IPC 发送宠物反应 | 正常使用 OpenCode 即可；不要求模型调用工具 |
+| 约数 `token/s` 与输出 token 数 | 同一项目插件统计流式文本增量，并读取 OpenCode 报告的输出用量；本机 IPC 只传数字和短会话标识 | 有流式输出时在宠物旁短暂显示；实时速率是字符数换算的估计值 |
+| 主动让宠物说话或做动作 | 项目配置中的本地 MCP 启动 OpenPets CLI，提供 `openpets_status`、`openpets_react`、`openpets_say` | 在 OpenCode 中让模型使用相应 MCP 工具；受模型是否调用工具影响 |
+| 提醒、计时、喝水提示、系统资源、虚拟宠物等 | OpenPets 桌面内置插件 SDK | 从控制中心启用所需插件；无需 OpenCode |
+| 角色皮肤与动作素材 | 本地 v2 宠物包 | 在宠物库导入并设为默认；ZIP 不自带 token 统计或工具逻辑 |
+
+如要增加上下文占用、费用或工具进度等读数，应先确认内网 OpenCode fork 实际提供的事件字段，再沿项目插件 → 本机 IPC → 桌面显示的链路增加数值字段。费用还需要经内部批准的模型价格表；不应从皮肤 ZIP 推断运行数据。
+
 ## 发布验证
 
 签名后，用独立审批渠道提供签名证书 SHA-1 thumbprint 和安装包 SHA-256，再运行：

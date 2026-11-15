@@ -22,11 +22,16 @@ Provides comprehensive OpenCode editor integration including: MCP server configu
 **Plugin Runtime** (`opencode-plugin-runtime.ts`):
 - Runtime adapters: V2 events, session prompt, and single-event tool execute hooks
 - Event classification: Maps V2 event envelopes (`type` + `data`) to reactions/speech
+- Token telemetry: V1/V2 stream deltas feed a local-only, at-most-once-per-second character-based token/s estimate; provider-reported output totals are forwarded when available. Only counts and session IDs cross IPC, and unload clears the display.
 - Tool classification: Edit → "editing", Bash test commands → "testing"
 - Lease management: serialized dispatch, one in-flight acquisition, 2s renewal buffer, previous lease released when the id changes
 - Throttling: 20s speech and 3s permission cooldowns; success/error reactions bypass the 10s reaction cooldown, which still applies to other reactions
 - Async scheduling via `queueMicrotask`; cleanup waits for in-flight acquisition and releases it; queued work after unload does not acquire again
 - Tool failures from OpenPets' own MCP tools are ignored so a pet reaction cannot loop on itself
+
+**Token-rate estimation** (`opencode-token-rate.ts`):
+- V2 `session.text.delta` / `session.reasoning.delta` and V1 `message.part.delta` / historical `message.part.updated` supply stream lengths. A three-second rolling window estimates output token/s from character count; it is never presented as provider-reported throughput.
+- V2 usage/step completion and V1 completed assistant message events supply provider-reported output token counts. Unrecognized event shapes are ignored; bounded nonconforming session IDs receive an ephemeral safe local alias. The V1.6.x internal fork still requires event-contract validation.
 
 **Config Management** (`opencode-config.ts`):
 - JSONC parsing with `jsonc-parser` (comments, trailing commas)

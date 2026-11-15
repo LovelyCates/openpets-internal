@@ -23,7 +23,7 @@
     }
   },
   "scripts": {
-    "test": "node dist/check-opencode-foundation.js && node dist/check-opencode-plugin.js && node dist/check-opencode-v1.js",
+    "test": "node dist/check-opencode-foundation.js && node dist/check-opencode-plugin.js && node dist/check-opencode-v1.js && node dist/check-opencode-token-rate.js",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "typecheck": "tsc --noEmit",
     "build": "tsc",

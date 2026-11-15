@@ -88,6 +88,7 @@ export const ru: Partial<Messages> = {
 
   // --- Pet window (main process, src/pet-window.ts) ---
   "pet.paused": "Пауза",
+  "pet.tokenRate.output": "Вывод",
   "pet.status.thinking": "Думаю",
   "pet.status.working": "Работаю",
   "pet.status.editing": "Правлю",

@@ -23,6 +23,8 @@ await hooks.event({ event: { type: "session.status", properties: { status: { typ
 await hooks.event({ event: { type: "session.status", properties: { status: { type: "idle" } } } });
 await hooks.event({ event: { type: "session.idle", properties: { sessionID: "s" } } });
 await hooks.event({ event: { type: "session.error", properties: { error: { message: "private error" } } } });
+const usageEvent = { type: "message.updated", properties: { info: { role: "assistant", sessionID: "s", tokens: { output: 7 }, time: { completed: 123 } } } };
+await hooks.event({ event: usageEvent });
 await hooks.event({ event: { type: "file.edited", properties: { file: "private.ts" } } });
 await hooks.event({ event: null });
 
@@ -33,8 +35,9 @@ assert.deepEqual(calls, [
   ["event", { type: "permission.asked" }],
   ["prompt"],
   ["event", { type: "session.idle" }],
-  ["event", { type: "session.idle" }],
+  ["event", { type: "session.idle", data: { sessionID: "s" } }],
   ["event", { type: "session.execution.failed" }],
+  ["event", usageEvent],
 ]);
 
 const entry = await import("./plugin-v1.js");
