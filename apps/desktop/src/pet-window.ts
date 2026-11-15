@@ -646,7 +646,11 @@ function applyPetAlwaysOnTop(window: BrowserWindow): void {
     if (process.platform === "win32" && window.isAlwaysOnTop()) {
       window.setAlwaysOnTop(false);
     }
-    window.setAlwaysOnTop(true, process.platform === "linux" ? "screen-saver" : "floating");
+    // Windows puts the floating level behind its taskbar, which also lets
+    // fullscreen browser windows cover the pet. Keep the pet in the overlay
+    // tier while retaining the one-second reassertion above.
+    const level = process.platform === "win32" ? "pop-up-menu" : process.platform === "linux" ? "screen-saver" : "floating";
+    window.setAlwaysOnTop(true, level);
     if (process.platform === "linux") {
       window.setVisibleOnAllWorkspaces(true);
     }

@@ -303,8 +303,10 @@ Electron's cached always-on-top flag first - Electron short-circuits
 `setAlwaysOnTop(true)` when its cached state already matches, so without the
 cache-bust the re-assert never reaches the OS
 (`createBasePetWindow` in `pet-window.ts`); the call is a cheap no-op while the
-flag is intact, and keeping the pet above fullscreen content matches the
-explicit macOS `visibleOnFullScreen: true` behavior.
+flag is intact. Windows uses Electron's `pop-up-menu` level so the pet is not
+placed behind the taskbar, including when a browser enters F11 fullscreen;
+this was checked with a packaged Windows build and Chrome F11. Exclusive
+fullscreen games can still own the display and cover ordinary desktop windows.
 
 Separately, Chromium's native window occlusion tracker considers every window
 on a display occluded while a fullscreen app is active there and stops
