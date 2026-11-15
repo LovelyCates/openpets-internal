@@ -14,6 +14,7 @@ $requiredVariables = @(
     'OPENPETS_INTERNAL_PNPM_STORE',
     'OPENPETS_INTERNAL_ELECTRON_CACHE',
     'OPENPETS_INTERNAL_ELECTRON_BUILDER_CACHE',
+    'OPENPETS_INTERNAL_WIN_CODESIGN_ARCHIVE',
     'OPENPETS_INTERNAL_GET_WINDOWS_BINARY',
     'OPENPETS_INTERNAL_GET_WINDOWS_SHA256',
     'npm_config_registry',
@@ -186,6 +187,52 @@ if ($nativeBinary -and (Test-Path -LiteralPath $nativeBinary -PathType Leaf)) {
         $actualNativeHash = (Get-FileHash -LiteralPath $nativeBinary -Algorithm SHA256).Hash
         if ($actualNativeHash -ne $expectedNativeHash) {
             Add-Issue 'get-windows 原生二进制的 SHA-256 与审批值不一致。'
+        }
+    }
+}
+
+$codeSignArchive = Get-RequiredVariable 'OPENPETS_INTERNAL_WIN_CODESIGN_ARCHIVE'
+Test-ExistingAbsolutePath 'OPENPETS_INTERNAL_WIN_CODESIGN_ARCHIVE' $codeSignArchive 'Leaf'
+if ($codeSignArchive -and (Test-Path -LiteralPath $codeSignArchive -PathType Leaf)) {
+    if ([System.IO.Path]::GetFileName($codeSignArchive) -ne 'winCodeSign-2.6.0.7z') {
+        Add-Issue 'winCodeSign 归档文件名必须是 winCodeSign-2.6.0.7z。'
+    }
+    $expectedCodeSignArchiveHash = 'CDAEC7154DDA7CC31F88D886E2489379A0625A737D610B5AE7F62A12F16743A4'
+    if ((Get-FileHash -LiteralPath $codeSignArchive -Algorithm SHA256).Hash -ne $expectedCodeSignArchiveHash) {
+        Add-Issue 'winCodeSign 归档 SHA-256 与固定审核值不一致。'
+    }
+}
+
+$builderCache = [Environment]::GetEnvironmentVariable('ELECTRON_BUILDER_CACHE', 'Process')
+if ($builderCache -and [System.IO.Path]::IsPathRooted($builderCache)) {
+    $codeSignDirectory = Join-Path $builderCache 'winCodeSign/winCodeSign-2.6.0'
+    if (-not (Test-Path -LiteralPath $codeSignDirectory -PathType Container)) {
+        Add-Issue 'winCodeSign 缓存尚未准备；运行 Prepare-WindowsCodeSignCache.ps1。'
+    } else {
+        $codeSignItem = Get-Item -LiteralPath $codeSignDirectory -Force
+        if (($codeSignItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Add-Issue 'winCodeSign 缓存目录不得是重解析点。'
+        }
+        $requiredCodeSignTools = @(
+            @('rcedit-x64.exe', 'AB53500D556FD824636621BCA7DBECD8583BA181891C3E9EFDCF16B72A28B0CD'),
+            @('rcedit-ia32.exe', '8D7F9E4CDBFFADF53806EA0646A6CF5A67244F16DDA3CABB7B3F00DC0CDDB552'),
+            @('windows-10/x64/signtool.exe', 'E472AB54601F9DA46915A68DA4D93B6D6CC61502E6BF18D5A53C0A70176119A4'),
+            @('windows-10/ia32/signtool.exe', 'A13BFD50668B2ACB91B0334D36DCE7E04D6FC2E3A122F9C9C145D3659FD0CD84')
+        )
+        foreach ($tool in $requiredCodeSignTools) {
+            $toolPath = Join-Path $codeSignDirectory $tool[0]
+            if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+                Add-Issue "winCodeSign 缓存缺少文件：$($tool[0])"
+                continue
+            }
+            $toolItem = Get-Item -LiteralPath $toolPath -Force
+            if (($toolItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $toolItem.Length -eq 0) {
+                Add-Issue "winCodeSign 缓存文件无效：$($tool[0])"
+                continue
+            }
+            if ((Get-FileHash -LiteralPath $toolPath -Algorithm SHA256).Hash -ne $tool[1]) {
+                Add-Issue "winCodeSign 缓存文件 SHA-256 不匹配：$($tool[0])"
+            }
         }
     }
 }

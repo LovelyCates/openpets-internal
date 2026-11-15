@@ -51,6 +51,11 @@ need artifact integrity review before treating them as trusted code. The upstrea
 public-catalog, Teams, provider, and plugin documentation below describes
 capabilities retained in source but disabled by this distribution policy.
 
+Windows packaging accepts a hash-verified, pre-extracted winCodeSign cache when
+the build account cannot create symbolic links. The cache preparation script and
+required hashes are documented in `internal/BUILD-WINDOWS.md`; this does not
+replace installer signing or the isolated-network release checks.
+
 ## Process model
 
 Electron gives us a **main process** and multiple **renderer processes**. In
@@ -1031,6 +1036,9 @@ ZIPs) and runs third-party plugin code, so it is defensive by construction:
 `electron-builder.yml` configures cross-platform packaging (macOS/Windows/Linux)
 with ASAR. Bundled mode unpacks the integration runtimes from ASAR so hooks, MCP,
 editor setup, and the native OpenClaw plugin can spawn them.
+On Windows, its `afterPack` hook waits for the newly written executable to settle
+before resource editing; `internal/BUILD-WINDOWS.md` records the build-machine
+requirements and validation steps.
 `scripts/release-local.mjs` builds an isolated unpacked package for every
 platform/architecture target and then extracts the actual DMG, ZIP, AppImage,
 DEB, RPM, and tar.gz payloads for target-aware `check-packaging-contract --output`

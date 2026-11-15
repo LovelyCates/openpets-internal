@@ -87,7 +87,7 @@ for (const reaction of allowedReactions) {
 }
 assert.equal(pickReactionMessage("success", () => 0), reactionMessagePools.success[0], "reaction message picking must be deterministic when random is injected.");
 assert.ok(existsSync(join(appDir, "scripts", "clean-package-output.cjs")), "package output cleanup helper must exist.");
-assert.ok(existsSync(join(appDir, "scripts", "check-windows-symlink-privilege.cjs")), "Windows package symlink preflight helper must exist.");
+assert.ok(existsSync(join(appDir, "scripts", "check-windows-packaging-prerequisites.cjs")), "Windows package prerequisites helper must exist.");
 assert.ok(existsSync(join(distDir, "main.js")), "desktop main build output must exist before packaging checks run.");
 assert.ok(existsSync(join(distDir, "bootstrap.js")), "desktop startup bootstrap build output must exist before packaging checks run.");
 assert.ok(existsSync(join(distDir, "startup-backend-policy.js")), "pure startup backend policy build output must exist before packaging checks run.");

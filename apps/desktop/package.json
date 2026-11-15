@@ -31,7 +31,7 @@
     "build:wayland-helper": "cargo build --release --manifest-path native/openpets-wayland-helper/Cargo.toml",
     "dev:renderer": "vite --host 127.0.0.1",
     "build": "pnpm build:main && pnpm build:renderer",
-    "package:preflight": "node scripts/check-windows-symlink-privilege.cjs"
+    "package:preflight": "node scripts/check-windows-packaging-prerequisites.cjs"
   },
   "devDependencies": {
     "7zip-bin": "5.2.0",

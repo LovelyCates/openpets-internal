@@ -11,7 +11,7 @@
 由有外网权限的受控环境采购、校验并镜像以下内容；将原始来源、版本、SHA-256、许可证、审核人和导入时间写入内部制品记录：
 
 1. 锁文件中所有 npm 包与 pnpm 存储内容，以及固定版本的 Node.js、pnpm。
-2. Electron 应用二进制及 electron-builder 需要的辅助二进制，例如 NSIS。二者使用各自的镜像/缓存路径，不受 npm registry 单独控制。
+2. Electron 应用二进制及 electron-builder 需要的辅助二进制，例如 NSIS。二者使用各自的镜像/缓存路径，不受 npm registry 单独控制。当前 `electron-builder@26.10.0` 在 Windows 资源编辑阶段调用旧 `app-builder-bin`，它仍从 `winCodeSign-2.6.0.7z` 解压工具；归档里的 macOS 符号链接会让无符号链接权限的 Windows 构建账号失败。把这个固定 SHA-256 的归档纳入内部制品，并通过下述脚本只提取 Windows 需要的内容到已审批缓存，无需开启开发者模式或提升构建账号权限。
 3. `get-windows@9.3.0` 在 Windows 上需要的 `node-get-windows.node`。其包内 `binary.host` 指向 `github.com/sindresorhus/get-windows/releases/download/`，`install` 脚本运行 `node-pre-gyp install --fallback-to-build`；本机基线安装日志已经观察到对该 GitHub Releases 地址的下载。把审核后的文件导入内网，并记录 SHA-256。不要让构建机执行原始公网下载脚本。
 4. 根 `.gitmodules` 中两个 Git 子模块，固定到主仓库记录的 commit，转入内部 Git 镜像。
 5. 所有宠物包、插件包和第三方素材各自的许可证及内容审核记录。公开 `openpets.dev` 目录站点不包含在当前主仓库中。
@@ -31,19 +31,30 @@
 | `OPENPETS_INTERNAL_PNPM_STORE` | 已导入并校验的 pnpm store 绝对目录 |
 | `OPENPETS_INTERNAL_ELECTRON_CACHE` | 已导入的 Electron 缓存绝对目录 |
 | `OPENPETS_INTERNAL_ELECTRON_BUILDER_CACHE` | 已导入的 electron-builder 缓存绝对目录 |
+| `OPENPETS_INTERNAL_WIN_CODESIGN_ARCHIVE` | 已审批的 `winCodeSign-2.6.0.7z` 绝对路径；SHA-256 固定为 `cdaec7154dda7cc31f88d886e2489379a0625a737d610b5ae7f62a12f16743a4` |
 | `OPENPETS_INTERNAL_GET_WINDOWS_BINARY` | 已审核的 `node-get-windows.node` 绝对路径 |
 | `OPENPETS_INTERNAL_GET_WINDOWS_SHA256` | 上述原生文件的审批 SHA-256 |
 
 同时在**当前构建进程**设置 `npm_config_registry`、`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR` 为对应内部 URL，设置 `npm_config_store_dir`、`ELECTRON_CACHE`、`ELECTRON_BUILDER_CACHE` 为对应审批缓存目录，并设置 `npm_config_offline=true`、`npm_config_ignore_scripts=true`。预检会核对这些值及缓存目录非空。不要用 `pnpm config set`、`npm config set` 或修改用户级 `.npmrc`。这些进程变量只对当前 CI job 生效。
 
-运行预检：
+先查看预检要求：
 
 ```powershell
 pwsh -NoProfile -File .\internal\Test-WindowsBuild.ps1 -ShowRequirements
+```
+
+在安装依赖并设置上述缓存环境变量后，先准备 Windows 工具缓存：
+
+```powershell
+pwsh -NoProfile -File .\internal\Prepare-WindowsCodeSignCache.ps1 -ArchivePath $env:OPENPETS_INTERNAL_WIN_CODESIGN_ARCHIVE
 pwsh -NoProfile -File .\internal\Test-WindowsBuild.ps1
 ```
 
-预检还会检查 Windows、Git 基线可达、子模块处于固定提交、Node/pnpm 版本、缓存路径和原生二进制哈希。pnpm 版本优先通过已预置缓存的 `corepack pnpm --version` 核对，并在该调用期间强制 `COREPACK_ENABLE_NETWORK=0`；缓存不存在时才检查已安装的 `pnpm`。不会为了版本检查在线下载 pnpm。失败时返回非零退出码并列出缺项。
+该脚本不下载文件；它核验归档 SHA-256，用已安装的 `7zip-bin` 排除归档中的 macOS 目录，将 Windows 工具写入 `ELECTRON_BUILDER_CACHE`，再核验资源编辑与签名工具的哈希。已有缓存且哈希匹配时直接返回；不匹配时拒绝覆盖。`package:preflight` 接受经哈希校验的工具缓存，或实际具备符号链接权限的账号。升级 `electron-builder`、`app-builder-bin` 或工具归档时，要重新核对缓存格式和固定哈希。
+
+Windows 打包在 ASAR 完整性资源写入后，先等待 30 秒再运行 `rcedit`；本机构建验证了该等待能避开刚生成的 exe 被短暂占用导致的 `Unable to commit changes`。这不是所有企业终端防护软件的通用保证；若构建机仍报此错，应检查该机器对构建输出目录的文件占用记录并在受控环境重试。
+
+只读构建预检还会检查 Windows、Git 基线可达、子模块处于固定提交、Node/pnpm 版本、缓存路径、原生二进制与工具归档哈希，以及已准备的工具缓存。pnpm 版本优先通过已预置缓存的 `corepack pnpm --version` 核对，并在该调用期间强制 `COREPACK_ENABLE_NETWORK=0`；缓存不存在时才检查已安装的 `pnpm`。不会为了版本检查在线下载 pnpm。失败时返回非零退出码并列出缺项。
 
 ## 构建门槛
 
@@ -51,7 +62,7 @@ pwsh -NoProfile -File .\internal\Test-WindowsBuild.ps1
 
 1. 在无公网出口的 Windows runner 上，从内部 Git 镜像检出内部版本与固定子模块；记录 commit 和工作树状态。
 2. 使用内部 pnpm store 离线安装，禁止未审核的生命周期脚本；以批准的缓存/本地构建方式准备原生依赖与 Electron 工具。
-3. 运行 `pnpm check`、`pnpm typecheck`、`pnpm test`，重点验证 `packages/opencode` 与桌面端的本地 IPC。运行 `pnpm --filter @open-pets/desktop package:dir` 做打包契约检查，再生成 NSIS 安装包。
+3. 运行 `pnpm check`、`pnpm typecheck`、`pnpm test`，重点验证 `packages/opencode` 与桌面端的本地 IPC。运行 `pnpm --filter @open-pets/desktop package:dir` 做打包契约检查，再运行 `pnpm --filter @open-pets/desktop package` 生成 NSIS 安装包；两条命令都会先检查 Windows 工具缓存，并执行桌面构建。
 4. 在隔离测试机上安装产物，验证 OpenCode 的思考、编辑、测试、等待、成功、失败事件与宠物反应；抓取网络出站记录，确保仅出现审批的内网地址或无出站请求。
 5. 生成 SBOM、依赖/二进制哈希清单、测试记录、网络审计记录和构建日志。由内部签名服务签名安装包，保留签名证书链及审批 SHA-256。
 

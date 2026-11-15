@@ -65,7 +65,7 @@ In the internal build, startup skips Teams/Manager Check-ins synchronization, LA
   - Codex: `~/.codex/pets/` (local pet development)
   - IPC: Discovery file at platform-specific path, Unix socket/Windows named pipe/TCP
   - Logs: `userData/logs/openpets.log`
-- **Build**: `electron-builder` with ASAR, cross-platform (macOS/Windows/Linux)
+- **Build**: `electron-builder` with ASAR, cross-platform (macOS/Windows/Linux); Windows packaging checks a verified winCodeSign cache or symlink capability before running, then allows the executable to settle before resource editing.
 
 ## Key Files
 

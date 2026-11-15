@@ -46,12 +46,13 @@ Check preload syntax → Compile tests to .test-dist → Run behavior tests → 
 - **File System**: `apps/desktop/dist-electron/` (build output), `apps/desktop/.release-state/` (gitignored release checkpoints), `apps/desktop/dist/` (compiled JS), optional external Linux package staging directory
 - **Git**: Working tree status, remote sync verification, tag existence checks
 - **GitHub**: `gh workflow run`, `gh run list/download`, and draft-to-published release operations for `OpenPetsHQ/openpets`
-- **Build Tools**: `pnpm`, `electron-builder`, `node --check`
+- **Build Tools**: `pnpm`, `electron-builder`, `node --check`; `check-windows-packaging-prerequisites.cjs` verifies either Windows symlink capability or the approved winCodeSign cache before packaging. `wait-windows-resource-edit.cjs` gives Windows executable handles time to settle before electron-builder edits resources.
 - **Node APIs**: `crypto` (SHA256), `fs`, `path`, `child_process.spawnSync`
 
 ## Key Scripts
 
 - `clean-package-output.cjs`: Removes `dist-electron` directory with path safety checks
+- `wait-windows-resource-edit.cjs`: Windows-only `afterPack` hook that waits 30 seconds before executable resource editing
 - `release-local.mjs`: Full release orchestration with preflight validation, per-platform/architecture unpacked package validation, multi-platform builds, and GitHub draft creation
 - `package-artifact.mjs`: Extracts DMG/ZIP/AppImage/DEB/RPM/tar.gz payloads for release validation
 - `release-checkpoint.mjs`: Records and verifies checkpoint output sizes plus content digests
