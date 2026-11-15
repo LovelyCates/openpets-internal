@@ -164,7 +164,7 @@ test("Team state stores only nonsecret metadata atomically and enforces one orga
 test("Teams API client pins requests to the configured origin and validates pack responses", async () => {
   let seenAuthorization = "";
   let seenUrl = "";
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async (url, init) => {
       seenUrl = String(url);
@@ -179,14 +179,14 @@ test("Teams API client pins requests to the configured origin and validates pack
   assert.equal(result.pack.revision, 3);
   assert.equal(seenUrl, "https://teams.example.test/v1/device/team-pack");
   assert.equal(seenAuthorization, "Bearer secret-is-not-logged");
-  assert.throws(() => new TeamApiClient({ baseUrl: "http://insecure.example.test" }));
+  assert.throws(() => new TeamApiClient({ allowNetworkInTests: true, baseUrl: "http://insecure.example.test" }));
 });
 
 test("Teams artifact downloads mint the capability with POST, as the API route requires", async () => {
   const bytes = new TextEncoder().encode("team artifact bytes");
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const requests: string[] = [];
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async (url, init) => {
       const path = new URL(String(url)).pathname;
@@ -210,7 +210,7 @@ test("Teams enrollment previews identity and completes in one desktop request", 
   const requestBodies: Record<string, Record<string, unknown>> = {};
   const expiresAt = new Date(Date.now() + 3_000).toISOString();
   const requestedProof = "desktop-proof";
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async (url, init) => {
       const path = new URL(String(url)).pathname;
@@ -279,7 +279,7 @@ test("Teams enrollment preview accepts only exact started, accepted, and complet
   const expiresAt = new Date(Date.now() + 60_000).toISOString();
   const statuses = ["started", "accepted", "completed"] as const;
   let index = 0;
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async () => {
       const status = statuses[index++]!;
@@ -297,7 +297,7 @@ test("Teams enrollment preview accepts only exact started, accepted, and complet
   assert.equal((await client.getEnrollmentPreview("intent-1")).status, "accepted");
   assert.equal((await client.getEnrollmentPreview("intent-1")).status, "completed");
 
-  const invalidClient = new TeamApiClient({
+  const invalidClient = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async () => new Response(JSON.stringify({
       intentId: "intent-1",
@@ -311,7 +311,7 @@ test("Teams enrollment preview accepts only exact started, accepted, and complet
 
 test("Teams enrollment enforces the server's 80-character display-name limit", async () => {
   const expiresAt = new Date(Date.now() + 60_000).toISOString();
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async () => new Response(JSON.stringify({
       deviceId: "device-1",
@@ -364,7 +364,7 @@ test("Teams enrollment completion retries a lost response with the same proof", 
   let calls = 0;
   const proof = "desktop-proof";
   const expiresAt = new Date(Date.now() + 60_000).toISOString();
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async (_url, init) => {
       calls += 1;
@@ -393,7 +393,7 @@ test("Teams enrollment completion retries a lost response with the same proof", 
 
 test("Teams enrollment completion respects the server-provided bounded window", async () => {
   let calls = 0;
-  const client = new TeamApiClient({
+  const client = new TeamApiClient({ allowNetworkInTests: true,
     baseUrl: "https://teams.example.test/",
     fetchImpl: async () => {
       calls += 1;

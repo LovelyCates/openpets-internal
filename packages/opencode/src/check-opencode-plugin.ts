@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -765,14 +766,26 @@ async function withPluginIpc(run: (
       server.once("error", reject);
       server.once("listening", () => {
         const address = server.address();
-        if (!address || typeof address === "string") {
-          reject(new Error("OpenPets test IPC server did not bind a TCP address."));
-          return;
+        if (process.platform === "win32") {
+          if (typeof address !== "string" || address !== endpoint) {
+            reject(new Error("OpenPets test IPC server did not bind a Windows named pipe."));
+            return;
+          }
+        } else {
+          if (!address || typeof address === "string") {
+            reject(new Error("OpenPets test IPC server did not bind a TCP address."));
+            return;
+          }
+          endpoint = `tcp://127.0.0.1:${address.port}`;
         }
-        endpoint = `tcp://127.0.0.1:${address.port}`;
         resolve();
       });
-      server.listen(0, "127.0.0.1");
+      if (process.platform === "win32") {
+        endpoint = `\\\\.\\pipe\\openpets-test-${process.pid}-${randomUUID()}`;
+        server.listen(endpoint);
+      } else {
+        server.listen(0, "127.0.0.1");
+      }
     });
     assert.ok(endpoint, "OpenPets test IPC server must have an endpoint.");
     writeFileSync(discoveryPath, `${JSON.stringify({

@@ -1,0 +1,9 @@
+{
+  "name": "@open-pets-internal/opencode-v2",
+  "version": "4.1.0-internal.1",
+  "description": "Standalone local OpenPets adapter for OpenCode 2.x",
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "README.md"],
+  "license": "MIT"
+}

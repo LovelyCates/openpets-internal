@@ -4,6 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { assertPetPackageFiles } from "install-pet/spritesheet";
 import { getAppStateSnapshot, installPetState, removePetState, setDefaultPet, upsertPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { getCatalogPet } from "./catalog.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 import { maxCodexPetJsonBytes } from "@open-pets/pet-format/metadata";
 import { validatePetPackageMetadata } from "@open-pets/pet-format/package";
 import type { PetPackage } from "@open-pets/pet-format/package-types";
@@ -173,6 +174,7 @@ export async function installPetFromZipUrlWithResult(
   zipUrl: string,
   options: PetZipUrlInstallOptions,
 ): Promise<LocalPetInstallResult> {
+  if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
   const maxBytes = Math.min(options.maxBytes, maxZipDownloadBytes);
   const zip = await downloadZip(zipUrl, maxBytes, options.validateUrl);
   return installPetFromZipBufferWithResult(zip);
@@ -284,6 +286,7 @@ async function downloadZip(
   maxBytes: number,
   validateUrl: (value: string) => void,
 ): Promise<Buffer> {
+  if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
   validateUrl(zipUrl);
   const controller = new AbortController();
   let timedOut = false;

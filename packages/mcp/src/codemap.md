@@ -29,7 +29,7 @@ Source implementation for the OpenPets MCP stdio server, including argument pars
 
 - **index.ts**: Main entry (99 lines). Argument parsing, lease acquisition, heartbeat management, signal handling, graceful shutdown.
 - **server.ts**: MCP server factory (32 lines). `createOpenPetsMcpServer()` registers `openpets_status`, `openpets_react`, `openpets_say` tools with metadata.
-- **tools.ts**: Tool implementations. Zod schemas, `handleStatus()`, `handleReact()`, `handleSay()`, `createToolContext()`, `createMcpStatus()`, lease reacquisition, structured content, and error sanitization.
+- **tools.ts**: Tool implementations. Zod schemas, `handleStatus()`, `handleReact()`, `handleSay()`, `createToolContext()`, `createMcpStatus()`, lease reacquisition, structured content, and error sanitization. The internal edition's default client always selects local IPC, even if remote environment variables are set.
 - **args.ts**: CLI argument parsing (57 lines). `parseMcpArgs()`, `validatePetId()`, `createHelpText()`.
 - **ensure-executable.ts**: Post-build chmod for Unix (9 lines).
 - **check-mcp-contract.ts**: Contract validation (excluded from detailed documentation).

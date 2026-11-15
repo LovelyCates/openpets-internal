@@ -6,7 +6,6 @@
 export const bundledOfficialPluginIds = [
   "openpets.reminders",
   "openpets.simple-timer",
-  "openpets.anxiety-aid-tools",
   "openpets.focus-buddy",
   "openpets.launch-buddy",
   "openpets.fortune-cookie",

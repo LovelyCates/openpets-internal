@@ -6,6 +6,7 @@ import { app, BrowserWindow, session, type Session } from "electron";
 import { VOICE_DEVICE_ENUMERATION_TIMEOUT_MS, VOICE_MEDIA_PARTITION, VOICE_OUTPUT_PROBE_TIMEOUT_MS, type VoiceOutputSelectionStatus } from "./voice-device-service.js";
 import type { VoiceDeviceDescription } from "./voice-device-resolver.js";
 import { isVoiceMediaPermissionAllowed } from "./voice-device-permissions.js";
+import { publicNetworkEnabled } from "./internal-network-policy.js";
 
 let configuredSession: Session | null = null;
 let captureUrls: readonly string[] | null = null;
@@ -14,6 +15,12 @@ let speakerSelectionUrls: readonly string[] | null = null;
 export function getVoiceMediaSession(): Session {
   const voiceSession = session.fromPartition(VOICE_MEDIA_PARTITION);
   if (configuredSession === voiceSession) return voiceSession;
+  if (!publicNetworkEnabled) {
+    voiceSession.webRequest.onBeforeRequest(
+      { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
+      (_details, callback) => callback({ cancel: true }),
+    );
+  }
   const captureUrl = pathToFileURL(join(app.getAppPath(), "assets", "voice-capture.html")).toString();
   const realtimeUrl = pathToFileURL(join(app.getAppPath(), "assets", "voice-realtime.html")).toString();
   const playerUrl = pathToFileURL(join(app.getAppPath(), "assets", "voice-media-player.html")).toString();

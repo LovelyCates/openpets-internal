@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getOpenCodeSetup, installOpenCodeGlobal, removeOpenCodeGlobal } from "../src/agent-setup-opencode.js";
+import { getOpenCodeSetup, installOpenCodeGlobal } from "../src/agent-setup-opencode.js";
 
-// This protects the global OpenCode configuration preview/install/remove lifecycle.
+// The internal build keeps a read-only preview but refuses public npm setup.
 const configDir = mkdtempSync(join(realpathSync(tmpdir()), "openpets-agent-setup-opencode-"));
 const formatUserPath = (path: string | undefined) => path;
 const dependencies = {
@@ -22,22 +22,14 @@ try {
   const initial = getOpenCodeSetup(dependencies);
   assert.equal(initial.status.state, "needs_setup");
   assert.ok(initial.preview.configPath);
+  assert.equal(initial.status.canInstall, false);
+  assert.match(initial.status.details, /reviewed local installer/);
 
   const installed = installOpenCodeGlobal(dependencies);
   assert.equal(installed.action, "opencode-install");
-  assert.equal(installed.changed, true);
-  const config = JSON.parse(readFileSync(initial.preview.configPath, "utf8")) as { readonly mcp: { readonly openpets: unknown } };
-  assert.ok(config.mcp.openpets);
-
-  const configured = getOpenCodeSetup(dependencies);
-  assert.equal(configured.status.state, "configured");
-
-  const removed = removeOpenCodeGlobal({ configDir });
-  assert.equal(removed.action, "opencode-remove");
-  assert.equal(removed.changed, true);
-
-  const final = getOpenCodeSetup(dependencies);
-  assert.equal(final.status.state, "needs_setup");
+  assert.equal(installed.ok, false);
+  assert.equal(installed.changed, false);
+  assert.equal(existsSync(initial.preview.configPath), false);
 } finally {
   rmSync(configDir, { recursive: true, force: true });
 }

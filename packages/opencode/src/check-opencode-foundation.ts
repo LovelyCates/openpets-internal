@@ -18,7 +18,7 @@ try {
   const project = join(root, "project");
   mkdirSync(project);
   const paths = getProjectOpenCodeConfigPaths(project);
-  assert.deepEqual(paths.candidates.map((path) => path.slice(project.length + 1)), ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]);
+  assert.deepEqual(paths.candidates.map((path) => path.slice(project.length + 1).replaceAll("\\", "/")), ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]);
   assert.equal(selectProjectOpenCodeConfigPath(project), join(project, ".opencode", "opencode.jsonc"));
   mkdirSync(join(project, ".opencode"));
   writeFileSync(join(project, ".opencode", "opencode.jsonc"), "{}\n");

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import net from "node:net";
 
-import { Notification, shell, systemPreferences } from "electron";
+import { app, Notification, shell, systemPreferences } from "electron";
 
 import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
@@ -145,7 +145,7 @@ export async function startLocalIpcServer(): Promise<void> {
 
   ipcServer = server;
   const listeningEndpoint = getListeningEndpoint(server, endpointConfig);
-  ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
+  ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token, app.getVersion());
   leaseCleanupTimer = setInterval(() => {
     leaseManager.cleanupExpired();
     leaseManager.checkPidLiveness();

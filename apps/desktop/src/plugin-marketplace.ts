@@ -1,6 +1,7 @@
 import { validatePluginCatalog } from "./plugin-catalog-validation.js";
 
 import type { MarketplaceRelease, MarketplacePlugin, MarketplaceDetail, MarketplacePage, MarketplaceQuery } from "./plugin-marketplace-types.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 export type { MarketplaceRelease, MarketplacePlugin, MarketplaceDetail, MarketplacePage, MarketplaceQuery } from "./plugin-marketplace-types.js";
 
 export function marketplaceOrigin(): string {
@@ -142,6 +143,7 @@ function plugin(value: unknown, origin: string): MarketplacePlugin {
 }
 
 async function request(path: string, fetchImpl: typeof fetch): Promise<unknown> {
+  if (!publicNetworkEnabled && fetchImpl === fetch) throw new Error(publicNetworkDisabledMessage);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -189,6 +191,9 @@ export async function getMarketplacePlugins(query: MarketplaceQuery = {}, fetchI
       throw new Error("Invalid marketplace pagination.");
     }
     params.set(key, String(value));
+  }
+  if (!publicNetworkEnabled && fetchImpl === fetch) {
+    return { plugins: [], total: 0, offset: query.offset ?? 0, limit: query.limit ?? 20 };
   }
   const data = object(await request(`/api/marketplace/plugins?${params}`, fetchImpl));
   if (!Array.isArray(data.plugins) || data.plugins.length > 100) throw new Error("Invalid marketplace page.");

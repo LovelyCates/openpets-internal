@@ -3,10 +3,11 @@ import { shell } from "electron";
 
 import { createExternalUrlOpener } from "./external-url-opener-core.js";
 import { warn } from "./logger.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 const XDG_OPEN_TIMEOUT_MS = 10_000;
 
-const openExternalUrl = createExternalUrlOpener({
+const platformOpenExternalUrl = createExternalUrlOpener({
   platform: process.platform,
   environment: process.env,
   xdgOpenTimeoutMs: XDG_OPEN_TIMEOUT_MS,
@@ -37,4 +38,7 @@ const openExternalUrl = createExternalUrlOpener({
   }),
 });
 
-export { openExternalUrl };
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
+  await platformOpenExternalUrl(url);
+}

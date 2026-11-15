@@ -16,21 +16,25 @@ register(`data:text/javascript,${encodeURIComponent(`
 `)}`, import.meta.url);
 
 const originalFetch = globalThis.fetch;
+let fetchCalls = 0;
 
 try {
   globalThis.fetch = async () => {
+    fetchCalls += 1;
     throw new Error("catalog unavailable");
   };
 
   const fixtureFallback = await import("../src/catalog.js");
   const fixtureState = await fixtureFallback.getCatalogUiState();
   assert.equal(fixtureState.source, "fixture");
-  assert.ok(fixtureState.pets.length > 0);
-  assert.equal(fixtureState.total, fixtureState.pets.length);
-  assert.equal(fixtureState.pets.every((pet) => pet.original === undefined && pet.featured === undefined), true);
-  assert.equal((await fixtureFallback.getCatalogPet("snoopy")).id, "snoopy");
+  assert.deepEqual(fixtureState.pets, []);
+  assert.equal(fixtureState.total, 0);
+  assert.deepEqual((await fixtureFallback.getCatalogPageUiState(0)).pets, []);
+  assert.deepEqual((await fixtureFallback.getCatalogSearchUiState()).pets, []);
+  await assert.rejects(() => fixtureFallback.getCatalogPet("snoopy"), /Public network services are disabled/);
+  assert.equal(fetchCalls, 0);
 } finally {
   globalThis.fetch = originalFetch;
 }
 
-console.log("Catalog fixture fallback visibility and lookup behavior passed.");
+console.log("Internal catalog remains empty without a network request.");

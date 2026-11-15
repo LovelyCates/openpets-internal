@@ -48,6 +48,12 @@ await scenario("initializes store and roots", async ({ userData }) => {
   service.stop();
 });
 
+await scenario("internal build rejects unreviewed local plugin load", async ({ root, service }) => {
+  const result = await service.loadLocalPath(root);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /disabled in this internal build/);
+});
+
 await scenario("snapshot omits paths and includes manifest config", async ({ service, store }) => {
   addPlugin(store, { config: { interval: 7 } }, manifest({ configSchema: { interval: { type: "number", default: 5 } }, everyMinutes: { config: "interval" } }));
   const snapshot = await service.getSnapshot();
@@ -755,7 +761,7 @@ async function localScenario(name: string, fn: (ctx: { root: string; userData: s
   store.initialize();
   const runtime = new FakeRuntime();
   let service: PluginService & Record<string, unknown>;
-  service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, showOpenDialog: async () => service["__cancelPicker"] ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [String(service["__source"] ?? source)] }, confirmPermissions: async () => !service["__denyPermissions"] }) as PluginService & Record<string, unknown>;
+  service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, allowUnreviewedPluginsInTests: true, showOpenDialog: async () => service["__cancelPicker"] ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [String(service["__source"] ?? source)] }, confirmPermissions: async () => !service["__denyPermissions"] }) as PluginService & Record<string, unknown>;
   service["__userData"] = userData;
   service["__runtimeReloads"] = runtime.reloads;
   try { await fn({ root, userData, source, store, service, runtime }); } catch (error) { throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`); }

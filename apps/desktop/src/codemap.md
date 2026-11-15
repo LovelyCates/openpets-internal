@@ -6,6 +6,8 @@ Core TypeScript source for the OpenPets desktop application. Organized into: lif
 
 ## Design/Patterns
 
+- **Internal network boundary**: `internal-network-policy.ts` centralizes disabled public services, optional listeners, and unreviewed plugin execution. Transport owners reject network requests before dispatch while local IPC and local pet imports remain available. On Windows, `local-ipc-paths.ts` ignores legacy TCP bind and discovery-file overrides, keeping the server on a local named pipe.
+
 - **Modular Controllers**: Separate controllers for default pet vs agent pets (lease-based)
 - **Protocol-First IPC**: Versioned JSON protocol over TCP/Unix sockets with token auth
 - **Defensive I/O**: All file operations use temp+rename for atomicity, path traversal validation, symlink checks

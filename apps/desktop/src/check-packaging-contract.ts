@@ -40,9 +40,9 @@ assert.match(workspaceConfig, /supportedArchitectures:[\s\S]*?os:[\s\S]*?- darwi
 assert.match(workspaceConfig, /supportedArchitectures:[\s\S]*?cpu:[\s\S]*?- x64[\s\S]*?- arm64/, "pnpm must install optional sharp binaries for desktop release CPU targets.");
 assert.match(workspaceConfig, /supportedArchitectures:[\s\S]*?libc:[\s\S]*?- glibc/, "pnpm must install optional sharp binaries for Linux glibc release targets.");
 assert.match(packageJson.devDependencies?.["electron-builder"] ?? "", /^\^26\.(?:9|[1-9]\d)\./, "desktop AppImage packaging must use electron-builder 26.9+ for conditional Linux sandbox handling.");
-assert.match(builderConfig, /appId:\s*dev\.openpets\.app/);
-assert.match(builderConfig, /productName:\s*OpenPets/);
-assert.match(builderConfig, /executableName:\s*openpets/, "desktop packages must use a safe executable name for the stricter AppImage toolset.");
+assert.match(builderConfig, /appId:\s*dev\.openpets\.internal/);
+assert.match(builderConfig, /productName:\s*OpenPets Internal/);
+assert.match(builderConfig, /executableName:\s*openpets-internal/, "desktop packages must use a safe executable name for the stricter AppImage toolset.");
 assert.match(builderConfig, /output:\s*dist-electron/);
 assert.match(builderConfig, /linux:[\s\S]*?target:[\s\S]*?- AppImage[\s\S]*?- deb[\s\S]*?- rpm[\s\S]*?- tar\.gz/, "desktop Linux packaging must include AppImage, deb, rpm, and tar.gz targets.");
 assert.match(builderConfig, /publish:\s*null/);
@@ -57,7 +57,7 @@ assert.match(builderConfig, /plugin-sdk-preload\.cjs/);
 assert.match(builderConfig, /plugin-command-form-preload\.cjs/);
 assert.match(builderConfig, /voice-realtime-preload\.cjs/);
 assert.match(builderConfig, /assets\/\*\*/);
-assert.match(builderConfig, /extraResources:[\s\S]*from:\s*\.\.\/\.\.\/plugins\/official[\s\S]*to:\s*plugins\/official/, "desktop packages must include bundled official plugins as extra resources.");
+assert.match(builderConfig, /extraResources:[\s\S]*from:\s*\.\.\/\.\.\/plugins\/official\/openpets\.reminders[\s\S]*to:\s*plugins\/official\/openpets\.reminders/, "desktop packages must include reviewed official plugins as extra resources.");
 assert.match(builderConfig, /icon:\s*assets\/app-icon\.icns/);
 
 assert.ok(existsSync(join(appDir, "control-center-preload.cjs")), "control-center-preload.cjs must exist for Control Center IPC.");

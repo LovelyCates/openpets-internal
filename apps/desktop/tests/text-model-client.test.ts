@@ -16,7 +16,7 @@ try {
   initializePluginPlatformSettings(userDataPath);
   configureProvider({ id: "text-test", label: "Text test", adapter: "openai-compatible-text", model: "test-model", baseUrl: "https://provider.test/v1", secretRef: "text-test" }, "text");
 
-  const openAi = new TextModelClient(secrets, { fetchImpl: async (input, init) => {
+  const openAi = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async (input, init) => {
     calls.push({ input: String(input), init });
     return new Response(JSON.stringify({ choices: [{ message: { content: "Planning the focus session.", tool_calls: [{ id: "call-1", type: "function", function: { name: "op_tool", arguments: '{"minutes":25}' } }] } }] }), { status: 200 });
   } });
@@ -33,7 +33,7 @@ try {
 
   let snapshotCalls = 0;
   const snapshotUrls: string[] = [];
-  const snapshotClient = new TextModelClient(secrets, { fetchImpl: async (input) => {
+  const snapshotClient = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async (input) => {
     snapshotUrls.push(String(input));
     snapshotCalls += 1;
     if (snapshotCalls === 1) updateProviderProfile("text-test", { baseUrl: "https://changed.test/v1" });
@@ -56,7 +56,7 @@ try {
 
   configureProvider({ id: "anthropic-test", label: "Anthropic test", adapter: "anthropic-text", model: "claude-test", baseUrl: "https://anthropic.test", secretRef: "anthropic-test" }, "text");
   calls = [];
-  const anthropic = new TextModelClient(secrets, { fetchImpl: async (input, init) => {
+  const anthropic = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async (input, init) => {
     calls.push({ input: String(input), init });
     return new Response(JSON.stringify({ content: [{ type: "text", text: "Preparing." }, { type: "tool_use", id: "anthropic-call", name: "op_tool", input: { minutes: 5 } }] }), { status: 200 });
   } });
@@ -73,22 +73,22 @@ try {
   assert.equal(anthropicBody.messages[0]?.content[0]?.text, "Previous thought.");
   assert.equal(anthropicBody.messages[1]?.content[0]?.tool_use_id, "previous");
 
-  const malformed = new TextModelClient(secrets, { fetchImpl: async () => new Response(JSON.stringify({ content: [{ type: "tool_use", id: "", name: "op_tool", input: {} }] }), { status: 200 }) });
+  const malformed = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async () => new Response(JSON.stringify({ content: [{ type: "tool_use", id: "", name: "op_tool", input: {} }] }), { status: 200 }) });
   await assert.rejects(() => malformed.generate({ messages: [{ role: "user", content: "start" }], tools: [] }, new AbortController().signal), /missing or duplicate tool-call ids/);
 
-  const failed = new TextModelClient(secrets, { fetchImpl: async () => new Response("no", { status: 503 }) });
+  const failed = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async () => new Response("no", { status: 503 }) });
   await assert.rejects(() => failed.generate({ messages: [{ role: "user", content: "start" }], tools: [] }, new AbortController().signal), /HTTP 503/);
 
-  const oversized = new TextModelClient(secrets, { maxRequestBytes: 10 });
+  const oversized = new TextModelClient(secrets, { allowNetworkInTests: true, maxRequestBytes: 10 });
   await assert.rejects(() => oversized.generate({ messages: [{ role: "user", content: "start" }], tools: [] }, new AbortController().signal), /request is too large/);
 
   const caller = new AbortController();
-  const cancelled = new TextModelClient(secrets, { fetchImpl: async () => new Promise<Response>(() => undefined) });
+  const cancelled = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async () => new Promise<Response>(() => undefined) });
   const pending = cancelled.generate({ messages: [{ role: "user", content: "start" }], tools: [] }, caller.signal);
   caller.abort();
   await assert.rejects(() => pending, /cancelled/);
 
-  const timedOut = new TextModelClient(secrets, { timeoutMs: 5, fetchImpl: async () => new Promise<Response>(() => undefined) });
+  const timedOut = new TextModelClient(secrets, { allowNetworkInTests: true, timeoutMs: 5, fetchImpl: async () => new Promise<Response>(() => undefined) });
   await assert.rejects(() => timedOut.generate({ messages: [{ role: "user", content: "start" }], tools: [] }, new AbortController().signal), /timed out/);
 } finally {
   rmSync(userDataPath, { recursive: true, force: true });

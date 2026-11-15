@@ -13,6 +13,7 @@ import { assistantCapabilityFailure, PluginAssistantCapabilityError, type Plugin
 import type { PluginInspectorState } from "./plugin-sdk-state.js";
 import type { PluginStateRecord, PluginStateStore } from "./plugin-state.js";
 import { classifyPluginError, logPluginDiagnostic } from "./plugin-diagnostics.js";
+import { thirdPartyPluginsEnabled } from "./internal-network-policy.js";
 
 export interface PluginTimerHandle { cancel(): void }
 export interface PluginRuntimeScheduler { setTimeout(callback: () => void, delayMs: number): PluginTimerHandle }
@@ -36,6 +37,8 @@ export type PluginRuntimeOptions = {
   readonly logger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
   readonly capabilities?: PluginHostCapabilities;
   readonly onPluginRuntimeError?: (properties: { readonly plugin_source?: string; readonly plugin_runtime?: string; readonly permission_count?: number; readonly error_code: string }) => void;
+  /** Explicit unit-test opt-in; the desktop entry point never sets this. */
+  readonly allowUnreviewedPluginsInTests?: boolean;
 };
 
 type CompiledTimer = { readonly intervalMs: number; readonly actions: readonly CompiledAction[] };
@@ -53,6 +56,7 @@ export class PluginRuntime {
   readonly #sdkBridge: PluginSdkBridge;
   readonly #logger: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
   readonly #onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"];
+  readonly #allowUnreviewedPluginsInTests: boolean;
   readonly #slots = new Map<string, PluginRuntimeSlot>();
   readonly #reloads = new Map<string, Promise<void>>();
   #active = false;
@@ -67,6 +71,7 @@ export class PluginRuntime {
     this.#capabilities = options.capabilities;
     this.#logger = options.logger ?? (() => undefined);
     this.#onPluginRuntimeError = options.onPluginRuntimeError;
+    this.#allowUnreviewedPluginsInTests = options.allowUnreviewedPluginsInTests === true;
     this.#sdkBridge = new PluginSdkBridge({ stateStore: this.#stateStore, petApi: this.#petApi, scheduler: this.#scheduler, storage: options.storageStore, onError: (id, reason) => this.#markBroken(id, reason), logger: this.#logger, capabilities: options.capabilities });
   }
 
@@ -149,6 +154,14 @@ export class PluginRuntime {
     if (!this.#active) { logPluginDiagnostic(this.#logger, "debug", "plugin reload", { pluginId: id, phase: "skip", reason: "runtime-inactive" }); return; }
     const record = this.#stateStore.getRecord(id);
     if (!record || !record.enabled || record.catalogDisabled) { logPluginDiagnostic(this.#logger, "debug", "plugin reload", { pluginId: id, phase: "skip", reason: !record ? "not-installed" : !record.enabled ? "disabled" : "catalog-disabled" }); return; }
+    if (!thirdPartyPluginsEnabled && !this.#allowUnreviewedPluginsInTests && !record.bundled) {
+      logPluginDiagnostic(this.#logger, "info", "plugin reload", {
+        pluginId: id,
+        phase: "skip",
+        reason: "internal-build-unreviewed",
+      });
+      return;
+    }
     const slot = this.#slotFor(id);
     const generation = slot.generation;
 

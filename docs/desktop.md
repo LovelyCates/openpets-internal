@@ -14,6 +14,43 @@ contract see [IPC and remote control](/ipc); for plugins see [Plugin platform](/
 Source map: `apps/desktop/codemap.md` and `apps/desktop/src/codemap.md` are the
 authoritative file-by-file maps. This doc is the narrative on top of them.
 
+## Internal Windows distribution baseline
+
+This fork ships as **OpenPets Internal** with a separate Windows application ID
+and user-data directory. `apps/desktop/src/internal-network-policy.ts` is the
+auditable source of its closed-by-default feature policy. The first internal
+build supports the bundled pet, local pet ZIP/folder imports, bundled local
+plugins, and OpenCode reactions through the local named-pipe IPC service.
+Legacy TCP IPC and discovery-path environment overrides cannot change the
+Windows desktop server's named-pipe binding or its internal discovery file.
+
+Public pet and plugin catalogs, marketplace requests, remote ZIP installs,
+GitHub release checks, announcements, Studio links, Teams API calls, OAuth,
+cloud provider requests, plugin HTTP requests, and browser-opening links are
+rejected before transport. LAN pet mode and the remote-control listener do not
+start. The custom `openpets://` protocol is not registered or processed. The
+network-backed Anxiety Aid Tools plugin is absent from the bundled list, and
+unreviewed local/catalog plugins cannot run. This does not affect local pet
+imports or local IPC. The Control Center's OpenCode one-click installer remains
+read-only and cannot write a public npm package spec; use the reviewed local
+integration installer in `internal/`.
+
+The Control Center renderer CSP excludes public image origins. The default
+Electron session rejects HTTP(S) and WebSocket requests in packaged builds;
+the voice-media session rejects them too. Unpackaged desktop development permits
+only its loopback Vite/capture endpoints through the default session.
+
+These code gates do not prove that a released binary makes no outbound
+connections. Release validation must inspect the exact packaged artifact and
+its dependencies, run it behind an egress-denying firewall, and record a network
+trace on a clean Windows profile. In particular, OpenCode integration packages
+and package-manager configuration are separate from the desktop process;
+review their command paths and resolve them through the approved internal
+package mirror before deployment. Bundled plugins are copied into user data and
+need artifact integrity review before treating them as trusted code. The upstream
+public-catalog, Teams, provider, and plugin documentation below describes
+capabilities retained in source but disabled by this distribution policy.
+
 ## Process model
 
 Electron gives us a **main process** and multiple **renderer processes**. In

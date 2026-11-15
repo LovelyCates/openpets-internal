@@ -1,4 +1,4 @@
-import { app, dialog, globalShortcut, powerMonitor, protocol, screen, type Display } from "electron";
+import { app, dialog, globalShortcut, powerMonitor, protocol, screen, session, type Display } from "electron";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
@@ -27,6 +27,7 @@ import { openLocalPetAssistantConversationArchive } from "./pet-assistant-archiv
 import { startVoiceAssistantHost } from "./voice-assistant-host.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
+import { publicNetworkEnabled, remoteNetworkEnabled, thirdPartyPluginsEnabled } from "./internal-network-policy.js";
 import { broadcastDashboardRefresh, broadcastManagerCheckInsRefresh, installInternalUiHandlers, installInternalUiProtocol, openControlCenterWindow, openControlCenterWindowTarget } from "./windows.js";
 import { sessionMediaScheme } from "./session-media-cache.js";
 import { broadcastDefaultPetManagerCheckInSnapshot, installDefaultPetChatIpcHandlers } from "./default-pet-chat.js";
@@ -55,6 +56,13 @@ import { removePetActivitiesForPet, resetPetActivitiesForPet, startPetActivities
 import { markOutfitRefresh, suspendPetBodies } from "./pet-window.js";
 import { setPetWardrobeChangeHandler } from "./pet-wardrobe.js";
 import { refreshPetWindowsForPetId } from "./pet-window-refresh.js";
+
+// Use a separate profile and single-instance lock from the public OpenPets app.
+app.setName("OpenPets Internal");
+app.setPath("userData", join(app.getPath("appData"), "OpenPets Internal"));
+if (process.platform === "win32") {
+  app.setAppUserModelId("dev.openpets.internal");
+}
 
 let teamService: TeamService | null = null;
 let managerCheckInService: ManagerCheckInService | null = null;
@@ -140,6 +148,7 @@ if (!gotSingleInstanceLock) {
 } else {
   installAppLifecycle({
     onTeamEnrollmentLink: (link) => {
+      if (!publicNetworkEnabled) return;
       const value = `openpets://teams/enroll?intent=${encodeURIComponent(link.intentId)}`;
       if (!teamService) {
         pendingTeamEnrollmentLink = value;
@@ -149,6 +158,7 @@ if (!gotSingleInstanceLock) {
       openControlCenterWindow("teams");
     },
     onPetInstallLink: (link) => {
+      if (!publicNetworkEnabled) return;
       if (!petInstallLinkHandler) {
         pendingPetInstallLink = link;
         return;
@@ -172,9 +182,24 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     initializeLogger();
-    app.setName("OpenPets");
-    if (process.platform === "win32") {
-      app.setAppUserModelId("dev.openpets.app");
+    if (!publicNetworkEnabled) {
+      session.defaultSession.webRequest.onBeforeRequest(
+        { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
+        (details, callback) => {
+          let allowDevServer = false;
+          if (!app.isPackaged) {
+            try {
+              const url = new URL(details.url);
+              allowDevServer = url.hostname === "127.0.0.1"
+                && (url.port === "5173" || url.port === "8797")
+                && (url.protocol === "http:" || url.protocol === "ws:");
+            } catch {
+              // Invalid URLs are blocked.
+            }
+          }
+          callback({ cancel: !allowDevServer });
+        },
+      );
     }
     info("app", "startup begin", {
       version: app.getVersion(),
@@ -237,12 +262,14 @@ if (!gotSingleInstanceLock) {
       petsRoot: getPetsRoot(),
       onWarning: ({ message, petId }) => warn("state", message, petId ? { petId } : undefined),
     });
-    try {
-      app.setAsDefaultProtocolClient("openpets");
-    } catch (error) {
-      warn("app", "Teams enrollment protocol registration unavailable", {
-        reason: error instanceof Error ? error.message : "registration_failed",
-      });
+    if (publicNetworkEnabled) {
+      try {
+        app.setAsDefaultProtocolClient("openpets");
+      } catch (error) {
+        warn("app", "Teams enrollment protocol registration unavailable", {
+          reason: error instanceof Error ? error.message : "registration_failed",
+        });
+      }
     }
     try {
       const migration = await migrateLegacyCodexV2ImportsAtStartup();
@@ -304,13 +331,13 @@ if (!gotSingleInstanceLock) {
     petDisplayCoordinator.start();
     await startLocalIpcServer();
     releaseStartupInstallLock();
-    const roots = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_ROOTS);
-    const paths = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS);
+    const roots = thirdPartyPluginsEnabled ? parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_ROOTS) : [];
+    const paths = thirdPartyPluginsEnabled ? parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS) : [];
     const devPluginMode = roots.length > 0 || paths.length > 0;
     initializePluginPlatformSettings(app.getPath("userData"));
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"));
     let devPluginWatcher: ReturnType<typeof startDevPluginWatcher> | undefined;
-    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, undefined, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
+    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, !publicNetworkEnabled || process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, undefined, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
     const teamsApiClient = new TeamApiClient({ production: app.isPackaged });
     teamService = initializeTeamService({
       userDataPath: app.getPath("userData"),
@@ -353,24 +380,28 @@ if (!gotSingleInstanceLock) {
       broadcastDefaultPetManagerCheckInSnapshot(snapshot);
       broadcastManagerCheckInsRefresh();
     });
-    powerMonitor.on("resume", () => {
-      void teamService?.syncNow().catch(() => undefined);
-      void managerCheckInService?.syncNow().catch(() => undefined);
-    });
-    const startupTeamLink = findTeamEnrollmentLink(process.argv);
+    if (publicNetworkEnabled) {
+      powerMonitor.on("resume", () => {
+        void teamService?.syncNow().catch(() => undefined);
+        void managerCheckInService?.syncNow().catch(() => undefined);
+      });
+    }
+    const startupTeamLink = publicNetworkEnabled ? findTeamEnrollmentLink(process.argv) : null;
     if (startupTeamLink) {
       teamService.handleDeepLink(
         `openpets://teams/enroll?intent=${encodeURIComponent(startupTeamLink.intentId)}`,
       );
       openControlCenterWindow("teams");
     }
-    if (pendingTeamEnrollmentLink) {
+    if (publicNetworkEnabled && pendingTeamEnrollmentLink) {
       teamService.handleDeepLink(pendingTeamEnrollmentLink);
       pendingTeamEnrollmentLink = null;
       openControlCenterWindow("teams");
     }
     petInstallLinkHandler = createDesktopPetInstallLinkHandler();
-    const startupPetInstallLink = pendingPetInstallLink ?? findPetInstallLink(process.argv);
+    const startupPetInstallLink = publicNetworkEnabled
+      ? pendingPetInstallLink ?? findPetInstallLink(process.argv)
+      : null;
     pendingPetInstallLink = null;
     if (startupPetInstallLink) {
       handlePetInstallLink(petInstallLinkHandler, startupPetInstallLink);
@@ -383,18 +414,22 @@ if (!gotSingleInstanceLock) {
     // Pinned pets are user-owned windows: they come back on every launch, independent of
     // launcher visibility and of any agent session.
     syncPinnedPets();
-    startLanController();
-    try {
-      await remoteControlService.start();
-    } catch {
-      warn("remote", "remote control listener unavailable");
+    if (remoteNetworkEnabled) {
+      startLanController();
+      try {
+        await remoteControlService.start();
+      } catch {
+        warn("remote", "remote control listener unavailable");
+      }
     }
     refreshTrayMenu();
     const pluginStartup = (async () => {
       const service = pluginService;
       await service.start();
-      await teamService?.start();
-      await managerCheckInService?.start();
+      if (publicNetworkEnabled) {
+        await teamService?.start();
+        await managerCheckInService?.start();
+      }
       const assistant = startPetAssistantHost(service, pluginCapabilities.secretsStore, {
         // App state is host-owned and synchronous; the service snapshots this
         // profile before each turn.
@@ -426,7 +461,9 @@ if (!gotSingleInstanceLock) {
     if (captureSessionDir) {
       startCaptureSession({ sessionDir: captureSessionDir, pluginService, pluginCapabilities, pluginStartup });
     }
-    void checkForGitHubReleaseUpdate().then(() => refreshTrayMenu());
+    if (publicNetworkEnabled) {
+      void checkForGitHubReleaseUpdate().then(() => refreshTrayMenu());
+    }
     info("app", "startup complete", { logFile: getLogFilePath(), openDefaultPetOnLaunch: shouldOpenDefaultPetOnLaunch() });
     const devRoute = app.isPackaged
       ? null

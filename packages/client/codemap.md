@@ -19,6 +19,7 @@ Provides the foundational client library for all OpenPets integrations. Handles 
 - File validation (size, permissions, symlink checks)
 - Endpoint validation: Unix sockets, Windows named pipes, TCP (IPv4)
 - TCP/WSL cross-platform support: Windows desktop → WSL client via private IPs
+- Native Windows local discovery accepts only named pipes; TCP discovery is rejected
 - Security: XDG_RUNTIME_DIR permission checks (0o700, ownership)
 
 **TCP Endpoint Security:**

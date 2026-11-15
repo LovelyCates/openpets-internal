@@ -15,6 +15,7 @@ let defaultPetAway = false;
 const logs: string[] = [];
 
 const service = new RemoteControlService({
+  allowListenerInTests: true,
   statePath,
   getStatusSnapshot: () => ({
     ok: true,
@@ -158,6 +159,7 @@ await service.configure({ enabled: true, address: "127.0.0.1", port: restartedPo
 await service.stop();
 assert.equal(service.getConfiguration().listening, false, "stopping remote control must close its listener");
 const restartedService = new RemoteControlService({
+  allowListenerInTests: true,
   statePath,
   getStatusSnapshot: serviceOptionsStatus,
   applyReaction: () => ({ shown: true }),
@@ -172,6 +174,7 @@ assert.equal(restartedService.getConfiguration().listening, false, "disabling re
 await restartedService.stop();
 
 const resourceService = new RemoteControlService({
+  allowListenerInTests: true,
   statePath: join(root, "resource-state.json"),
   connectionDeadlineMs: 100,
   maxConcurrentSockets: 1,
@@ -199,6 +202,7 @@ await resourceService.stop();
 
 const rateStatePath = join(root, "rate-state.json");
 const rateService = new RemoteControlService({
+  allowListenerInTests: true,
   statePath: rateStatePath,
   rateLimitMaxRequests: 2,
   rateLimitWindowMs: 60_000,

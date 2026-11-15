@@ -9,6 +9,7 @@ import { type PluginCatalogEntry, type PluginCatalogEntryV2 } from "./plugin-cat
 import { defaultMaxPluginManifestBytes, readSafePluginManifest, isUnderPath } from "./plugin-manifest-reader.js";
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, validatePluginManifest, type OpenPetsPluginManifest } from "./plugin-manifest.js";
 import { marketplaceOrigin } from "./plugin-marketplace.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 const maxZipBytes = 16 * 1024 * 1024;
 const maxPluginEntryBytes = 1024 * 1024;
@@ -20,6 +21,7 @@ export type PluginPackageInstall = { readonly manifest: OpenPetsPluginManifest; 
 type AnyPluginCatalogEntry = PluginCatalogEntry | PluginCatalogEntryV2;
 
 export async function downloadCatalogPluginZip(entry: AnyPluginCatalogEntry, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
+  if (!publicNetworkEnabled && fetchImpl === fetch) throw new Error(publicNetworkDisabledMessage);
   validatePluginZipUrl(entry.downloadUrl);
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 30_000);
   try { const response = await fetchImpl(entry.downloadUrl, { signal: controller.signal, credentials: "omit", redirect: "error" }); if (!response.ok) throw new Error(`Plugin ZIP download failed with HTTP ${response.status}.`); return await readLimitedResponse(response, maxZipBytes); }

@@ -6,6 +6,8 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Design
 
+- **Internal distribution policy**: `src/internal-network-policy.ts` disables public services, optional network listeners, and third-party plugin execution in the Windows internal build. The app uses its own name, user-data path, and app ID before the single-instance lock.
+
 - **Tray-First UX**: No default main window; tray actions open the singleton React/Tailwind Control Center and route directly to Dashboard, Pets, Integrations, Plugins, Settings, and Teams.
 - **Single Instance**: Uses `app.requestSingleInstanceLock()` with second-instance focusing
 - **Security Model**: 
@@ -30,6 +32,8 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 ## Flow
 
 **Startup**: `main.ts` → `installAppLifecycle()` → `initializeLogger()` → `initializeAppState()` → safely repair eligible legacy Codex V2 import markers → `createAppTray()` → start `PetDisplayCoordinator` → `startLocalIpcServer()` → initialize plugin service with JavaScript host/SDK bridge → start bundled `ManagerCheckInService` and subscribe the default pet → construct Pet Assistant host and local conversation archive → optionally open a validated `OPENPETS_DEV_ROUTE` Control Center route in unpackaged development → optionally `showDefaultPet()`
+
+In the internal build, startup skips Teams/Manager Check-ins synchronization, LAN and remote listeners, public update checks, and remote catalogs. Local named-pipe IPC and local pet imports remain active.
 
 **Pet Display**: IPC Request → `local-ipc.ts` → `LeaseManager.acquire()` → `agent-pet-controller.ts` → `pet-window.ts` → HTML/CSS spritesheet animation with reaction-to-animation mapping; topology and resume recovery are coordinated by `pet-display-coordinator.ts`
 

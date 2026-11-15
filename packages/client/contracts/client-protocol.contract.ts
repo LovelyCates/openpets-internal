@@ -17,7 +17,12 @@ const baseDiscovery = {
 };
 
 validateDiscovery(baseDiscovery);
-validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" });
+if (process.platform === "win32") {
+  assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" }));
+  assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://192.168.1.100:37645" }));
+} else {
+  validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" });
+}
 assert.deepEqual(parseIpcEndpoint("tcp://127.0.0.1:37645"), { kind: "tcp", host: "127.0.0.1", port: 37645 });
 
 // Test private/local IPv4 addresses for WSL NAT mode

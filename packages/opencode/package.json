@@ -23,10 +23,12 @@
     }
   },
   "scripts": {
-    "test": "node dist/check-opencode-foundation.js && node dist/check-opencode-plugin.js",
+    "test": "node dist/check-opencode-foundation.js && node dist/check-opencode-plugin.js && node dist/check-opencode-v1.js",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "build:v1": "esbuild src/plugin-v1.ts --bundle --platform=node --format=esm --target=node20 --outfile=v1-package/index.js",
+    "build:v2": "esbuild src/plugin-v2-standalone.ts --bundle --platform=node --format=esm --target=node20 --outfile=v2-package/index.js"
   },
   "dependencies": {
     "@open-pets/agent-events": "workspace:*",

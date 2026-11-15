@@ -1,16 +1,12 @@
-appId: dev.openpets.app
-productName: OpenPets
-executableName: openpets
-protocols:
-  - name: OpenPets Teams enrollment
-    schemes:
-      - openpets
+appId: dev.openpets.internal
+productName: OpenPets Internal
+executableName: openpets-internal
 copyright: Copyright © 2026 OpenPets
 
 directories:
   output: dist-electron
 
-artifactName: OpenPets-${version}-${os}-${arch}.${ext}
+artifactName: OpenPets-Internal-${version}-${os}-${arch}.${ext}
 
 files:
   - dist/**
@@ -24,8 +20,20 @@ files:
   - package.json
 
 extraResources:
-  - from: ../../plugins/official
-    to: plugins/official
+  - from: ../../plugins/official/openpets.reminders
+    to: plugins/official/openpets.reminders
+  - from: ../../plugins/official/openpets.simple-timer
+    to: plugins/official/openpets.simple-timer
+  - from: ../../plugins/official/openpets.focus-buddy
+    to: plugins/official/openpets.focus-buddy
+  - from: ../../plugins/official/openpets.launch-buddy
+    to: plugins/official/openpets.launch-buddy
+  - from: ../../plugins/official/openpets.fortune-cookie
+    to: plugins/official/openpets.fortune-cookie
+  - from: ../../plugins/official/openpets.virtual-pet
+    to: plugins/official/openpets.virtual-pet
+  - from: ../../plugins/official/openpets.system-resources
+    to: plugins/official/openpets.system-resources
 
 asar: true
 asarUnpack:
@@ -58,7 +66,7 @@ win:
   verifyUpdateCodeSignature: false
 
 nsis:
-  artifactName: OpenPets-${version}-win-${arch}-setup.${ext}
+  artifactName: OpenPets-Internal-${version}-win-${arch}-setup.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

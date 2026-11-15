@@ -28,7 +28,7 @@ export function getDiscoveryFilePath(): string {
   }
 
   if (process.platform === "win32") {
-    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets", "runtime", "ipc.json");
+    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets Internal", "runtime", "ipc.json");
   }
 
   const xdg = getSecureXdgRuntimeDir();
@@ -74,6 +74,9 @@ export function validateDiscovery(value: unknown): OpenPetsDiscoveryFile {
   if (value.platform !== "darwin" && value.platform !== "linux" && value.platform !== "win32") throw new OpenPetsClientError("invalid_discovery", "Discovery platform is invalid.");
 
   const endpoint = parseIpcEndpoint(value.endpoint);
+  if (process.platform === "win32" && endpoint.kind === "tcp") {
+    throw new OpenPetsClientError("invalid_discovery", "Windows local discovery must use an OpenPets named pipe.");
+  }
   if (value.platform !== process.platform && !allowsCrossPlatformDiscovery(value.platform, endpoint)) {
     throw new OpenPetsClientError("invalid_discovery", "Discovery platform does not match this client.");
   }

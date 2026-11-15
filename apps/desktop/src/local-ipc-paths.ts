@@ -3,8 +3,7 @@ import { randomBytes } from "node:crypto";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
-import { app } from "electron";
-
+import { remoteNetworkEnabled } from "./internal-network-policy.js";
 import { openPetsIpcProtocol, openPetsIpcVersion } from "./local-ipc-protocol.js";
 
 export interface OpenPetsDiscoveryFile {
@@ -22,6 +21,11 @@ export type IpcEndpoint =
   | { readonly kind: "path"; readonly path: string };
 
 export function getDiscoveryFilePath(): string {
+  // The internal Windows build keeps its IPC token in its own fixed profile.
+  if (process.platform === "win32" && !remoteNetworkEnabled) {
+    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets Internal", "runtime", "ipc.json");
+  }
+
   if (process.env.OPENPETS_DISCOVERY_FILE) {
     return process.env.OPENPETS_DISCOVERY_FILE;
   }
@@ -31,7 +35,7 @@ export function getDiscoveryFilePath(): string {
   }
 
   if (process.platform === "win32") {
-    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets", "runtime", "ipc.json");
+    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets Internal", "runtime", "ipc.json");
   }
 
   const xdg = getSecureXdgRuntimeDir();
@@ -53,6 +57,13 @@ export function createIpcEndpoint(): string {
 }
 
 export function getIpcEndpointConfig(): IpcEndpointConfig {
+  // Older OpenPets builds allowed TCP IPC for WSL. Never expose that listener
+  // from the internal Windows edition, even if the old variables are present.
+  if (process.platform === "win32" && !remoteNetworkEnabled) {
+    const pipePath = `\\\\.\\pipe\\openpets-${randomEndpointPart()}-${process.pid}`;
+    return { bindEndpoint: { kind: "path", path: pipePath }, advertisedEndpoint: pipePath };
+  }
+
   const bindEnv = process.env.OPENPETS_IPC_BIND;
   const endpointEnv = process.env.OPENPETS_IPC_ENDPOINT;
 
@@ -203,13 +214,13 @@ function isPrivateOrLocalIpv4(host: string): boolean {
   return false;
 }
 
-export function writeDiscoveryFile(endpoint: string, token: string): OpenPetsDiscoveryFile {
+export function writeDiscoveryFile(endpoint: string, token: string, appVersion: string): OpenPetsDiscoveryFile {
   const discovery: OpenPetsDiscoveryFile = {
     protocolVersion: openPetsIpcVersion,
     protocol: openPetsIpcProtocol,
     endpoint,
     token,
-    appVersion: app.getVersion(),
+    appVersion,
     pid: process.pid,
     platform: process.platform,
   };

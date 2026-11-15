@@ -1,3 +1,5 @@
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_JSON_MAX_BYTES = 2 * 1024 * 1024;
 const BINARY_MAX_BYTES = 64 * 1024 * 1024;
@@ -33,13 +35,18 @@ export type ProviderTransportLease = {
 export class ProviderTransport {
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
+  readonly #allowNetworkInTests: boolean;
 
-  constructor(fetchImpl: typeof fetch = fetch, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  constructor(fetchImpl: typeof fetch = fetch, timeoutMs = DEFAULT_TIMEOUT_MS, allowNetworkInTests = false) {
     this.#fetch = fetchImpl;
     this.#timeoutMs = timeoutMs;
+    this.#allowNetworkInTests = allowNetworkInTests;
   }
 
   async request(url: string, init: RequestInit, signal?: AbortSignal): Promise<ProviderTransportLease> {
+    if (!publicNetworkEnabled && !this.#allowNetworkInTests) {
+      throw providerError(publicNetworkDisabledMessage, "provider.disabled");
+    }
     const controller = new AbortController();
     let rejectLifecycle!: (error: ProviderError) => void;
     const lifecyclePromise = new Promise<never>((_resolve, reject) => {

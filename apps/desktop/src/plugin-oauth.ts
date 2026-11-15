@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { info, warn } from "./logger.js";
 import { openExternalUrl } from "./external-url-opener.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 import type { PluginSecretsStore } from "./plugin-secrets.js";
 import type { PluginOauthTokens } from "./plugin-sdk-bridge.js";
 
@@ -47,6 +48,7 @@ export class PluginOauthBroker {
   }
 
   async oauth(pluginId: string, config: OauthRequest): Promise<PluginOauthTokens> {
+    if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
     validateProviderScopes(config);
     if (activeFlow) throw new Error("Another OAuth flow is already in progress.");
     activeFlow = true;
@@ -82,6 +84,7 @@ export class PluginOauthBroker {
   }
 
   async refresh(pluginId: string, provider: string): Promise<{ accessToken: string; expiresAt?: number }> {
+    if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
     const stored = await this.#secrets.get(pluginId, `oauth:${provider}`);
     if (!stored) throw new Error(`No stored OAuth session for provider: ${provider}`);
     if (provider !== "google" && provider !== "spotify") throw new Error(`OAuth provider is not supported: ${provider}`);

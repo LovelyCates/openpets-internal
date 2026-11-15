@@ -37,13 +37,24 @@ The client and server pick a transport per platform:
 - **TCP (IPv4)** - used for cross-platform/WSL: a WSL client connects to the
   Windows desktop app over a private IP.
 
+Native Windows clients reject a TCP endpoint in local discovery, including a
+loopback address; they require an OpenPets named pipe. Linux/WSL clients retain
+the validated Windows-to-WSL TCP parser, but the internal Windows desktop does
+not expose a TCP listener for them.
+
 TCP is the one that touches the network, so it is locked down (see Security).
+The internal Windows build always binds a named pipe. It ignores legacy
+`OPENPETS_IPC_BIND` and `OPENPETS_IPC_ENDPOINT` values, including settings that
+would otherwise bind a LAN address.
 
 ## Discovery handshake
 
 The app writes a **discovery file** at a platform-specific path
 (`local-ipc-paths.ts` on the server, `discovery.ts` on the client). The file
-contains the endpoint to connect to and an auth **token**. A client:
+contains the endpoint to connect to and an auth **token**. The Windows internal
+edition writes it at `%APPDATA%/OpenPets Internal/runtime/ipc.json`, separate
+from public OpenPets installs; the desktop server ignores the legacy
+`OPENPETS_DISCOVERY_FILE` override. A client:
 
 1. Reads and validates the discovery file (size, permissions, symlink checks;
    on Linux, `XDG_RUNTIME_DIR` must be `0o700` and owned by the user).

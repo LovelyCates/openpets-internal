@@ -8,6 +8,7 @@ import {
   writePreparedOpenCodeGlobalSetup,
 } from "@open-pets/opencode";
 import type { OpenCodeCommandMode } from "@open-pets/opencode";
+import { publicNetworkEnabled } from "./internal-network-policy.js";
 
 export interface OpenCodeSetupStatus {
   readonly state: "configured" | "needs_setup" | "not_detected" | "error";
@@ -81,7 +82,9 @@ export function getOpenCodeSetup(dependencies: OpenCodeSetupDependencies): { rea
           : dependencies.detected
             ? "Ready"
             : "Not detected",
-      details: globalState.status === "custom" || globalState.status === "conflict" || globalState.status === "error"
+      details: !publicNetworkEnabled
+        ? `${globalState.message} One-click setup is disabled in this internal build; use the reviewed local installer script.`
+        : globalState.status === "custom" || globalState.status === "conflict" || globalState.status === "error"
         ? globalState.message
         : configured
           ? globalState.message
@@ -91,7 +94,7 @@ export function getOpenCodeSetup(dependencies: OpenCodeSetupDependencies): { rea
               ? "OpenCode was not found on PATH or in a Scoop shim directory. You can still preview setup, but OpenCode must be installed to use it."
               : "OpenCode did not run from the saved command path. You can still preview setup, but OpenCode must be installed to use it.",
       configDir: dependencies.formatUserPath(dependencies.configDir) ?? dependencies.configDir,
-      canInstall: prepared.ok && !configured,
+      canInstall: publicNetworkEnabled && prepared.ok && !configured,
       canRemove: configured,
     },
     preview: {
@@ -116,6 +119,14 @@ export function getOpenCodeSetup(dependencies: OpenCodeSetupDependencies): { rea
 }
 
 export function installOpenCodeGlobal(dependencies: OpenCodeInstallDependencies): OpenCodeSetupActionResult {
+  if (!publicNetworkEnabled) {
+    return {
+      ok: false,
+      action: "opencode-install",
+      message: "One-click setup is disabled in this internal build; use the reviewed local installer script.",
+      changed: false,
+    };
+  }
   try {
     const prepared = prepareOpenCodeGlobalSetup({
       configDir: dependencies.configDir,

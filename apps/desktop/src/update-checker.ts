@@ -3,6 +3,7 @@ import https from "node:https";
 
 import { createParsedUpdateStatus, normalizeVersion } from "./update-version.js";
 import { openExternalUrl } from "./external-url-opener.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 export type UpdateStatusState = "idle" | "checking" | "available" | "current" | "error";
 
@@ -34,6 +35,7 @@ export function getUpdateStatus(): UpdateStatus {
 }
 
 export async function checkForGitHubReleaseUpdate(): Promise<UpdateStatus> {
+  if (!publicNetworkEnabled) return getUpdateStatus();
   if (checkInFlight) return checkInFlight;
   updateStatus = { ...updateStatus, state: "checking", currentVersion: getCurrentAppVersion() };
   checkInFlight = fetchLatestRelease()
@@ -53,6 +55,7 @@ export async function checkForGitHubReleaseUpdate(): Promise<UpdateStatus> {
 }
 
 export async function openUpdateReleasePage(): Promise<void> {
+  if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
   const url = validateGitHubReleaseUrl(updateStatus.releaseUrl) || releasesPageUrl;
   await openExternalUrl(url);
 }

@@ -4,6 +4,8 @@ description: Connect Claude Code, OpenCode, Cursor, Zed, Devin, Pi, OpenClaw, an
 
 # Agent integrations
 
+> **Internal edition:** OpenCode 1.x and 2.x use separate local bundles installed with `internal/Install-OpenCodeIntegration.ps1`. The desktop one-click installer is disabled because its upstream configuration names public npm packages. Both plugin and MCP paths use local IPC; see `packages/opencode/V1_COMPAT.md`.
+
 OpenPets reacts to coding agents. Most supported agents have an integration
 package that does two jobs: **configure** the agent to talk to OpenPets, and at
 runtime **translate** the agent's activity into safe pet reactions sent over

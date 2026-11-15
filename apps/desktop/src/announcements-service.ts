@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Announcement, AnnouncementSnapshot } from "./announcements-contract.js";
 import { isAnnouncementId, parseAnnouncementsFeed, selectAnnouncement } from "./announcements-core.js";
+import { publicNetworkEnabled } from "./internal-network-policy.js";
 
 const feedUrl = "https://openpets.dev/announcements/v1.json";
 const maxBytes = 256 * 1024;
@@ -52,6 +53,9 @@ export class AnnouncementsService {
   }
 
   async get(): Promise<AnnouncementSnapshot> {
+    if (!publicNetworkEnabled && !this.options.fetch) {
+      return { announcement: null, unseen: false };
+    }
     if (this.options.preview) {
       return {
         announcement: preview,

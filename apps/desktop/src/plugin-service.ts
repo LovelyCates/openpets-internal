@@ -21,6 +21,7 @@ import { PluginRuntime, type PluginRuntimeOptions, type PluginRuntimeScheduler }
 import { PluginStateStore, type PluginSource, type PluginStateRecord } from "./plugin-state.js";
 import { getAppStateSnapshot } from "./app-state.js";
 import { bundledOfficialPluginIds } from "./bundled-plugins.js";
+import { thirdPartyPluginsEnabled } from "./internal-network-policy.js";
 
 export { bundledOfficialPluginIds } from "./bundled-plugins.js";
 
@@ -87,12 +88,13 @@ export type PluginServiceOptions = {
   readonly onLocalPluginSourceRemoved?: (sourcePath: string) => void;
   /** Test seam for persistent recovery cleanup failures. */
   readonly pluginInstallRecoveryCleanup?: () => Promise<void>;
+  /** Explicit unit-test opt-in; the desktop entry point never sets this. */
+  readonly allowUnreviewedPluginsInTests?: boolean;
 };
 
 const bundledEnabledByDefault = new Set<string>([
   "openpets.reminders",
   "openpets.simple-timer",
-  "openpets.anxiety-aid-tools",
   "openpets.focus-buddy",
   "openpets.launch-buddy",
   "openpets.fortune-cookie",
@@ -118,6 +120,7 @@ export class PluginService {
   readonly #onLocalPluginSourceLoaded?: (sourcePath: string) => void;
   readonly #onLocalPluginSourceRemoved?: (sourcePath: string) => void;
   readonly #pluginInstallRecoveryCleanup?: () => Promise<void>;
+  readonly #allowUnreviewedPluginsInTests: boolean;
   readonly #catalogMutations = new Map<string, Promise<PluginServiceResult>>();
 
   constructor(options: PluginServiceOptions) {
@@ -142,12 +145,13 @@ export class PluginService {
     this.#onLocalPluginSourceLoaded = options.onLocalPluginSourceLoaded;
     this.#onLocalPluginSourceRemoved = options.onLocalPluginSourceRemoved;
     this.#pluginInstallRecoveryCleanup = options.pluginInstallRecoveryCleanup;
+    this.#allowUnreviewedPluginsInTests = options.allowUnreviewedPluginsInTests === true;
     this.stateStore = options.stateStore ?? new PluginStateStore({ userDataPath: options.userDataPath ?? "" });
     if (options.runtime) {
       this.runtime = options.runtime;
     } else {
       if (!options.petApi) throw new Error("Plugin service requires petApi when runtime is not provided.");
-      this.runtime = new PluginRuntime({ stateStore: this.stateStore, petApi: options.petApi, scheduler: options.scheduler, allowedPluginRoots: this.allowedPluginRoots, maxManifestBytes: options.maxManifestBytes, jsHost: options.jsHost, storageStore: options.userDataPath ? new JsonPluginStorageStore(join(options.userDataPath, "plugin-storage")) : undefined, logger: options.runtimeLogger, capabilities: options.capabilities, onPluginRuntimeError: options.onPluginRuntimeError });
+      this.runtime = new PluginRuntime({ stateStore: this.stateStore, petApi: options.petApi, scheduler: options.scheduler, allowedPluginRoots: this.allowedPluginRoots, maxManifestBytes: options.maxManifestBytes, jsHost: options.jsHost, storageStore: options.userDataPath ? new JsonPluginStorageStore(join(options.userDataPath, "plugin-storage")) : undefined, logger: options.runtimeLogger, capabilities: options.capabilities, onPluginRuntimeError: options.onPluginRuntimeError, allowUnreviewedPluginsInTests: options.allowUnreviewedPluginsInTests });
     }
     this.#maxManifestBytes = options.maxManifestBytes;
   }
@@ -428,6 +432,7 @@ export class PluginService {
   }
 
   async loadLocalPath(sourceFolder: string, options: { readonly autoApprove?: boolean } = {}): Promise<PluginServiceResult> {
+    if (!thirdPartyPluginsEnabled && !this.#allowUnreviewedPluginsInTests) return this.#error("Local plugins are disabled in this internal build.");
     if (!this.#userDataPath) return this.#error("Local plugin loading is unavailable.");
     let source: Awaited<ReturnType<typeof readLocalPluginSourceManifest>>;
     let realSourceFolder = sourceFolder;

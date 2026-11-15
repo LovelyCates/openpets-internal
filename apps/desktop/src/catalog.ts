@@ -8,6 +8,7 @@ import { builtInPetCatalogIds } from "./built-in-pet.js";
 import { createCatalogRemoteClient } from "./catalog-remote.js";
 import { validateCatalogV2, type CatalogPetPackageMeta, type CatalogPetV2, type CatalogV2, type CatalogV3Index, type CatalogV3SearchPet } from "@open-pets/pet-format/catalog-validation";
 import { isVersionNewer } from "./update-version.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 export const catalogUrl = "https://openpets.dev/pets/catalog.v2.json";
 export const catalogV3Url = "https://openpets.dev/pets/catalog.v3.json";
@@ -42,6 +43,7 @@ export interface CatalogSearchUiState {
 const catalogRemote = createCatalogRemoteClient({ v2Url: catalogUrl, v3Url: catalogV3Url });
 
 export async function getCatalogUiState(): Promise<CatalogUiState> {
+  if (!publicNetworkEnabled) return { source: "fixture", pets: [], total: 0 };
   const remoteV3 = await tryLoadRemoteCatalogV3Index();
 
   if (remoteV3.ok) {
@@ -67,6 +69,7 @@ export async function getCatalogUiState(): Promise<CatalogUiState> {
 
 export async function getCatalogPageUiState(page: number): Promise<CatalogUiState> {
   if (!Number.isInteger(page) || page < 0) throw new Error("Catalog page must be a non-negative integer.");
+  if (!publicNetworkEnabled) return { source: "fixture", pets: [], total: 0, page: 0, pageCount: 0 };
   const remoteV3 = await tryLoadRemoteCatalogV3Index();
   if (!remoteV3.ok) return { source: "error", pets: [], error: remoteV3.error };
   if (page >= surfaceablePageCount(remoteV3.index)) throw new Error("Catalog page is out of range.");
@@ -89,6 +92,7 @@ export async function getCatalogPageUiState(page: number): Promise<CatalogUiStat
 }
 
 export async function getCatalogSearchUiState(): Promise<CatalogSearchUiState> {
+  if (!publicNetworkEnabled) return { source: "remote", pets: [], total: 0 };
   const remoteV3 = await tryLoadRemoteCatalogV3Index();
   if (!remoteV3.ok) return { source: "error", pets: [], error: remoteV3.error };
 
@@ -102,6 +106,7 @@ export async function getCatalogSearchUiState(): Promise<CatalogSearchUiState> {
 
 /** Look up an installable catalog pet; rejects pets that need a newer OpenPets. */
 export async function getCatalogPet(petId: string): Promise<CatalogPetV2> {
+  if (!publicNetworkEnabled) throw new Error(publicNetworkDisabledMessage);
   const pet = await findCatalogPet(petId);
   const required = getRequiredOpenPetsVersion(pet);
   if (required) throw new Error(`${pet.displayName} needs OpenPets ${required} or newer. Update OpenPets to install it.`);

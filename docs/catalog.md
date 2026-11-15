@@ -4,6 +4,8 @@ description: Reference the OpenPets pet and plugin catalogs, generated artifacts
 
 # Catalogs
 
+> **Internal edition:** Public pet and plugin catalog requests are disabled. Users can import reviewed local pet ZIPs or folders. The contracts below document upstream catalog behavior for any future private replacement.
+
 The app discovers pets from versioned JSON **catalogs** served at
 `openpets.dev`, with ZIPs hosted on R2 behind `zip.openpets.dev`. Current plugin
 discovery and publication use the Studio-hosted [marketplace](/marketplace),

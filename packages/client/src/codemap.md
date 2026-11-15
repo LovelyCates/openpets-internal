@@ -57,7 +57,7 @@ Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFil
 
 **Platform Paths:**
 - macOS: `~/Library/Application Support/OpenPets/runtime/ipc.json`
-- Windows: `%APPDATA%/OpenPets/runtime/ipc.json`
+- Windows internal edition: `%APPDATA%/OpenPets Internal/runtime/ipc.json`
 - Linux: `$XDG_RUNTIME_DIR/openpets/ipc.json` (preferred) or `~/.config/OpenPets/runtime/ipc.json`
 
 **Endpoint Types:**
@@ -67,6 +67,7 @@ Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFil
 
 **TCP/WSL Support:**
 - Cross-platform discovery for Windows desktop → WSL client
+- Native Windows clients reject TCP local discovery and require `\\.\pipe\openpets-*`
 - Validates private/local IPv4: loopback (127.x), private (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x)
 - Rejects hostnames, 0.0.0.0, public IPs
 

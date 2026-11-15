@@ -10,6 +10,7 @@ const statePath = join(root, "remote-state.json");
 
 try {
   const service = new RemoteControlService({
+    allowListenerInTests: true,
     statePath,
     getStatusSnapshot: () => ({
       ok: true,

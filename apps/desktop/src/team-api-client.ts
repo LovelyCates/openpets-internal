@@ -3,6 +3,7 @@ import {
   type TeamPack,
 } from "./team-protocol.js";
 import type { ManagerCheckInRecurrence } from "./manager-check-in-schedule.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 export const defaultTeamsApiBaseUrl = "https://openpets-teams-api.tokozedg793.workers.dev";
 const maxResponseBytes = 512 * 1024;
@@ -94,6 +95,8 @@ export class TeamApiError extends Error {
 export type TeamApiClientOptions = {
   readonly baseUrl?: string;
   readonly fetchImpl?: typeof fetch;
+  /** Explicit unit-test opt-in; production callers omit this. */
+  readonly allowNetworkInTests?: boolean;
   readonly timeoutMs?: number;
   readonly production?: boolean;
 };
@@ -120,6 +123,7 @@ export type TeamEnrollmentPreview = {
 export class TeamApiClient {
   readonly baseUrl: URL;
   readonly #fetch: typeof fetch;
+  readonly #allowNetworkInTests: boolean;
   readonly #timeoutMs: number;
   constructor(options: TeamApiClientOptions = {}) {
     const raw = options.baseUrl ?? process.env.OPENPETS_TEAMS_API_URL ?? defaultTeamsApiBaseUrl;
@@ -142,6 +146,7 @@ export class TeamApiClient {
     ) throw new Error("Teams API must use HTTPS in production.");
     this.baseUrl = new URL(url.origin);
     this.#fetch = options.fetchImpl ?? fetch;
+    this.#allowNetworkInTests = options.allowNetworkInTests === true;
     this.#timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? 15_000, 60_000));
   }
 
@@ -360,6 +365,9 @@ export class TeamApiClient {
     readonly body: unknown;
     readonly raw?: Uint8Array;
   }> {
+    if (!publicNetworkEnabled && !this.#allowNetworkInTests) {
+      throw new Error(publicNetworkDisabledMessage);
+    }
     const url = new URL(path, this.baseUrl);
     if (url.origin !== this.baseUrl.origin) {
       throw new Error("Teams API request escaped the configured origin.");

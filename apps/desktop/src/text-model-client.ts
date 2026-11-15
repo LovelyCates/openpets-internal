@@ -15,6 +15,8 @@ export const TEXT_MODEL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 export type TextModelClientOptions = {
   readonly fetchImpl?: typeof fetch;
+  /** Explicit unit-test opt-in; production callers omit this. */
+  readonly allowNetworkInTests?: boolean;
   readonly timeoutMs?: number;
   readonly maxRequestBytes?: number;
   readonly maxResponseBytes?: number;
@@ -30,7 +32,7 @@ export class TextModelClient implements PetAssistantTextModel {
   constructor(secretsOrProvider: PluginSecretsStore | HostProviderOperations, options: TextModelClientOptions = {}) {
     this.#provider = "snapshot" in secretsOrProvider
       ? secretsOrProvider
-      : new HostProviderService(secretsOrProvider, { ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}), timeoutMs: options.timeoutMs });
+      : new HostProviderService(secretsOrProvider, { ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}), timeoutMs: options.timeoutMs, allowNetworkInTests: options.allowNetworkInTests });
     this.#timeoutMs = positiveInteger(options.timeoutMs ?? TEXT_MODEL_DEFAULT_TIMEOUT_MS, "text model timeout");
     this.#maxRequestBytes = positiveInteger(options.maxRequestBytes ?? TEXT_MODEL_MAX_REQUEST_BYTES, "text model request limit");
     this.#maxResponseBytes = positiveInteger(options.maxResponseBytes ?? TEXT_MODEL_MAX_RESPONSE_BYTES, "text model response limit");

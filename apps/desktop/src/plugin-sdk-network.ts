@@ -5,6 +5,7 @@ import type { ConnectionOptions } from "node:tls";
 import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit, type Response as UndiciResponse } from "undici";
 
 import { classifyPluginError, logPluginDiagnostic } from "./plugin-diagnostics.js";
+import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
 export type SimpleHttpResponse = { status: number; ok: boolean; headers: Record<string, string>; text: string; json?: unknown };
 export type ValidatedNetOptions = { method: string; headers?: Record<string, string>; body?: string; timeoutMs?: number };
@@ -193,6 +194,9 @@ function composeRequestCancellation(lifecycleSignal?: AbortSignal): RequestCance
 }
 
 async function prepareSafeRequest(urlText: string, opts: ValidatedNetOptions, allowedHosts: ReadonlySet<string>, allowLocal: boolean, controller: AbortController): Promise<{ url: URL; init: UndiciRequestInit; addresses: ResolvedAddress[] }> {
+  if (!publicNetworkEnabled && networkTestHookLayers.length === 0) {
+    throw new Error(publicNetworkDisabledMessage);
+  }
   const url = new URL(urlText);
   if (url.username || url.password) throw new Error("Plugin HTTP fetch credentials are not allowed.");
   const host = normalizeHostname(url.hostname);

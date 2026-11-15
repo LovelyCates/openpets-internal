@@ -28,7 +28,7 @@ try {
         // Reopening persisted profiles must not replace explicit model selections.
         initializePluginPlatformSettings(directory);
         assert.equal(getPluginPlatformSettings().profiles[id]?.model, model);
-        const provider = new HostProviderService(secrets, { fetchImpl: async (input, init) => {
+        const provider = new HostProviderService(secrets, { allowNetworkInTests: true, fetchImpl: async (input, init) => {
           captures += 1;
           assert.equal(String(input), `${baseUrl}${anthropic ? "/v1/messages" : "/chat/completions"}`);
           const headers = new Headers(init?.headers);

@@ -9,7 +9,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createHelpText, parseMcpArgs } from "./args.js";
 import { wireTransportLifecycle, type OpenPetsLeaseResult } from "./index.js";
 import { createOpenPetsMcpServer } from "./server.js";
-import { createMcpStatus, handleReact, handleSay, sanitizeUnavailableReason, type LeaseContext, type OpenPetsMcpStatus } from "./tools.js";
+import { createMcpStatus, createToolContext, handleReact, handleSay, sanitizeUnavailableReason, type LeaseContext, type OpenPetsMcpStatus } from "./tools.js";
 
 parseMcpArgs(["--pet", "snoopy"]);
 parseMcpArgs(["--pet=snoopy"]);
@@ -18,6 +18,21 @@ parseMcpArgs(["--help"]);
 assertRejects(() => parseMcpArgs(["--pet", "bad/pet"]));
 assertRejects(() => parseMcpArgs(["--agent", "claude"]));
 if (!createHelpText().includes("remote mode rejects --pet")) throw new Error("MCP help does not define remote --pet behavior.");
+
+const previousRemoteEndpoint = process.env.OPENPETS_REMOTE_ENDPOINT;
+const previousRemoteToken = process.env.OPENPETS_REMOTE_TOKEN;
+try {
+  process.env.OPENPETS_REMOTE_ENDPOINT = "tcp://127.0.0.1:37645";
+  process.env.OPENPETS_REMOTE_TOKEN = "x".repeat(43);
+  if (createToolContext().client.transport !== "local") {
+    throw new Error("Internal MCP must use local IPC even when remote environment variables are set.");
+  }
+} finally {
+  if (previousRemoteEndpoint === undefined) delete process.env.OPENPETS_REMOTE_ENDPOINT;
+  else process.env.OPENPETS_REMOTE_ENDPOINT = previousRemoteEndpoint;
+  if (previousRemoteToken === undefined) delete process.env.OPENPETS_REMOTE_TOKEN;
+  else process.env.OPENPETS_REMOTE_TOKEN = previousRemoteToken;
+}
 
 const unavailableStatus = createMcpStatus({ ok: false, appRunning: false, unavailableReason: "/Users/alvin/.config/OpenPets/runtime/ipc.json ENOENT" }, "snoopy");
 if (unavailableStatus.routingImplemented !== true || unavailableStatus.configuredPetId !== "snoopy") {

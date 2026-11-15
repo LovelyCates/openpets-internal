@@ -13,6 +13,11 @@ import {
 
 const limits = { responseBytes: 32, streamResponseBytes: 32 };
 
+await assert.rejects(
+  () => safeHttpFetch("https://1.1.1.1/", { method: "GET" }, new Set(["1.1.1.1"]), false, undefined, limits),
+  /Public network services are disabled in this internal build/,
+);
+
 function response(value: string, init?: ResponseInit): Awaited<ReturnType<typeof undiciFetch>> {
   return new Response(value, init) as unknown as Awaited<ReturnType<typeof undiciFetch>>;
 }

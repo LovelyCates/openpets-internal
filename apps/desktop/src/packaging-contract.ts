@@ -29,6 +29,16 @@ export function assertTargetSharpNative(appContents: string, target: PackagingTa
 }
 
 export function assertBundledOfficialPlugins(resourceDir: string, sourceDir: string): void {
+  const packagedPluginsRoot = join(resourceDir, "plugins", "official");
+  const packagedIds = readdirSync(packagedPluginsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    packagedIds,
+    [...bundledOfficialPluginIds].sort(),
+    "Internal package must include only the reviewed bundled plugins.",
+  );
   for (const id of bundledOfficialPluginIds) {
     const sourcePluginDir = join(sourceDir, id);
     const packagedPluginDir = join(resourceDir, "plugins", "official", id);

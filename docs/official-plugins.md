@@ -5,6 +5,8 @@ sidebar:
   label: Official plugins
 ---
 
+> **Internal edition:** Only the seven IDs in `apps/desktop/src/bundled-plugins.ts` are packaged and seeded. The network-dependent Anxiety Aid Tools plugin is excluded. The catalog and publication details below describe upstream capabilities that are disabled in this distribution.
+
 OpenPets plugins are reviewed companion features that run through the desktop
 plugin host. Users install and enable them from the Control Center. Maintainers
 ship them through the plugin catalog, and plugin authors can study them as SDK v3

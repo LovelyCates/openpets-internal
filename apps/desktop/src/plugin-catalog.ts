@@ -1,5 +1,6 @@
 import { validatePluginCatalog, type PluginCatalog, type PluginCatalogEntry, type PluginCatalogEntryV2 } from "./plugin-catalog-validation.js";
 import { marketplaceOrigin } from "./plugin-marketplace.js";
+import { publicNetworkEnabled } from "./internal-network-policy.js";
 
 export const pluginCatalogUrl = "https://studio-api.openpets.dev/api/marketplace/catalog.v2.json";
 export const pluginCatalogV2Url = pluginCatalogUrl;
@@ -10,6 +11,9 @@ const cached = new Map<string, PluginCatalog>();
 export type PluginCatalogOptions = { readonly refresh?: boolean; readonly fetchImpl?: typeof fetch; readonly url?: string };
 
 export async function getPluginCatalog(options: PluginCatalogOptions = {}): Promise<PluginCatalog> {
+  if (!publicNetworkEnabled && !options.fetchImpl) {
+    return { version: 2, generatedAt: "internal-offline", plugins: [] };
+  }
   const url = options.url ?? `${marketplaceOrigin()}/api/marketplace/catalog.v2.json`;
   const cacheKey = url;
   const cachedCatalog = cached.get(cacheKey);

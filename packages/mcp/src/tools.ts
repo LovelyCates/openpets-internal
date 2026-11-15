@@ -46,7 +46,7 @@ export interface ToolContext {
 }
 
 export function createToolContext(configuredPetId?: string): ToolContext & { readonly client: OpenPetsClient } {
-  const client = createOpenPetsClient();
+  const client = createOpenPetsClient({ remote: false });
   return {
     configuredPetId: client.transport === "remote" ? undefined : configuredPetId,
     client,
@@ -55,7 +55,7 @@ export function createToolContext(configuredPetId?: string): ToolContext & { rea
 
 export async function handleStatus(context: ToolContext): Promise<CallToolResult> {
   await context.leaseReady;
-  const client = context.client ?? createOpenPetsClient();
+  const client = context.client ?? createOpenPetsClient({ remote: false });
   const leaseId = context.lease?.lease?.leaseId ?? context.lease?.staleLeaseId;
   const status = await client.status({ leaseId });
   const structured = createMcpStatus(status, context.configuredPetId, context.lease?.lease, context.lease?.degradedReason, context.lease?.staleLeaseId);
@@ -135,7 +135,7 @@ async function ensureLease(context: ToolContext): Promise<boolean> {
   if (!lease || lease.closing) return false;
   if (lease.lease) return true;
   try {
-    await recoverLease(context.client ?? createOpenPetsClient(), lease, context.configuredPetId);
+    await recoverLease(context.client ?? createOpenPetsClient({ remote: false }), lease, context.configuredPetId);
   } catch {
     return false;
   }
@@ -150,7 +150,7 @@ export async function handleReact(input: unknown, context: ToolContext): Promise
   if (!(await ensureLease(context))) return toolError(`OpenPets lease is unavailable. ${sanitizeUnavailableReason(context.lease?.degradedReason) ?? "Open OpenPets and try again."}`);
 
   try {
-    const client = context.client ?? createOpenPetsClient();
+    const client = context.client ?? createOpenPetsClient({ remote: false });
     const result = await client.react(parsed.data.reaction, client.transport === "remote" ? undefined : { leaseId: context.lease!.lease!.leaseId });
     return {
       content: [{ type: "text", text: `OpenPets reaction sent: ${parsed.data.reaction}` }],
@@ -171,7 +171,7 @@ export async function handleSay(input: unknown, context: ToolContext): Promise<C
   if (!(await ensureLease(context))) return toolError(`OpenPets lease is unavailable. ${sanitizeUnavailableReason(context.lease?.degradedReason) ?? "Open OpenPets and try again."}`);
 
   try {
-    const client = context.client ?? createOpenPetsClient();
+    const client = context.client ?? createOpenPetsClient({ remote: false });
     const result = await client.say(parsed.data.message, client.transport === "remote"
       ? (parsed.data.reaction === undefined ? undefined : { reaction: parsed.data.reaction })
       : { reaction: parsed.data.reaction, leaseId: context.lease!.lease!.leaseId });

@@ -26,7 +26,7 @@ export type ProviderOperationSnapshot = {
   readonly secret?: string;
 };
 export type ProviderFetch = typeof fetch;
-export type ProviderServiceOptions = { readonly fetchImpl?: ProviderFetch; readonly timeoutMs?: number };
+export type ProviderServiceOptions = { readonly fetchImpl?: ProviderFetch; readonly timeoutMs?: number; /** Explicit unit-test opt-in; production callers omit this. */ readonly allowNetworkInTests?: boolean };
 
 /**
  * Builds a validated operation from an already-resolved profile. This lets the
@@ -83,7 +83,7 @@ export class HostProviderService implements HostProviderOperations {
   constructor(secrets: PluginSecretsStore, options: ProviderServiceOptions = {}) {
     this.#secrets = secrets;
     const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
-    this.#transport = new ProviderTransport(fetchImpl, options.timeoutMs);
+    this.#transport = new ProviderTransport(fetchImpl, options.timeoutMs, options.allowNetworkInTests === true);
   }
 
   async snapshot(role: ProviderRole | "realtime"): Promise<ProviderOperationSnapshot> {

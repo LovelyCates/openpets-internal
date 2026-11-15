@@ -47,7 +47,7 @@ export function isReactionExcluded(reaction: OpenPetsReaction, excludedSet: Read
 
 export function createOpenPetsOpenCodeRuntime(options: OpenCodePluginRuntimeOptions = {}): OpenCodePluginRuntime {
   const pet = options.pet === undefined ? undefined : validateOpenPetsPetArg(options.pet);
-  const clientFactory = options.clientFactory ?? (() => createOpenPetsClient({ connectTimeoutMs: 500, responseTimeoutMs: 500 }));
+  const clientFactory = options.clientFactory ?? (() => createOpenPetsClient({ remote: false, connectTimeoutMs: 500, responseTimeoutMs: 500 }));
   const schedule = options.schedule ?? defaultSchedule;
   const debug = options.debug === true || process.env.OPENPETS_DEBUG === "1";
   const debugLog = options.debugLog ?? ((message) => { if (debug) process.stderr.write(`${message}\n`); });

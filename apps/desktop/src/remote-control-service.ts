@@ -28,6 +28,7 @@ import {
   type RemoteStatusSnapshot,
 } from "./remote-control-protocol.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
+import { remoteNetworkEnabled } from "./internal-network-policy.js";
 import {
   disabledRemoteControlConfig,
   loadRemoteControlState,
@@ -45,6 +46,8 @@ export interface RemoteControlHandlers {
 
 export interface RemoteControlServiceOptions extends RemoteControlHandlers {
   readonly statePath: string;
+  /** In-process protocol tests only; packaged main never supplies this. */
+  readonly allowListenerInTests?: boolean;
   readonly log?: (message: string) => void;
   readonly isDefaultPetAway?: () => boolean;
   readonly socketTimeoutMs?: number;
@@ -112,6 +115,7 @@ export class RemoteControlService {
   }
 
   private async startInternal(): Promise<void> {
+    if (!remoteNetworkEnabled && !this.options.allowListenerInTests) return;
     if (this.server || !this.state.config.enabled) return;
     try {
       await this.startListener(this.state.config);
@@ -189,6 +193,9 @@ export class RemoteControlService {
   }
 
   private async configureInternal(input: { readonly enabled: boolean; readonly address?: string; readonly port?: number }): Promise<RemoteControlConfigSnapshot> {
+    if (!remoteNetworkEnabled && !this.options.allowListenerInTests && input.enabled) {
+      throw new Error("Remote control is disabled in this internal build.");
+    }
     const nextConfig = validateRemoteControlConfig(input);
     const previousConfig = this.state.config;
     if (sameConfig(previousConfig, nextConfig)) {

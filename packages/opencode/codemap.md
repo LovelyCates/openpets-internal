@@ -2,6 +2,11 @@
 
 OpenCode editor integration for OpenPets.
 
+`src/plugin.ts` remains the OpenCode 2.x entrypoint. The public OpenCode 1.x API
+uses a separate single-export entrypoint in `src/plugin-v1.ts`; `build:v1` and
+`build:v2` generate self-contained local bundles in `v1-package/` and
+`v2-package/`. See `V1_COMPAT.md` for version selection and internal deployment.
+
 ## Responsibility
 
 Provides comprehensive OpenCode editor integration including: MCP server configuration, plugin runtime with event hooks, project/global setup management/removal, and instruction file generation.

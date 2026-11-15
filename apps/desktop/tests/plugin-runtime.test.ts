@@ -78,6 +78,14 @@ await scenario("disabled no timers", async ({ store, scheduler }) => {
   assert.equal(scheduler.activeCount(), 0);
 });
 
+await scenario("internal build skips unreviewed plugins by default", async ({ store, scheduler }) => {
+  addPlugin(store);
+  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot] });
+  await rt.start();
+  assert.equal(rt.isPluginActive("plug", "1.0.0"), false);
+  assert.equal(scheduler.activeCount(), 0);
+});
+
 await scenario("javascript sdk command status storage schedule and permissions", async ({ store, scheduler, petApi }) => {
   const jsHost = new FakeJsHost();
   addPlugin(store, { manifestVersion: 2, runtime: "javascript", approvedPermissions: ["commands", "status", "storage", "schedule", "pet:speak"] }, jsManifest({ permissions: ["commands", "status", "storage", "schedule", "pet:speak"] }));
@@ -132,7 +140,7 @@ await scenario("javascript http fetch denies unapproved host and non-get", async
   const jsHost = new FakeJsHost();
   addPlugin(store, { manifestVersion: 2, runtime: "javascript", approvedPermissions: ["network"], approvedNetworkHosts: ["api.github.com"] }, jsManifest({ permissions: ["network"], network: { hosts: ["api.github.com"] } }));
   await runtime(store, new FakeScheduler(), new FakePetApi(), undefined, jsHost).start();
-  await assert.rejects(() => jsHost.starts[0].sdk!.http.fetch("https://example.com/"), /host is not approved/);
+  await assert.rejects(() => jsHost.starts[0].sdk!.http.fetch("https://example.com/"), /Public network services are disabled/);
   await assert.rejects(() => jsHost.starts[0].sdk!.http.fetch("https://api.github.com/", { method: "POST" }), /only supports GET/);
 });
 
@@ -246,7 +254,7 @@ await scenario("javascript net.fetch requires exact approved host:port", async (
     network: { hosts: ["127.0.0.1:9876"] },
   }));
   await runtime(store, new FakeScheduler(), new FakePetApi(), undefined, jsHost).start();
-  await assert.rejects(() => jsHost.starts[0].sdk!.net.fetch("http://127.0.0.1:9876/"), /host is not approved/);
+  await assert.rejects(() => jsHost.starts[0].sdk!.net.fetch("http://127.0.0.1:9876/"), /Public network services are disabled/);
 });
 
 await scenario("javascript http fetch rejects oversized response", async ({ store }) => {
@@ -404,7 +412,7 @@ await scenario("stop drains in-flight javascript startup", async ({ store }) => 
       return { stop: () => { hostStopped = true; } };
     },
   };
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [currentRoot], jsHost, capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [currentRoot], jsHost, capabilities });
   const start = rt.start();
   await startup;
   let stopSettled = false;
@@ -453,7 +461,7 @@ await scenario("stale startup cleanup keeps assistant generations aligned", asyn
     },
   };
   addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0", approvedPermissions: ["pets:manage"] }, jsManifest({ manifestVersion: 3, sdkVersion: "3.0.0", permissions: ["pets:manage"] }));
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [currentRoot], jsHost, capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [currentRoot], jsHost, capabilities });
   const firstStart = rt.start();
   await startup;
   await spawnStartedPromise;
@@ -598,7 +606,7 @@ await scenario("reload waits for host teardown", async ({ store, scheduler }) =>
   const teardownStarted = new Promise<void>((resolve) => { teardownStartedResolve = resolve; });
   const capabilities = createDefaultPluginHostCapabilities(new FakePetApi());
   (capabilities as { clearPlugin?: () => Promise<void> }).clearPlugin = () => blockTeardown ? new Promise<void>((resolve) => { teardownStartedResolve(); releaseTeardown = resolve; }) : Promise.resolve();
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], capabilities });
   await rt.start();
   blockTeardown = true;
 
@@ -639,7 +647,7 @@ await scenario("stale broken teardown preserves a reloaded host resource", async
     },
   };
   addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0", approvedPermissions: [] }, jsManifest({ manifestVersion: 3, sdkVersion: "3.0.0", permissions: [] }));
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], jsHost, capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], jsHost, capabilities });
   await rt.start();
   await brokenTeardownStartedPromise;
   const reload = rt.reloadPlugin("plug");
@@ -676,7 +684,7 @@ await scenario("stop awaits bridge network cleanup before capability teardown", 
   const capabilities = createDefaultPluginHostCapabilities(new FakePetApi());
   capabilities.clearPlugin = async () => { assert.equal(agentDestroyed, true); };
   const jsHost = new FakeJsHost();
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], jsHost, capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], jsHost, capabilities });
   try {
     await rt.start();
     const pending = jsHost.starts[0]!.sdk!.net.fetch(`https://${host}/`);
@@ -697,7 +705,7 @@ await scenario("concurrent reloads are serialized", async ({ store, scheduler })
   const teardownStarted = new Promise<void>((resolve) => { teardownStartedResolve = resolve; });
   const capabilities = createDefaultPluginHostCapabilities(new FakePetApi());
   (capabilities as { clearPlugin?: () => Promise<void> }).clearPlugin = () => blockTeardown ? new Promise<void>((resolve) => { teardownStartedResolve(); releaseTeardown = resolve; }) : Promise.resolve();
-  const rt = new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], capabilities });
+  const rt = new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler, allowedPluginRoots: [currentRoot], capabilities });
   await rt.start();
   blockTeardown = true;
 
@@ -721,7 +729,7 @@ await scenario("path outside install/root and oversized rejected", async ({ root
   const path = join(install, OPENPETS_PLUGIN_MANIFEST_FILENAME);
   writeFileSync(path, JSON.stringify(manifest()) + " ".repeat(200), "utf8");
   store.upsertRecord(record({ id: "oversized", installPath: install, manifestPath: path }));
-  await new PluginRuntime({ stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [root], maxManifestBytes: 100 }).start();
+  await new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi: new FakePetApi(), scheduler: new FakeScheduler(), allowedPluginRoots: [root], maxManifestBytes: 100 }).start();
   assert.match(store.getRecord("oversized")?.brokenReason ?? "", /too large/);
 });
 
@@ -847,7 +855,7 @@ async function scenario(name: string, fn: (ctx: { root: string; store: PluginSta
 }
 
 function runtime(store: PluginStateStore, scheduler: FakeScheduler, petApi = new FakePetApi(), roots?: string[], jsHost?: PluginJsHost): PluginRuntime {
-  return new PluginRuntime({ stateStore: store, petApi, scheduler, allowedPluginRoots: roots ?? [currentRoot], jsHost });
+  return new PluginRuntime({ allowUnreviewedPluginsInTests: true, stateStore: store, petApi, scheduler, allowedPluginRoots: roots ?? [currentRoot], jsHost });
 }
 
 function addPlugin(store: PluginStateStore, patch: Partial<PluginStateRecord> = {}, data: unknown = manifest()): PluginStateRecord {
