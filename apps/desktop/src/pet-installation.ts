@@ -217,7 +217,7 @@ export async function installPetFromFolderWithResult(folderPath: string): Promis
   if (await realpath(sourceDir) !== sourceDir) throw new Error("Pet folder path is not canonical.");
   const parsed = JSON.parse((await readBoundedRegularFile(join(sourceDir, "pet.json"), maxCodexPetJsonBytes, "pet.json")).toString("utf8")) as unknown;
   const parsedId = isRecord(parsed) && typeof parsed.id === "string" ? parsed.id : basename(sourceDir);
-  const petPackage = validatePetPackageMetadata(parsed, parsedId);
+  const petPackage = validatePetPackageMetadata(normalizeLegacyClassicSpriteVersionOne(parsed), parsedId);
   const { metadata } = petPackage;
   assertSafePetId(metadata.id);
   const petsRoot = getPetsRoot();
@@ -364,12 +364,22 @@ async function validateExtractedPet(tempDir: string): Promise<PetPackage> {
 
   const parsed = JSON.parse((await readBoundedRegularFile(petJsonPath, maxCodexPetJsonBytes, "pet.json")).toString("utf8")) as unknown;
   const parsedId = isRecord(parsed) && typeof parsed.id === "string" ? parsed.id : basename(tempDir);
-  const petPackage = validatePetPackageMetadata(parsed, parsedId);
+  const normalized = normalizeLegacyClassicSpriteVersionOne(parsed);
+  const petPackage = validatePetPackageMetadata(normalized, parsedId);
   assertSafePetId(petPackage.metadata.id);
   await validateDesktopPetPackageAssets(tempDir, petPackage, { exactPackage: true });
+  // Installed manifests are read again by the pet window and Control Center.
+  if (normalized !== parsed) {
+    await writeFile(petJsonPath, `${JSON.stringify(normalized, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  }
   return petPackage;
 }
 
+function normalizeLegacyClassicSpriteVersionOne(value: unknown): unknown {
+  if (!isRecord(value) || value.format === "motion" || value.spriteVersionNumber !== 1) return value;
+  const { spriteVersionNumber: _legacyVersion, ...normalized } = value;
+  return normalized;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

@@ -582,7 +582,9 @@ Codex V2 pets. Its public `builtin` identity and `Hoodie Cat` display name stay
 unchanged; only the desktop asset and runtime layout have been upgraded.
 
 OpenPets preserves the original Codex V1 package shape: an unmarked
-atlas with the nine standard `192×208` animation rows. It also imports V2 only
+atlas with the nine standard `192×208` animation rows. An explicit numeric
+`"spriteVersionNumber": 1` is also accepted as V1 and normalized to an
+omitted marker internally. OpenPets imports V2 only
 when `pet.json` has `"spriteVersionNumber": 2` and its source asset is either
 a fully decodable, single-image, alpha-enabled WebP or a validated static SVG,
 with the exact `1536×2288` (`8×11`) grid. SVG V1 uses the exact `1536×1872`
