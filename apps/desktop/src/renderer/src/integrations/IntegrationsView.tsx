@@ -243,8 +243,6 @@ export function IntegrationsView({ api: injectedApi }: IntegrationsViewProps) {
     },
   ] as const;
 
-  const soon = [{ name: t("integrations.soon.vscode"), icon: "vscode" }];
-
   const selectedIntegrationName =
     selectedId === "pi"
       ? t("integrations.pi.name")
@@ -256,7 +254,7 @@ export function IntegrationsView({ api: injectedApi }: IntegrationsViewProps) {
       {message && <div className="settings-success settings-message">{message}</div>}
 
       <div className="integration-grid">
-        {integrations.map((item) => (
+        {integrations.filter((item): boolean => item.id === "opencode").map((item) => (
           <article
             key={item.id}
             className={`integration-card ${selectedId === item.id ? "border-brand ring-4 ring-brand/15" : ""}`}
@@ -363,27 +361,6 @@ export function IntegrationsView({ api: injectedApi }: IntegrationsViewProps) {
                   </Button>
                 )}
               </div>
-            </div>
-          </article>
-        ))}
-        {soon.map((item) => (
-          <article key={item.name} className="integration-card opacity-60">
-            <div className="plugin-card-body">
-              <div className="integration-icon grayscale">
-                <IntegrationIcon id={item.icon} />
-              </div>
-              <div className="plugin-card-content">
-                <div className="flex items-center justify-between">
-                  <strong>{item.name}</strong>
-                  <StatusPill tone="slate">{t("integrations.soon.status")}</StatusPill>
-                </div>
-                <small>{t("integrations.soon.description")}</small>
-              </div>
-            </div>
-            <div className="plugin-card-footer">
-              <Button variant="secondary" size="compact" fullWidth disabled>
-                {t("integrations.soon.button")}
-              </Button>
             </div>
           </article>
         ))}

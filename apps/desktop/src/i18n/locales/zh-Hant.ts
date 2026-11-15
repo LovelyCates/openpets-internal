@@ -208,7 +208,7 @@ export const zhHant: Partial<Messages> = {
   "route.plugins.title": "市集",
   "route.plugins.description": "用自訂工具與行為擴充你的桌面體驗。",
   "route.integrations.title": "整合",
-  "route.integrations.description": "將你的夥伴連接到 Claude Code、VS Code、Cursor 等工具。",
+  "route.integrations.description": "將你的夥伴連接到 OpenCode。",
   "route.teams.title": "團隊",
   "teams.empty.marketing.kicker": "組織與寵物團隊",
   "teams.empty.marketing.title": "你的團隊。你的寵物。你的伺服器。",

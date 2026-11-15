@@ -23,6 +23,7 @@ OpenCode 1.x 与 2.x 使用不同插件入口，详见 `packages/opencode/V1_COM
 
 - [Windows 构建与发布流程](BUILD-WINDOWS.md)
 - [内网插件目录与维护](PLUGIN-MAINTENANCE.md)
+- [4.1.0-internal.5 本机构建记录](RELEASE-4.1.0-internal.5.md)
 - [4.1.0-internal.4 本机构建记录](RELEASE-4.1.0-internal.4.md)
 - `Test-WindowsBuild.ps1`：只读预检，检查源码基线、工具版本、内部镜像、缓存及原生二进制。默认失败关闭，不会安装依赖、构建、发起 HTTP 下载或修改全局配置。
 - `Prepare-WindowsCodeSignCache.ps1`：用固定哈希的本地归档预置 Windows 资源编辑和签名工具缓存，避免旧工具包中的 macOS 符号链接阻断无管理员权限的构建账号；不下载或覆盖未知缓存。

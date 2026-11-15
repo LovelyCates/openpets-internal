@@ -202,7 +202,7 @@ export const ptBR: Partial<Messages> = {
   "route.plugins.title": "Mercado",
   "route.plugins.description": "Amplie a sua experiência no desktop com ferramentas e comportamentos personalizados.",
   "route.integrations.title": "Integrações",
-  "route.integrations.description": "Conecte seus companheiros ao Claude Code, VS Code, Cursor e muito mais.",
+  "route.integrations.description": "Conecte seus companheiros ao OpenCode.",
   "route.teams.title": "Equipes",
   "teams.empty.marketing.kicker": "Organizações e frotas",
   "teams.empty.marketing.title": "Sua equipe. Seus pets. Seu servidor.",

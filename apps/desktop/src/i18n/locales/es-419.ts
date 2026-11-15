@@ -202,7 +202,7 @@ export const es419: Partial<Messages> = {
   "route.plugins.title": "Mercado",
   "route.plugins.description": "Amplía tu experiencia de escritorio con herramientas y comportamientos personalizados.",
   "route.integrations.title": "Integraciones",
-  "route.integrations.description": "Conecta tus compañeros con Claude Code, VS Code, Cursor y más.",
+  "route.integrations.description": "Conecta tus compañeros con OpenCode.",
   "route.teams.title": "Equipos",
   "teams.empty.marketing.kicker": "Organizaciones y flotas",
   "teams.empty.marketing.title": "Tu equipo. Tus mascotas. Tu servidor.",

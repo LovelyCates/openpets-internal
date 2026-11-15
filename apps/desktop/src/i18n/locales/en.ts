@@ -220,7 +220,7 @@ export const en = {
   "route.plugins.title": "Marketplace",
   "route.plugins.description": "Browse and manage community extensions, themes, and installed companions.",
   "route.integrations.title": "Integrations",
-  "route.integrations.description": "Connect your companions to Claude Code, VS Code, Cursor, and more.",
+  "route.integrations.description": "Connect your companions to OpenCode.",
   "route.teams.title": "Teams",
   "route.teams.description": "Manage your organization membership, team pets, and deployed companion plugins.",
   "teams.empty.marketing.kicker": "Organizations & Fleets",

@@ -5,6 +5,7 @@
 export const publicNetworkEnabled = false;
 export const remoteNetworkEnabled = false;
 export const thirdPartyPluginsEnabled = false;
+export const nonOpenCodeIntegrationsEnabled = false;
 
 export const publicNetworkDisabledMessage =
   "Public network services are disabled in this internal build.";

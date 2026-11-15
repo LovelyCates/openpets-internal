@@ -208,7 +208,7 @@ export const zhHans: Partial<Messages> = {
   "route.plugins.title": "市场",
   "route.plugins.description": "用自定义工具和行为扩展你的桌面体验。",
   "route.integrations.title": "集成",
-  "route.integrations.description": "将你的伙伴连接到 Claude Code、VS Code、Cursor 等。",
+  "route.integrations.description": "将你的伙伴连接到 OpenCode。",
   "route.teams.title": "团队",
   "teams.empty.marketing.kicker": "组织与宠物团队",
   "teams.empty.marketing.title": "你的团队。你的宠物。你的服务器。",

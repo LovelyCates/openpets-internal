@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 
-import { resolveDevControlCenterRoute } from "../src/control-center-route.js";
+import { normalizeControlCenterRoute, normalizeControlCenterRouteTarget, resolveDevControlCenterRoute } from "../src/control-center-route.js";
 
 assert.deepEqual(resolveDevControlCenterRoute(undefined, false), null);
 assert.deepEqual(resolveDevControlCenterRoute("teams", false), {
-  kind: "route",
-  route: "teams",
+  kind: "invalid",
+  rawValue: "teams",
 });
+assert.equal(normalizeControlCenterRoute("teams"), "dashboard");
+assert.deepEqual(normalizeControlCenterRouteTarget({ route: "teams" }), { route: "dashboard" });
 assert.deepEqual(resolveDevControlCenterRoute("providers", false), {
   kind: "target",
   target: { route: "assistant", assistantTab: "providers" },

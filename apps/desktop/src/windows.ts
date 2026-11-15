@@ -60,6 +60,7 @@ import { configureChatShortcut, getChatShortcutSnapshot, resolveChatShortcutPref
 import { configurePetToggleShortcut, getPetToggleShortcutSnapshot, resolvePetToggleShortcutPreference } from "./pet-toggle-shortcut.js";
 import { getTeamService } from "./team-service.js";
 import { getManagerCheckInService } from "./manager-check-in-service.js";
+import { publicNetworkEnabled } from "./internal-network-policy.js";
 import { normalizeControlCenterRoute, normalizeControlCenterRouteTarget, type ControlCenterRoute, type ControlCenterRouteTarget } from "./control-center-route.js";
 import { getSharedVoiceDeviceService } from "./voice-device-service.js";
 import { normalizeVoiceDeviceId } from "./voice-device-resolver.js";
@@ -368,80 +369,83 @@ export function installInternalUiHandlers(): void {
     return getDashboardSnapshot();
   });
 
-  ipcMain.handle("openpets:teams-snapshot", (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    return getTeamService().getSnapshot();
-  });
-  ipcMain.handle("openpets:teams-enroll", async (event, displayName: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    if (
-      typeof displayName !== "string"
-      || displayName.length > 120
-      || displayName.trim().length === 0
-    ) {
-      throw new Error("Invalid Teams display name.");
-    }
-    const result = await getTeamService().submitEnrollment(displayName.trim());
-    await getManagerCheckInService().syncNow().catch(() => undefined);
-    return result;
-  });
-  ipcMain.handle("openpets:teams-sync", async (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    return getTeamService().syncNow();
-  });
-  ipcMain.handle("openpets:teams-approve-plugin-permissions", async (event, id: unknown, approvalToken: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    if (
-      typeof id !== "string"
-      || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)
-      || typeof approvalToken !== "string"
-      || !/^[A-Za-z0-9_-]{43}$/.test(approvalToken)
-    ) throw new Error("Invalid Team plugin approval request.");
-    return getTeamService().approveTeamPluginPermissions(id, approvalToken);
-  });
-  ipcMain.handle("openpets:teams-set-plugin-enabled", async (event, id: unknown, enabled: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    if (
-      typeof id !== "string"
-      || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)
-      || typeof enabled !== "boolean"
-    ) {
-      throw new Error("Invalid Team plugin enabled state request.");
-    }
-    return getTeamService().setTeamPluginEnabled(id, enabled);
-  });
-  ipcMain.handle("openpets:teams-leave", async (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    await getManagerCheckInService().stop();
-    try {
-      return await getTeamService().leave();
-    } finally {
-      await getManagerCheckInService().start();
-    }
-  });
+  // Teams and manager check-in IPC are unavailable in the internal build.
+  if (publicNetworkEnabled) {
+    ipcMain.handle("openpets:teams-snapshot", (event) => {
+      assertAllowedSender(event, ["control-center"]);
+      return getTeamService().getSnapshot();
+    });
+    ipcMain.handle("openpets:teams-enroll", async (event, displayName: unknown) => {
+      assertAllowedSender(event, ["control-center"]);
+      if (
+        typeof displayName !== "string"
+        || displayName.length > 120
+        || displayName.trim().length === 0
+      ) {
+        throw new Error("Invalid Teams display name.");
+      }
+      const result = await getTeamService().submitEnrollment(displayName.trim());
+      await getManagerCheckInService().syncNow().catch(() => undefined);
+      return result;
+    });
+    ipcMain.handle("openpets:teams-sync", async (event) => {
+      assertAllowedSender(event, ["control-center"]);
+      return getTeamService().syncNow();
+    });
+    ipcMain.handle("openpets:teams-approve-plugin-permissions", async (event, id: unknown, approvalToken: unknown) => {
+      assertAllowedSender(event, ["control-center"]);
+      if (
+        typeof id !== "string"
+        || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)
+        || typeof approvalToken !== "string"
+        || !/^[A-Za-z0-9_-]{43}$/.test(approvalToken)
+      ) throw new Error("Invalid Team plugin approval request.");
+      return getTeamService().approveTeamPluginPermissions(id, approvalToken);
+    });
+    ipcMain.handle("openpets:teams-set-plugin-enabled", async (event, id: unknown, enabled: unknown) => {
+      assertAllowedSender(event, ["control-center"]);
+      if (
+        typeof id !== "string"
+        || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)
+        || typeof enabled !== "boolean"
+      ) {
+        throw new Error("Invalid Team plugin enabled state request.");
+      }
+      return getTeamService().setTeamPluginEnabled(id, enabled);
+    });
+    ipcMain.handle("openpets:teams-leave", async (event) => {
+      assertAllowedSender(event, ["control-center"]);
+      await getManagerCheckInService().stop();
+      try {
+        return await getTeamService().leave();
+      } finally {
+        await getManagerCheckInService().start();
+      }
+    });
 
-  ipcMain.handle("openpets:manager-check-ins-snapshot", async (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    return getManagerCheckInService().getSnapshot();
-  });
-  ipcMain.handle("openpets:manager-check-ins-sync", async (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    return getManagerCheckInService().syncNow();
-  });
-  ipcMain.handle("openpets:manager-check-ins-history", async (event, cursor: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    if (!isValidManagerCheckInHistoryCursor(cursor)) {
-      throw new Error("Invalid manager check-in history cursor.");
-    }
-    return getManagerCheckInService().getHistory(cursor);
-  });
-  ipcMain.handle("openpets:manager-check-ins-set-device-paused", async (event, paused: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    if (typeof paused !== "boolean") {
-      throw new Error("Invalid manager check-in pause request.");
-    }
-    return getManagerCheckInService().setDevicePaused(paused);
-  });
+    ipcMain.handle("openpets:manager-check-ins-snapshot", async (event) => {
+      assertAllowedSender(event, ["control-center"]);
+      return getManagerCheckInService().getSnapshot();
+    });
+    ipcMain.handle("openpets:manager-check-ins-sync", async (event) => {
+      assertAllowedSender(event, ["control-center"]);
+      return getManagerCheckInService().syncNow();
+    });
+    ipcMain.handle("openpets:manager-check-ins-history", async (event, cursor: unknown) => {
+      assertAllowedSender(event, ["control-center"]);
+      if (!isValidManagerCheckInHistoryCursor(cursor)) {
+        throw new Error("Invalid manager check-in history cursor.");
+      }
+      return getManagerCheckInService().getHistory(cursor);
+    });
+    ipcMain.handle("openpets:manager-check-ins-set-device-paused", async (event, paused: unknown) => {
+      assertAllowedSender(event, ["control-center"]);
+      if (typeof paused !== "boolean") {
+        throw new Error("Invalid manager check-in pause request.");
+      }
+      return getManagerCheckInService().setDevicePaused(paused);
+    });
+  }
 
   ipcMain.handle("openpets:get-reaction-animation-settings", async (event) => {
     assertAllowedSender(event, ["control-center"]);

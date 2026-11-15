@@ -202,7 +202,7 @@ export const ja: Partial<Messages> = {
   "route.plugins.title": "マーケットプレイス",
   "route.plugins.description": "カスタムツールや動作でデスクトップ体験を拡張します。",
   "route.integrations.title": "連携",
-  "route.integrations.description": "相棒を Claude Code、VS Code、Cursor などに接続します。",
+  "route.integrations.description": "相棒を OpenCode に接続します。",
   "route.teams.title": "チーム",
   "teams.empty.marketing.kicker": "組織とフリート",
   "teams.empty.marketing.title": "あなたのチーム。あなたのペット。あなたのサーバー。",

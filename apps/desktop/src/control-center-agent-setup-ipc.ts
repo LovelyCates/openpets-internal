@@ -3,6 +3,7 @@ import type {
   AgentSetupCommandPaths,
   AgentSetupSnapshot,
 } from "./agent-setup.js";
+import { nonOpenCodeIntegrationsEnabled } from "./internal-network-policy.js";
 
 export type ControlCenterAgentSetupIpcChannel =
   | "openpets:agent-setup-snapshot"
@@ -78,7 +79,7 @@ export function installControlCenterAgentSetupIpcHandlers({
 
   registerHandle("openpets:agent-setup-action", async (event, action: unknown, selectedPetId: unknown, commandMode: unknown) => {
     authorizeSender(event);
-    if (!isSupportedAgentSetupAction(action)) {
+    if (!isSupportedAgentSetupAction(action) || (!nonOpenCodeIntegrationsEnabled && action !== "opencode-install" && action !== "opencode-remove")) {
       throw new Error("Invalid agent setup action.");
     }
 
@@ -87,6 +88,9 @@ export function installControlCenterAgentSetupIpcHandlers({
 
   registerHandle("openpets:agent-setup-command-paths", (event, patch: unknown) => {
     authorizeSender(event);
+    if (!nonOpenCodeIntegrationsEnabled && patch && typeof patch === "object" && Object.keys(patch).some((key) => key !== "opencode" && key !== "node")) {
+      throw new Error("Only OpenCode and Node.js command paths are available in this build.");
+    }
     return updateAgentSetupCommandPaths(patch);
   });
 }

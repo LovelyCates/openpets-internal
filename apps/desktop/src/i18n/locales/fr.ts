@@ -211,7 +211,7 @@ export const fr: Partial<Messages> = {
   "route.plugins.title": "Marketplace",
   "route.plugins.description": "Enrichissez votre bureau avec des outils et des comportements personnalisés.",
   "route.integrations.title": "Intégrations",
-  "route.integrations.description": "Connectez vos compagnons à Claude Code, VS Code, Cursor et plus encore.",
+  "route.integrations.description": "Connectez vos compagnons à OpenCode.",
   "route.teams.title": "Teams",
   "route.teams.description": "Gérez votre adhésion à l’organisation, les mascottes d’équipe et les plugins de compagnon déployés.",
   "teams.empty.marketing.kicker": "Organisations et flottes",

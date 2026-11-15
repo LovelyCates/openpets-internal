@@ -8,6 +8,8 @@
 
 当前随包的 11 个插件：Quick Reminders、Simple Timer、Focus Buddy、Launch Buddy、Daily Fortune Cookie、Virtual Pet、System Resources、Water Reminder、Mood Check-in、Morning & Evening Routine、Magic 8-Ball。前五个默认启用，其余默认停用，用户可以在「已安装」中自行启用。Calendar Airmail 依赖 Google API，Anxiety Aid Tools 依赖公网音频资源，未纳入内网安装包。
 
+要在宠物旁显示本机资源，在控制中心「市场 → 已安装」启用 **System Resources**，再右键宠物执行「显示资源 HUD」。该仪表显示 CPU、内存，以及主机可提供时的 GPU、磁盘；网络速率属于网络吞吐量，不是模型 token/s。这个插件只读取本机指标，不需伴随进程或联网。当前包没有 OpenCode token/s 宠物插件；宠物皮肤只提供动画与外观，OpenCode 集成只传递工作状态。若需要 token/s 贴在宠物旁，需另行实现并审核 OpenCode 用量事件到本地宠物 HUD 的桥接。
+
 ## 增加或升级插件
 
 1. 在受控源码仓库中新增或更新 `plugins/official/<插件 ID>/`。逐项审核源码、声明的权限、外部资源、许可证和素材来源；保留审查记录和文件哈希。内网版本不接受 `network` 权限、外部链接或运行时下载。

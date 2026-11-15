@@ -202,7 +202,7 @@ export const ko: Partial<Messages> = {
   "route.plugins.title": "마켓플레이스",
   "route.plugins.description": "맞춤 도구와 동작으로 데스크톱 경험을 확장하세요.",
   "route.integrations.title": "연동",
-  "route.integrations.description": "동반자를 Claude Code, VS Code, Cursor 등에 연결하세요.",
+  "route.integrations.description": "동반자를 OpenCode에 연결하세요.",
   "route.teams.title": "팀",
   "teams.empty.marketing.kicker": "조직 및 플릿",
   "teams.empty.marketing.title": "우리 팀. 우리 펫. 우리 서버.",

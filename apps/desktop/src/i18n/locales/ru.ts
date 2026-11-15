@@ -211,7 +211,7 @@ export const ru: Partial<Messages> = {
   "route.plugins.title": "Маркетплейс",
   "route.plugins.description": "Расширяйте рабочий стол собственными инструментами и поведением.",
   "route.integrations.title": "Интеграции",
-  "route.integrations.description": "Подключите компаньонов к Claude Code, VS Code, Cursor и другим.",
+  "route.integrations.description": "Подключите компаньонов к OpenCode.",
   "route.teams.title": "Команды",
   "route.teams.description": "Управляйте членством в организации, командными питомцами и развёрнутыми плагинами.",
   "teams.empty.marketing.kicker": "Организации и флоты",

@@ -4,8 +4,7 @@ export type ControlCenterRoute =
   | "assistant"
   | "settings"
   | "plugins"
-  | "integrations"
-  | "teams";
+  | "integrations";
 
 export type ControlCenterAssistantTab = "providers";
 
@@ -22,7 +21,6 @@ const controlCenterRoutes = new Set<ControlCenterRoute>([
   "settings",
   "plugins",
   "integrations",
-  "teams",
 ]);
 
 export function isControlCenterRoute(value: unknown): value is ControlCenterRoute {

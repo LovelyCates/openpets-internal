@@ -155,7 +155,6 @@ if (!gotSingleInstanceLock) {
         return;
       }
       teamService.handleDeepLink(value);
-      openControlCenterWindow("teams");
     },
     onPetInstallLink: (link) => {
       if (!publicNetworkEnabled) return;
@@ -338,65 +337,59 @@ if (!gotSingleInstanceLock) {
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"));
     let devPluginWatcher: ReturnType<typeof startDevPluginWatcher> | undefined;
     const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, !publicNetworkEnabled || process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, undefined, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
-    const teamsApiClient = new TeamApiClient({ production: app.isPackaged });
-    teamService = initializeTeamService({
-      userDataPath: app.getPath("userData"),
-      apiClient: teamsApiClient,
-      pluginService,
-      log: (level, message, fields) =>
-        level === "error"
-          ? logError("teams", message, fields)
-          : level === "warn"
-            ? warn("teams", message, fields)
-            : info("teams", message, fields),
-    });
-    teamService.subscribeToEnrollmentPreview(() => {
-      // Reuse the existing route event so an already-running Control Center
-      // refetches the authoritative preview instead of retaining its initial
-      // pending snapshot with null identity and expiry.
-      openControlCenterWindow("teams");
-    });
-    managerCheckInService = initializeManagerCheckInService({
-      teamStateStore: teamService.stateStore,
-      credentialStore: teamService.credentialStore,
-      apiClient: teamsApiClient,
-      stateOptions: { userDataPath: app.getPath("userData") },
-      offerWeeklyCheckIn: (offer, onPresented) => presentManagerCheckInOffer(
-        offer,
-        () => openDefaultPetManagerCheckIn(),
-        onPresented,
-      ),
-      log: (level, message, fields) => {
-        if (level === "error") {
-          logError("teams", message, fields);
-        } else if (level === "warn") {
-          warn("teams", message, fields);
-        } else {
-          info("teams", message, fields);
-        }
-      },
-    });
-    managerCheckInService.subscribe((snapshot) => {
-      broadcastDefaultPetManagerCheckInSnapshot(snapshot);
-      broadcastManagerCheckInsRefresh();
-    });
+    // Teams is excluded from this internal build. Do not initialize its
+    // services unless the public-network policy is explicitly changed.
     if (publicNetworkEnabled) {
+      const teamsApiClient = new TeamApiClient({ production: app.isPackaged });
+      teamService = initializeTeamService({
+        userDataPath: app.getPath("userData"),
+        apiClient: teamsApiClient,
+        pluginService,
+        log: (level, message, fields) =>
+          level === "error"
+            ? logError("teams", message, fields)
+            : level === "warn"
+              ? warn("teams", message, fields)
+              : info("teams", message, fields),
+      });
+      managerCheckInService = initializeManagerCheckInService({
+        teamStateStore: teamService.stateStore,
+        credentialStore: teamService.credentialStore,
+        apiClient: teamsApiClient,
+        stateOptions: { userDataPath: app.getPath("userData") },
+        offerWeeklyCheckIn: (offer, onPresented) => presentManagerCheckInOffer(
+          offer,
+          () => openDefaultPetManagerCheckIn(),
+          onPresented,
+        ),
+        log: (level, message, fields) => {
+          if (level === "error") {
+            logError("teams", message, fields);
+          } else if (level === "warn") {
+            warn("teams", message, fields);
+          } else {
+            info("teams", message, fields);
+          }
+        },
+      });
+      managerCheckInService.subscribe((snapshot) => {
+        broadcastDefaultPetManagerCheckInSnapshot(snapshot);
+        broadcastManagerCheckInsRefresh();
+      });
       powerMonitor.on("resume", () => {
         void teamService?.syncNow().catch(() => undefined);
         void managerCheckInService?.syncNow().catch(() => undefined);
       });
-    }
-    const startupTeamLink = publicNetworkEnabled ? findTeamEnrollmentLink(process.argv) : null;
-    if (startupTeamLink) {
-      teamService.handleDeepLink(
-        `openpets://teams/enroll?intent=${encodeURIComponent(startupTeamLink.intentId)}`,
-      );
-      openControlCenterWindow("teams");
-    }
-    if (publicNetworkEnabled && pendingTeamEnrollmentLink) {
-      teamService.handleDeepLink(pendingTeamEnrollmentLink);
-      pendingTeamEnrollmentLink = null;
-      openControlCenterWindow("teams");
+      const startupTeamLink = findTeamEnrollmentLink(process.argv);
+      if (startupTeamLink) {
+        teamService.handleDeepLink(
+          `openpets://teams/enroll?intent=${encodeURIComponent(startupTeamLink.intentId)}`,
+        );
+      }
+      if (pendingTeamEnrollmentLink) {
+        teamService.handleDeepLink(pendingTeamEnrollmentLink);
+        pendingTeamEnrollmentLink = null;
+      }
     }
     petInstallLinkHandler = createDesktopPetInstallLinkHandler();
     const startupPetInstallLink = publicNetworkEnabled

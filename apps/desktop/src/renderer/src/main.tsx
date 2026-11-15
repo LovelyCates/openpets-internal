@@ -4,7 +4,6 @@ import { I18nProvider, useI18n, type I18nSnapshot } from "./i18n";
 import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets-logo.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
-import { TeamsView } from "./teams/TeamsView.js";
 import {
   ProvidersSection,
   type ProviderRole,
@@ -528,7 +527,7 @@ type TeamsSnapshot = {
     source: "team";
   }>;
 };
-type Route = "dashboard" | "pets" | "assistant" | "settings" | "plugins" | "integrations" | "teams";
+type Route = "dashboard" | "pets" | "assistant" | "settings" | "plugins" | "integrations";
 type ControlCenterRouteTarget =
   | { readonly route: "assistant"; readonly assistantTab?: "providers"; readonly petId?: never }
   | { readonly route: "pets"; readonly petId?: string; readonly assistantTab?: never }
@@ -608,15 +607,6 @@ const IntegrationsIcon = () => (
   </svg>
 );
 
-const TeamsIcon = () => (
-  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-  </svg>
-);
-
 const navTabs = [
   { id: "dashboard" as const, labelKey: "nav.dashboard", icon: <DashboardIcon /> },
   { id: "pets" as const, labelKey: "nav.pets", icon: <PetsIcon /> },
@@ -624,7 +614,6 @@ const navTabs = [
   { id: "settings" as const, labelKey: "nav.settings", icon: <SettingsIcon /> },
   { id: "plugins" as const, labelKey: "nav.plugins", icon: <PluginsIcon /> },
   { id: "integrations" as const, labelKey: "nav.integrations", icon: <IntegrationsIcon /> },
-  { id: "teams" as const, labelKey: "nav.teams", icon: <TeamsIcon /> },
 ];
 
 const routeMetadata: Record<Route, { titleKey: string; descKey: string }> = {
@@ -651,10 +640,6 @@ const routeMetadata: Record<Route, { titleKey: string; descKey: string }> = {
   integrations: {
     titleKey: "route.integrations.title",
     descKey: "route.integrations.description",
-  },
-  teams: {
-    titleKey: "route.teams.title",
-    descKey: "route.teams.description",
   },
 };
 
@@ -945,7 +930,7 @@ const filterLabelKeys: Record<Filter, string> = {
 };
 
 function isRoute(value: string | null | undefined): value is Route {
-  return value === "dashboard" || value === "pets" || value === "assistant" || value === "settings" || value === "plugins" || value === "integrations" || value === "teams";
+  return value === "dashboard" || value === "pets" || value === "assistant" || value === "settings" || value === "plugins" || value === "integrations";
 }
 
 function isControlCenterRouteTarget(value: unknown): value is ControlCenterRouteTarget {
@@ -4231,9 +4216,6 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
 
       <nav className="nav-bar">
         {navTabs.map((tab) => {
-          const translated = t(tab.labelKey);
-          // "nav.teams" may be missing from some locales; fall back to English.
-          const label = tab.labelKey === "nav.teams" && translated === tab.labelKey ? "Teams" : translated;
           return (
             <button
               key={tab.id}
@@ -4241,7 +4223,7 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
               onClick={() => navigateToRoute(tab.id)}
             >
               {tab.icon}
-              <span>{label}</span>
+              <span>{t(tab.labelKey)}</span>
             </button>
           );
         })}
@@ -4274,14 +4256,6 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
         <PluginsView />
       ) : currentRoute === "integrations" ? (
         <IntegrationsView api={api} />
-      ) : currentRoute === "teams" ? (
-        <TeamsView
-          api={{
-            ...api,
-            onRouteChange: (callback: (route: string) => void) => api.onRouteChange((target) => callback(target.route)),
-          }}
-          onNavigate={navigateToRoute}
-        />
       ) : (
         <div className="layout">
           <GlassCard className="gallery">

@@ -88,10 +88,10 @@ function getHandler(
   const harness = createHarness();
   const selectedPetId = "pet-2";
   const commandMode = "local";
-  const result = await getHandler(harness.handlers, "openpets:agent-setup-action")(event, "zed-remove", selectedPetId, commandMode);
+  const result = await getHandler(harness.handlers, "openpets:agent-setup-action")(event, "opencode-remove", selectedPetId, commandMode);
 
   assert.strictEqual(result, snapshot);
-  assert.deepEqual(harness.delegated, [{ operation: "action", args: ["zed-remove", selectedPetId, commandMode] }]);
+  assert.deepEqual(harness.delegated, [{ operation: "action", args: ["opencode-remove", selectedPetId, commandMode] }]);
 }
 
 {
@@ -106,13 +106,31 @@ function getHandler(
 }
 
 {
-  const patch = { claude: "/custom/claude", node: "/custom/node" };
+  const harness = createHarness();
+  await assert.rejects(
+    async () => getHandler(harness.handlers, "openpets:agent-setup-action")(event, "zed-remove", "pet-1", "bundled"),
+    { message: "Invalid agent setup action." },
+  );
+  assert.deepEqual(harness.delegated, []);
+}
+
+{
+  const patch = { opencode: "/custom/opencode", node: "/custom/node" };
   const harness = createHarness();
   const result = await getHandler(harness.handlers, "openpets:agent-setup-command-paths")(event, patch);
 
   assert.strictEqual(result, commandPaths);
   assert.equal(harness.delegated[0]?.operation, "command-paths");
   assert.strictEqual(harness.delegated[0]?.args[0], patch, "command-path patch is forwarded untouched");
+}
+
+{
+  const harness = createHarness();
+  await assert.rejects(
+    async () => getHandler(harness.handlers, "openpets:agent-setup-command-paths")(event, { claude: "/custom/claude" }),
+    { message: "Only OpenCode and Node.js command paths are available in this build." },
+  );
+  assert.deepEqual(harness.delegated, []);
 }
 
 {
