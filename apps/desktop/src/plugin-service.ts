@@ -3,6 +3,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { getPluginCatalog, type PluginCatalogOptions } from "./plugin-catalog.js";
 import { getMarketplacePlugin, getMarketplacePlugins, type MarketplaceQuery } from "./plugin-marketplace.js";
+import type { MarketplaceDetail, MarketplacePage, MarketplacePlugin, MarketplaceRelease, RemoteMarketplaceRelease } from "./plugin-marketplace-types.js";
 import type { PluginCatalogEntryV2 } from "./plugin-catalog-validation.js";
 import { getEffectivePluginConfig, validatePluginConfigReplacement, type PluginConfigValidationError, type PluginConfig } from "./plugin-config.js";
 import { publishLocalPluginSnapshot, readLocalPluginSourceManifest } from "./plugin-local-loader.js";
@@ -21,7 +22,7 @@ import { PluginRuntime, type PluginRuntimeOptions, type PluginRuntimeScheduler }
 import { PluginStateStore, type PluginSource, type PluginStateRecord } from "./plugin-state.js";
 import { getAppStateSnapshot } from "./app-state.js";
 import { bundledOfficialPluginIds } from "./bundled-plugins.js";
-import { thirdPartyPluginsEnabled } from "./internal-network-policy.js";
+import { publicNetworkEnabled, thirdPartyPluginsEnabled } from "./internal-network-policy.js";
 
 export { bundledOfficialPluginIds } from "./bundled-plugins.js";
 
@@ -336,8 +337,13 @@ export class PluginService {
     }
   }
 
-  async getMarketplacePlugins(query: MarketplaceQuery = {}) {
+  async getMarketplacePlugins(query: MarketplaceQuery = {}): Promise<MarketplacePage> {
     try {
+      if (this.#useBundledMarketplace()) {
+        const page = bundledMarketplacePage(query, await this.getSnapshot());
+        this.#log("debug", "Bundled plugin marketplace page loaded.", { count: page.plugins.length, offset: page.offset, total: page.total });
+        return page;
+      }
       const page = await getMarketplacePlugins(query, this.#fetchImpl ?? this.#catalogOptions?.fetchImpl ?? fetch);
       this.#log("debug", "Plugin marketplace page loaded.", { count: page.plugins.length, offset: page.offset, total: page.total });
       return page;
@@ -347,8 +353,25 @@ export class PluginService {
     }
   }
 
-  async getMarketplacePlugin(id: string) {
+  async getMarketplacePlugin(id: string): Promise<MarketplaceDetail> {
     try {
+      if (this.#useBundledMarketplace()) {
+        if (!/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) throw new Error("Invalid marketplace plugin id.");
+        const record = (await this.getSnapshot()).plugins.find((item) => item.id === id && item.bundled && bundledOfficialPluginIds.includes(id as typeof bundledOfficialPluginIds[number]));
+        if (!record || !record.runtime || record.brokenReason) throw new Error("Bundled plugin is unavailable.");
+        const summary = bundledMarketplacePlugin(record);
+        const detail: MarketplaceDetail = {
+          ...summary,
+          readme: summary.description,
+          screenshots: [],
+          sourceUrl: null,
+          homepageUrl: null,
+          license: null,
+          releases: [bundledMarketplaceRelease(record)],
+        };
+        this.#log("debug", "Bundled plugin marketplace detail loaded.", { pluginId: id });
+        return detail;
+      }
       const detail = await getMarketplacePlugin(id, this.#fetchImpl ?? this.#catalogOptions?.fetchImpl ?? fetch);
       this.#log("debug", "Plugin marketplace detail loaded.", { pluginId: id, releaseCount: detail.releases.length });
       return detail;
@@ -356,6 +379,10 @@ export class PluginService {
       this.#log("warn", "Plugin marketplace detail failed.", { pluginId: id, reason: safeDetailedError(error) });
       throw error;
     }
+  }
+
+  #useBundledMarketplace(): boolean {
+    return !publicNetworkEnabled && !this.#fetchImpl && !this.#catalogOptions?.fetchImpl;
   }
 
   #queueCatalogMutation(id: string, action: () => Promise<PluginServiceResult>): Promise<PluginServiceResult> {
@@ -547,6 +574,7 @@ export class PluginService {
     const started = Date.now();
     this.#log("info", update ? "Plugin catalog update requested." : "Plugin catalog install requested.", { pluginId: id });
     if (!this.#userDataPath) return this.#error("Catalog plugin installation is unavailable.");
+    if (this.#useBundledMarketplace()) return this.#error("Internal plugins are delivered with the OpenPets desktop app.");
     try {
       await this.#settlePluginInstall(id);
     } catch (error) {
@@ -561,6 +589,7 @@ export class PluginService {
     try {
       const detail = await this.getMarketplacePlugin(id);
       const entry = [...detail.releases]
+        .filter(isRemoteMarketplaceRelease)
         .filter((release) => {
           const compatibleApp = isCatalogEntryCompatible(release.minOpenPetsVersion, release.maxOpenPetsVersion, this.#currentAppVersion);
           const supportedRuntime = release.runtime === "declarative"
@@ -742,6 +771,72 @@ export class PluginService {
 }
 
 let appPluginService: PluginService | null = null;
+
+function isRemoteMarketplaceRelease(release: MarketplaceRelease): release is RemoteMarketplaceRelease {
+  return release.source !== "bundled";
+}
+
+function bundledMarketplaceRelease(record: SafePluginRecord): MarketplaceRelease {
+  return {
+    source: "bundled",
+    releaseId: `${record.id}@${record.version}`,
+    pluginId: record.id,
+    id: record.id,
+    name: record.name ?? record.id,
+    description: record.description ?? "",
+    version: record.version,
+    runtime: record.runtime ?? "javascript",
+    icon: record.icon,
+    iconDataUrl: record.iconDataUrl,
+    sdkVersion: record.sdkVersion,
+    permissions: record.approvedPermissions,
+    status: "approved",
+    changelog: "",
+    createdAt: null,
+    reviewedAt: null,
+  };
+}
+
+function bundledMarketplacePlugin(record: SafePluginRecord): MarketplacePlugin {
+  return {
+    ...bundledMarketplaceRelease(record),
+    category: record.id === "openpets.virtual-pet" ? "companion" : "utility",
+    tags: [],
+    publisher: { id: "openpets", username: "openpets", displayName: "OpenPets", publisherType: "official" },
+    iconUrl: record.iconDataUrl ?? null,
+    heartCount: 0,
+    ratingAverage: null,
+    ratingCount: 0,
+    downloadCount: 0,
+    hearted: false,
+    myRating: null,
+  };
+}
+
+function bundledMarketplacePage(query: MarketplaceQuery, snapshot: PluginServiceSnapshot): MarketplacePage {
+  const q = query.q ?? "";
+  const category = query.category ?? "";
+  const sort = query.sort ?? "popular";
+  const offset = query.offset ?? 0;
+  const limit = query.limit ?? 20;
+  if (typeof q !== "string" || q.length > 200 || typeof category !== "string" || category.length > 120) {
+    throw new Error("Invalid marketplace query.");
+  }
+  if (!["popular", "newest", "rating", "name"].includes(sort)) throw new Error("Invalid marketplace sort.");
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("Invalid marketplace pagination.");
+  }
+  const records = new Map(snapshot.plugins.filter((record) => record.bundled && !record.brokenReason && record.runtime).map((record) => [record.id, record]));
+  const search = q.trim().toLocaleLowerCase();
+  const plugins = bundledOfficialPluginIds
+    .map((id) => records.get(id))
+    .filter((record): record is SafePluginRecord => record !== undefined)
+    .map(bundledMarketplacePlugin)
+    .filter((plugin) => (!category || plugin.category === category)
+      && (!search || `${plugin.name} ${plugin.description} ${plugin.id}`.toLocaleLowerCase().includes(search)));
+  if (sort === "name") plugins.sort((left, right) => left.name.localeCompare(right.name));
+  return { plugins: plugins.slice(offset, offset + limit), total: plugins.length, offset, limit };
+}
 
 export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, disableCatalog?: boolean, bundledPluginSourceDirs: readonly string[] = [], seedBundledPlugins = true, capabilities?: PluginHostCapabilities, onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"], onLocalPluginSourceLoaded?: (sourcePath: string) => void, onLocalPluginSourceRemoved?: (sourcePath: string) => void): PluginService {
   appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, disableCatalog, bundledPluginSourceDirs, seedBundledPlugins, capabilities, onPluginRuntimeError, onLocalPluginSourceLoaded, onLocalPluginSourceRemoved });

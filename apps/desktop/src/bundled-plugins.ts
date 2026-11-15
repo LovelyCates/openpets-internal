@@ -9,6 +9,10 @@ export const bundledOfficialPluginIds = [
   "openpets.focus-buddy",
   "openpets.launch-buddy",
   "openpets.fortune-cookie",
+  "openpets.water-reminder",
+  "openpets.mood-check-in",
+  "openpets.day-routine",
+  "openpets.magic-8-ball",
   "openpets.virtual-pet",
   "openpets.system-resources",
 ] as const;

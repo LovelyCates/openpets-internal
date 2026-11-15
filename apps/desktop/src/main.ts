@@ -28,7 +28,7 @@ import { startVoiceAssistantHost } from "./voice-assistant-host.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
 import { publicNetworkEnabled, remoteNetworkEnabled, thirdPartyPluginsEnabled } from "./internal-network-policy.js";
-import { broadcastDashboardRefresh, broadcastManagerCheckInsRefresh, installInternalUiHandlers, installInternalUiProtocol, openControlCenterWindow, openControlCenterWindowTarget } from "./windows.js";
+import { broadcastDashboardRefresh, broadcastManagerCheckInsRefresh, broadcastPluginRecordsRefresh, installInternalUiHandlers, installInternalUiProtocol, openControlCenterWindow, openControlCenterWindowTarget } from "./windows.js";
 import { sessionMediaScheme } from "./session-media-cache.js";
 import { broadcastDefaultPetManagerCheckInSnapshot, installDefaultPetChatIpcHandlers } from "./default-pet-chat.js";
 import { initializeVoiceAssistantShortcut } from "./voice-assistant-shortcut.js";
@@ -426,6 +426,7 @@ if (!gotSingleInstanceLock) {
     const pluginStartup = (async () => {
       const service = pluginService;
       await service.start();
+      broadcastPluginRecordsRefresh();
       if (publicNetworkEnabled) {
         await teamService?.start();
         await managerCheckInService?.start();

@@ -4,7 +4,7 @@ description: Understand the OpenPets plugin manifest, permissions, runtime sandb
 
 # Plugin platform
 
-> **Internal edition:** The first Windows distribution runs only its reviewed bundled local plugins. Public catalog access, third-party plugin installation, developer plugin loading, and plugin network requests are disabled. See `internal/README.md` and [Desktop app](/desktop) for the distribution policy; the platform contracts below remain in source for future reviewed changes.
+> **Internal edition:** The Windows distribution runs only its reviewed bundled local plugins. Browse shows those packages from local manifests; Installed controls enablement and configuration. Public catalog access, third-party plugin installation, developer plugin loading, and plugin network requests are disabled. See `internal/README.md` and [Desktop app](/desktop) for the distribution policy; the platform contracts below remain in source for future reviewed changes.
 
 OpenPets plugins are small companion programs that extend the pet: reminders,
 focus timers, a Tamagotchi-style virtual pet, GitHub notifications, and so on.

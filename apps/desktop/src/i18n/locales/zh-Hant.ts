@@ -5,6 +5,12 @@ export const zhHant: Partial<Messages> = {
   // Marketplace browser
   "marketplace.title": "外掛市集",
   "marketplace.subtitle": "探索並安裝社群夥伴、健康計時器與增強功能。",
+  "marketplace.internalTitle": "內建外掛",
+  "marketplace.internalSubtitle": "僅顯示隨內部版應用審核並封裝的外掛。",
+  "marketplace.internalNotice": "此目錄可離線使用。在「已安裝」中啟用和設定外掛；新增外掛由維護人員審核後隨應用發行。",
+  "marketplace.internalCount": "內建 {count} 個",
+  "marketplace.manageInstalled": "管理已安裝外掛",
+  "marketplace.version": "版本",
   "marketplace.publish": "發布外掛",
   "marketplace.search": "依名稱、標籤或描述搜尋外掛...",
   "marketplace.category.label": "類別",

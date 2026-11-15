@@ -880,7 +880,7 @@ export function broadcastManagerCheckInsRefresh(): void {
   }
 }
 
-function broadcastPluginRecordsRefresh(): void {
+export function broadcastPluginRecordsRefresh(): void {
   if (controlCenterWindow && !controlCenterWindow.isDestroyed()) {
     controlCenterWindow.webContents.send("openpets:plugins-refresh");
   }

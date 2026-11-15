@@ -5,7 +5,7 @@ sidebar:
   label: Official plugins
 ---
 
-> **Internal edition:** Only the seven IDs in `apps/desktop/src/bundled-plugins.ts` are packaged and seeded. The network-dependent Anxiety Aid Tools plugin is excluded. The catalog and publication details below describe upstream capabilities that are disabled in this distribution.
+> **Internal edition:** The eleven IDs in `apps/desktop/src/bundled-plugins.ts` are packaged and shown in the offline Browse page. Five are enabled by default. Calendar Airmail and Anxiety Aid Tools require external services and are excluded. The public catalog and publication details below describe upstream capabilities that are disabled in this distribution. See `internal/PLUGIN-MAINTENANCE.md` for the internal release process.
 
 OpenPets plugins are reviewed companion features that run through the desktop
 plugin host. Users install and enable them from the Control Center. Maintainers
@@ -67,28 +67,24 @@ Those defaults are defined in `apps/desktop/src/bundled-plugins.ts` and consumed
 
 | Default | Plugins |
 | --- | --- |
-| Bundled with the app | Quick Reminders, Simple Timer, Anxiety Aid Tools, Focus Buddy, Launch Buddy, Daily Fortune Cookie, Virtual Pet, System Resources |
-| Enabled by default | Quick Reminders, Simple Timer, Anxiety Aid Tools, Focus Buddy, Launch Buddy, Daily Fortune Cookie |
-| Bundled but disabled by default | Virtual Pet, System Resources |
+| Bundled with the app | Quick Reminders, Simple Timer, Focus Buddy, Launch Buddy, Daily Fortune Cookie, Virtual Pet, System Resources, Water Reminder, Mood Check-in, Morning & Evening Routine, Magic 8-Ball |
+| Enabled by default | Quick Reminders, Simple Timer, Focus Buddy, Launch Buddy, Daily Fortune Cookie |
+| Bundled but disabled by default | Virtual Pet, System Resources, Water Reminder, Mood Check-in, Morning & Evening Routine, Magic 8-Ball |
 
 A bundled plugin's saved enabled state wins over the default. A plugin newly
 added to the bundled lineup has no saved state yet, so users who upgrade get it
 with its default (enabled for the list above), not only fresh installs.
 
-Bundled plugins are approved with their manifest permissions. Anxiety Aid Tools
-is the one bundled plugin with `network` access, limited to its media host
-(`r2.anxietyaidtools.com`); it downloads narration and soundscape audio only
-when the user opens one of those practices, then serves it from the local cache.
-
-Everything else is installable from the catalog, not preloaded into a fresh app
-install.
+Bundled plugins are approved with their manifest permissions. The internal
+lineup does not grant plugins network access. Additional plugins are added by
+reviewing their source, permissions and assets, then packaging and releasing a
+new internal desktop version. Public catalog installation is disabled.
 
 The bundled plugins below expose their useful operations as typed Pet
 Assistant capabilities when enabled. Their assistant operations use the same
 durable domain state as their pet-menu controls, while the host conversation
-owns the spoken or chat response. Simple Timer, Anxiety Aid Tools and Daily
-Fortune Cookie do not register assistant capabilities yet; they are driven from
-the pet menu.
+owns the spoken or chat response. Simple Timer and Daily Fortune Cookie do not
+register assistant capabilities yet; they are driven from the pet menu.
 
 | Plugin | Assistant capabilities |
 | --- | --- |
@@ -143,7 +139,7 @@ How the bundled plugins apply the [pet menu rules](/plugins#pet-menu-rules):
 | Focus Buddy | Focus: Pause *or* Resume focus session, Skip to break, End focus session. Break: Pause *or* Resume break, End break. | Idle: Start focus session. Session: Show status (plus Start focus session during a break). |
 | Quick Reminders | — | Set reminder…, presets, Test reminder; View/Clear reminders only while one is pending. |
 | System Resources | — | Hide resource HUD while it is on screen, otherwise Show resource HUD; Read resources. |
-| Anxiety Aid Tools, Virtual Pet, Daily Fortune Cookie, Launch Buddy | — | Unchanged: every command applies at any time. Practice sessions have their own on-screen pause/stop controls. |
+| Virtual Pet, Daily Fortune Cookie, Launch Buddy | — | Unchanged: every command applies at any time. |
 
 ## Maintainer checklist
 
@@ -151,14 +147,15 @@ When plugin lineup, bundling, or catalog behavior changes:
 
 1. Update `plugins/official/*/openpets.plugin.json` or the community plugin
    source.
-2. Update `apps/desktop/src/plugin-service.ts` if bundled or default-enabled
-   plugins changed.
-3. Regenerate and commit the plugin catalog output under `web/public/plugins/`.
+2. For the internal build, update `apps/desktop/src/bundled-plugins.ts` and
+   `apps/desktop/electron-builder.yml` together. Update
+   `apps/desktop/src/plugin-service.ts` if default-enabled plugins changed.
+3. Regenerate the public catalog under `web/public/plugins/` only when
+   maintaining the separate upstream publication flow.
 4. Update this page and [Plugin platform](/plugins) when behavior, permissions,
    commands, or packaging rules changed.
 5. Run the plugin release validators listed in
    [Testing and validation](/testing-and-validation).
 
-Do not leave an older plugin lineup in docs after changing catalog output. The
-source of truth is the plugin source plus the generated catalog that the desktop
-actually consumes.
+Do not leave an older plugin lineup in docs after changing packaging. The
+internal source of truth is the bundled ID list and packaged plugin folders.

@@ -24,13 +24,15 @@ plugins, and OpenCode reactions through the local named-pipe IPC service.
 Legacy TCP IPC and discovery-path environment overrides cannot change the
 Windows desktop server's named-pipe binding or its internal discovery file.
 
-Public pet and plugin catalogs, marketplace requests, remote ZIP installs,
+Public pet and plugin catalogs, remote marketplace requests, remote ZIP installs,
 GitHub release checks, announcements, Studio links, Teams API calls, OAuth,
 cloud provider requests, plugin HTTP requests, and browser-opening links are
 rejected before transport. LAN pet mode and the remote-control listener do not
 start. The custom `openpets://` protocol is not registered or processed. The
 network-backed Anxiety Aid Tools plugin is absent from the bundled list, and
-unreviewed local/catalog plugins cannot run. This does not affect local pet
+unreviewed local/catalog plugins cannot run. The Marketplace Browse page lists
+reviewed plugins packaged with the desktop app from local metadata; their
+updates arrive with a new internal installer. This does not affect local pet
 imports or local IPC. The Control Center's OpenCode one-click installer remains
 read-only and cannot write a public npm package spec; use the reviewed local
 integration installer in `internal/`.

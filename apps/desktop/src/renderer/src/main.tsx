@@ -3659,6 +3659,7 @@ function PluginsView() {
             if (!plugin) throw new Error("Plugin is no longer installed.");
             await run(t("plugins.busy.updating"), () => updateCatalogEntry(plugin));
           }}
+          onShowInstalled={() => { initialTabChosen.current = true; setPluginTab("installed"); }}
           onOpenExternal={(value) => {
             try {
               const url = new URL(value);

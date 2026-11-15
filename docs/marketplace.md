@@ -4,6 +4,15 @@ description: API-owned plugin publication, immutable reviewed releases, shared S
 
 # Plugin marketplace
 
+> **Internal Windows edition:** Browse lists the reviewed plugins bundled with
+> the installed desktop package. The list and detail views are assembled from
+> locally seeded plugin manifests; they do not contact Studio or any public
+> service. Bundled releases have no download URL or checksum in the Browse API,
+> because they are delivered by the desktop installer. Users enable and configure
+> them under **Installed**. Adding or updating a plugin requires a reviewed
+> internal desktop release. The public marketplace design below is retained as
+> an upstream platform reference and is not active in the internal build.
+
 ## Direction and ownership
 
 The marketplace uses the existing Studio account and session. Studio's service

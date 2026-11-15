@@ -409,10 +409,11 @@ await localScenario("bundled seeding copies manifest and preserves user choices"
   assert.deepEqual(record?.approvedPermissions, ["pet:speak", "pet:reaction"]);
 });
 
-await localScenario("bundled defaults enable the companion lineup but not Virtual Pet on a fresh install", async ({ userData, root, store }) => {
+await localScenario("bundled defaults enable the companion lineup but leave optional plugins off", async ({ userData, root, store }) => {
   const official = join(root, "official");
-  const enabledIds = ["openpets.simple-timer", "openpets.anxiety-aid-tools", "openpets.focus-buddy", "openpets.launch-buddy", "openpets.fortune-cookie"];
-  for (const id of [...enabledIds, "openpets.virtual-pet"]) {
+  const enabledIds = ["openpets.reminders", "openpets.simple-timer", "openpets.focus-buddy", "openpets.launch-buddy", "openpets.fortune-cookie"];
+  const disabledIds = ["openpets.water-reminder", "openpets.mood-check-in", "openpets.day-routine", "openpets.magic-8-ball", "openpets.virtual-pet", "openpets.system-resources"];
+  for (const id of [...enabledIds, ...disabledIds]) {
     const source = join(official, id);
     writeManifest(source, { manifestVersion: 2, id, name: id, version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
     writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
@@ -422,7 +423,7 @@ await localScenario("bundled defaults enable the companion lineup but not Virtua
   await service.start();
 
   for (const id of enabledIds) assert.equal(store.getRecord(id)?.enabled, true, `${id} is enabled on a fresh install`);
-  assert.equal(store.getRecord("openpets.virtual-pet")?.enabled, false);
+  for (const id of disabledIds) assert.equal(store.getRecord(id)?.enabled, false, `${id} is disabled on a fresh install`);
 });
 
 await localScenario("bundled Focus Buddy keeps the user's choices across restarts", async ({ userData, root, store }) => {

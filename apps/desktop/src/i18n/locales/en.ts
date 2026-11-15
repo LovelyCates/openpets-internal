@@ -8,6 +8,12 @@ export const en = {
   // Marketplace browser
   "marketplace.title": "Plugin Marketplace",
   "marketplace.subtitle": "Discover and install community companions, wellness timers, and enhancements.",
+  "marketplace.internalTitle": "Built-in Plugins",
+  "marketplace.internalSubtitle": "Reviewed plugins packaged with this internal app.",
+  "marketplace.internalNotice": "This catalog works offline. Enable and configure plugins under Installed; maintainers add new plugins in a reviewed app release.",
+  "marketplace.internalCount": "{count} included",
+  "marketplace.manageInstalled": "Manage Installed",
+  "marketplace.version": "Version",
   "marketplace.publish": "Publish Plugin",
   "marketplace.search": "Search plugins by name, tag, or description...",
   "marketplace.category.label": "Category",

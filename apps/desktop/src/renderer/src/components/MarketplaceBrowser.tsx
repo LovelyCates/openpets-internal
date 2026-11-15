@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { publicNetworkEnabled } from "../../../internal-network-policy.js";
 import { formatMarketplaceReleaseDate } from "../../../plugin-marketplace-format.js";
 import { useI18n } from "../i18n.js";
 import type { MarketplacePlugin, MarketplaceDetail, MarketplacePage, MarketplaceQuery } from "../../../plugin-marketplace-types.js";
@@ -20,6 +21,7 @@ export type MarketplaceBrowserProps = {
   readonly onInstall: (id: string) => Promise<void>;
   readonly onUpdate: (id: string) => Promise<void>;
   readonly onOpenExternal: (url: string) => void;
+  readonly onShowInstalled: () => void;
 };
 
 export function MarketplaceBrowser({
@@ -28,8 +30,10 @@ export function MarketplaceBrowser({
   onInstall,
   onUpdate,
   onOpenExternal,
+  onShowInstalled,
 }: MarketplaceBrowserProps): React.ReactElement {
   const { t, locale } = useI18n();
+  const internalCatalog = !publicNetworkEnabled;
   const categories = [
     { id: "", label: t("marketplace.category.all") },
     { id: "extension", label: t("marketplace.category.extension") },
@@ -46,7 +50,7 @@ export function MarketplaceBrowser({
   const categoryLabel = (id: string) => categories.find((category) => category.id === id)?.label ?? id;
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedSort, setSelectedSort] = useState<"popular" | "newest" | "rating" | "name">("popular");
+  const [selectedSort, setSelectedSort] = useState<"popular" | "newest" | "rating" | "name">(internalCatalog ? "name" : "popular");
   const [offset, setOffset] = useState(0);
   const [refreshCounter, setRefreshCounter] = useState(0);
   const limit = 24;
@@ -74,6 +78,9 @@ export function MarketplaceBrowser({
     }
     return map;
   }, [installed]);
+  const bundledIdsKey = internalCatalog
+    ? installed.filter((item) => item.bundled).map((item) => item.id).sort().join("|")
+    : "";
 
   // Fetch list of plugins
   useEffect(() => {
@@ -106,7 +113,7 @@ export function MarketplaceBrowser({
       clearTimeout(timer);
       fetchGenerationRef.current++;
     };
-  }, [query, selectedCategory, selectedSort, offset, refreshCounter, api, limit, locale]);
+  }, [query, selectedCategory, selectedSort, offset, refreshCounter, api, limit, locale, bundledIdsKey]);
 
   // Fetch detail for selected plugin
   useEffect(() => {
@@ -189,11 +196,11 @@ export function MarketplaceBrowser({
             ✦
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-stone-100">{t("marketplace.title")}</h1>
-            <p className="text-xs text-stone-400">{t("marketplace.subtitle")}</p>
+            <h1 className="text-xl font-bold tracking-tight text-stone-100">{t(internalCatalog ? "marketplace.internalTitle" : "marketplace.title")}</h1>
+            <p className="text-xs text-stone-400">{t(internalCatalog ? "marketplace.internalSubtitle" : "marketplace.subtitle")}</p>
           </div>
         </div>
-        <div className="flex items-center space-x-3">
+        {!internalCatalog && <div className="flex items-center space-x-3">
           <button
             onClick={() => onOpenExternal("https://openpets.dev/plugins/publish")}
             className="flex items-center space-x-1.5 rounded-lg border border-stone-700 bg-stone-800/80 px-3 py-1.5 text-xs font-medium text-stone-300 hover:bg-stone-700 hover:text-white transition-all shadow-sm"
@@ -201,8 +208,24 @@ export function MarketplaceBrowser({
             <span>{t("marketplace.publish")}</span>
             <span className="text-stone-500">↗</span>
           </button>
-        </div>
+        </div>}
       </div>
+
+      {internalCatalog && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-900/40 bg-violet-950/20 px-6 py-3 text-xs leading-relaxed text-violet-200">
+          <span>
+            {t("marketplace.internalNotice")}
+            {pageData && !query.trim() && !selectedCategory && <span className="ml-2 text-violet-300">{t("marketplace.internalCount", { count: pageData.total })}</span>}
+          </span>
+          <button
+            type="button"
+            onClick={onShowInstalled}
+            className="rounded-lg border border-violet-700/50 bg-violet-900/30 px-3 py-1.5 font-medium text-violet-100 hover:bg-violet-900/50"
+          >
+            {t("marketplace.manageInstalled")}
+          </button>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
@@ -234,7 +257,7 @@ export function MarketplaceBrowser({
                   </option>
                 ))}
               </select>
-              <select
+              {!internalCatalog && <select
                 aria-label={t("marketplace.sort.label")}
                 value={selectedSort}
                 onChange={(e) => handleSortChange(e.target.value as "popular" | "newest" | "rating" | "name")}
@@ -245,7 +268,7 @@ export function MarketplaceBrowser({
                     {sort.label}
                   </option>
                 ))}
-              </select>
+              </select>}
             </div>
           </div>
 
@@ -287,7 +310,7 @@ export function MarketplaceBrowser({
                   {pageData?.plugins.map((plugin: MarketplacePlugin) => {
                     const installedRecord = installedMap.get(plugin.id);
                     const isInstalled = !!installedRecord;
-                    const isBundled = installedRecord?.bundled;
+                    const isBundled = plugin.source === "bundled" || installedRecord?.bundled;
                     const isLocal = installedRecord?.source === "local";
                     const hasUpdate = isInstalled && !isLocal && installedRecord.version !== plugin.version;
                     const isSelected = selectedId === plugin.id;
@@ -353,11 +376,11 @@ export function MarketplaceBrowser({
 
                         <div className="mt-4 flex items-center justify-between border-t border-stone-800/60 pt-3">
                           <div className="flex items-center space-x-3 text-[11px] text-stone-400">
-                            <span className="flex items-center space-x-1">
+                            {!internalCatalog && <span className="flex items-center space-x-1">
                               <span>❤️</span>
                               <span>{plugin.heartCount}</span>
-                            </span>
-                            {plugin.ratingAverage != null && (
+                            </span>}
+                            {!internalCatalog && plugin.ratingAverage != null && (
                               <span className="flex items-center space-x-1">
                                 <span>⭐</span>
                                 <span>{plugin.ratingAverage.toFixed(1)}</span>
@@ -490,7 +513,7 @@ export function MarketplaceBrowser({
                   {(() => {
                     const installedRecord = installedMap.get(detailData.id);
                     const isInstalled = !!installedRecord;
-                    const isBundled = installedRecord?.bundled;
+                    const isBundled = detailData.source === "bundled" || installedRecord?.bundled;
                     const isLocal = installedRecord?.source === "local";
                     const hasUpdate = isInstalled && !isLocal && installedRecord.version !== detailData.version;
                     const isActionActive = actionInProgress === detailData.id;
@@ -545,24 +568,28 @@ export function MarketplaceBrowser({
                     <span className="text-stone-500 block">{t("marketplace.category.label")}</span>
                     <span className="font-medium text-stone-200 mt-0.5 block">{categoryLabel(detailData.category)}</span>
                   </div>
-                  <div>
+                  {!internalCatalog && <div>
                     <span className="text-stone-500 block">{t("marketplace.downloads")}</span>
                     <span className="font-medium text-stone-200 mt-0.5 block">{detailData.downloadCount.toLocaleString(locale)}</span>
-                  </div>
-                  <div>
+                  </div>}
+                  {!internalCatalog && <div>
                     <span className="text-stone-500 block">{t("marketplace.rating")}</span>
                     <span className="font-medium text-stone-200 mt-0.5 block">
                       {detailData.ratingAverage != null ? `${detailData.ratingAverage.toFixed(1)} ⭐ (${detailData.ratingCount})` : t("marketplace.noRatings")}
                     </span>
-                  </div>
-                  <div>
+                  </div>}
+                  {internalCatalog && <div>
+                    <span className="text-stone-500 block">{t("marketplace.version")}</span>
+                    <span className="font-medium text-stone-200 mt-0.5 block">v{detailData.version}</span>
+                  </div>}
+                  {(!internalCatalog || detailData.license) && <div>
                     <span className="text-stone-500 block">{t("marketplace.license")}</span>
                     <span className="font-medium text-stone-200 mt-0.5 block">{detailData.license || t("marketplace.standard")}</span>
-                  </div>
+                  </div>}
                 </div>
 
                 {/* External links */}
-                <div className="flex flex-wrap gap-3">
+                {!internalCatalog && <div className="flex flex-wrap gap-3">
                   <button
                     onClick={() => onOpenExternal(`https://openpets.dev/plugins/${encodeURIComponent(detailData.id)}`)}
                     className="flex items-center space-x-1.5 rounded-lg border border-stone-800 bg-stone-900 px-3 py-1.5 text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
@@ -570,7 +597,7 @@ export function MarketplaceBrowser({
                     <span>{t("marketplace.projectLinks")}</span>
                     <span className="text-stone-500">↗</span>
                   </button>
-                </div>
+                </div>}
 
                 {/* Screenshots Gallery */}
                 {detailData.screenshots.length > 0 && (
@@ -611,7 +638,7 @@ export function MarketplaceBrowser({
                 )}
 
                 {/* Releases list */}
-                {detailData.releases.length > 0 && (
+                {!internalCatalog && detailData.releases.length > 0 && (
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-400 mb-3">{t("marketplace.approvedReleases")}</h3>
                     <div className="space-y-2">

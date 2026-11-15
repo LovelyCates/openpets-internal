@@ -5,6 +5,12 @@ export const zhHans: Partial<Messages> = {
   // Marketplace browser
   "marketplace.title": "插件市场",
   "marketplace.subtitle": "发现并安装社区伙伴、健康计时器和增强功能。",
+  "marketplace.internalTitle": "内置插件",
+  "marketplace.internalSubtitle": "仅展示随内部版应用审核并打包的插件。",
+  "marketplace.internalNotice": "此目录可离线使用。在“已安装”中启用和配置插件；新增插件由维护人员审核后随应用发版。",
+  "marketplace.internalCount": "内置 {count} 个",
+  "marketplace.manageInstalled": "管理已安装插件",
+  "marketplace.version": "版本",
   "marketplace.publish": "发布插件",
   "marketplace.search": "按名称、标签或描述搜索插件...",
   "marketplace.category.label": "类别",

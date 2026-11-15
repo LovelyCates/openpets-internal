@@ -30,6 +30,14 @@ extraResources:
     to: plugins/official/openpets.launch-buddy
   - from: ../../plugins/official/openpets.fortune-cookie
     to: plugins/official/openpets.fortune-cookie
+  - from: ../../plugins/official/openpets.water-reminder
+    to: plugins/official/openpets.water-reminder
+  - from: ../../plugins/official/openpets.mood-check-in
+    to: plugins/official/openpets.mood-check-in
+  - from: ../../plugins/official/openpets.day-routine
+    to: plugins/official/openpets.day-routine
+  - from: ../../plugins/official/openpets.magic-8-ball
+    to: plugins/official/openpets.magic-8-ball
   - from: ../../plugins/official/openpets.virtual-pet
     to: plugins/official/openpets.virtual-pet
   - from: ../../plugins/official/openpets.system-resources
