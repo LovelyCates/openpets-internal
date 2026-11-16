@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath } from "../src/local-ipc-protocol.js";
+import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalOrigin, validateInstallLocalPath, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateTokenRateParams } from "../src/local-ipc-protocol.js";
 
 const token = "test-token";
 const valid = {
@@ -14,10 +14,30 @@ const valid = {
 parseIpcRequest(JSON.stringify(valid), token);
 parseIpcRequest(JSON.stringify({ ...valid, method: "pets.list" }), token);
 parseIpcRequest(JSON.stringify({ ...valid, method: "pets.install-local" }), token);
+assert.equal(validateInstallLocalOrigin(undefined), undefined);
+assert.equal(validateInstallLocalOrigin("codex"), "codex");
+for (const origin of ["catalog", "Codex", "", null, 0, {}, ["codex"]]) {
+  assert.throws(() => validateInstallLocalOrigin(origin));
+}
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, token: "bad" }), token));
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, version: 2 }), token));
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, method: "pet.install" }), token));
 assert.throws(() => parseIpcRequest("not json", token));
+
+const legacyRate = { sessionId: "session-legacy", tokensPerSecond: 52.4, source: "estimated" } as const;
+assert.deepEqual(validateTokenRateParams(legacyRate), legacyRate, "omitting AVG preserves the original payload shape");
+for (const averageTokensPerSecond of [0, 24.7, 10_000]) {
+  const rate = { ...legacyRate, averageTokensPerSecond };
+  assert.deepEqual(validateTokenRateParams(rate), rate, "bounded AVG values survive server validation");
+}
+const finalRate = { sessionId: "session-final", tokensPerSecond: null, averageTokensPerSecond: 24.7, outputTokens: 123, source: "reported" } as const;
+assert.deepEqual(validateTokenRateParams(finalRate), finalRate, "reported counts can include the source-computed estimate");
+for (const averageTokensPerSecond of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0.1, 10_000.1, null, "24.7"]) {
+  assert.throws(() => validateTokenRateParams({ ...legacyRate, averageTokensPerSecond }));
+}
+for (const source of ["estimated", "reported"]) {
+  assert.throws(() => validateTokenRateParams({ sessionId: "session-clear", tokensPerSecond: null, averageTokensPerSecond: 0, source }), "a session clear cannot retain an average");
+}
 
 validateReaction("testing");
 validateReaction("waving");

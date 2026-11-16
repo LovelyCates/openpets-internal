@@ -20,9 +20,11 @@ import {
   getTeamPetDir,
 } from "./pet-paths.js";
 import { normalizePetPoolOrder } from "./pet-pool.js";
+import { normalizeFavoritePetIds } from "./app-state-core.js";
 import { normalizePinnedPetIds, normalizePinnedPetPositions, prunePinnedPetPositions } from "./pinned-pets.js";
 import { normalizePetWardrobePreference, normalizePetWardrobePreferences, type PetWardrobePreference, type PetWardrobePreferences } from "@open-pets/pet-format/wardrobe";
 import { normalizePetActivityPreferences } from "./pet-activity-policy.js";
+import { normalizePetLibraryMetadata, type PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
 import { normalizeVoiceDeviceId } from "./voice-device-resolver.js";
 import { publishPluginAgentActivity } from "./plugin-events-source.js";
 import { normalizeReactionAnimationOverrides, type ReactionAnimationOverrides } from "@open-pets/pet-format/animation";
@@ -33,6 +35,7 @@ import { normalizeLastSeenWhatsNewVersion, resolveMarkedSeenWhatsNewVersion, res
 export { normalizePetPoolOrder } from "./pet-pool.js";
 
 export interface InstalledPetState {
+  readonly libraryMetadata?: PetLibraryMetadata;
   readonly id: string;
   readonly displayName: string;
   readonly description?: string;
@@ -92,6 +95,8 @@ export interface OpenPetsStateV1 {
      * even if petPoolOrder is configured. Defaults to true. Platform-independent
      * (works on macOS/Windows/Linux). */
     readonly petPoolEnabled: boolean;
+    /** Library bookmarks, retained across removal/reinstall; unrelated to desktop pins. */
+    readonly favoritePetIds?: readonly string[];
     /** Global toggle for window-confinement. When true (default), session-bound pets are
      * confined to their terminal window. When false, all pets free-roam regardless of
      * whether a terminal window is tracked. Platform-independent. */
@@ -176,6 +181,26 @@ export type OpenPetsPreferencePatch = Omit<Partial<OpenPetsStateV1["preferences"
   readonly personality?: PetAssistantPersonalityPatch;
 };
 
+/** The bounded preference projection needed to prepare a pet window. */
+export type PetRenderPreferences = Readonly<Pick<OpenPetsStateV1["preferences"],
+  | "defaultPetId"
+  | "openDefaultPetOnLaunch"
+  | "speechBubblesEnabled"
+  | "petScale"
+  | "hudScale"
+  | "bubbleScale"
+  | "bubbleDurationScale"
+  | "bubbleTheme"
+  | "waitingAnimationDurationMs"
+  | "showChatButton"
+  | "showTalkButton"
+  | "petButtonsPosition"
+  | "petButtonsSize"
+>> & {
+  readonly petName: string;
+  readonly reactionAnimationOverrides?: Readonly<ReactionAnimationOverrides>;
+};
+
 const stateFileName = "openpets-state.json";
 const directInstallLockName = ".install-pet.lock";
 const directInstallLockStaleMs = 10 * 60 * 1000;
@@ -205,6 +230,46 @@ export function getAppStateSnapshot(): OpenPetsStateV1 {
   return cloneState(getInitializedState());
 }
 
+/** Copy only bounded render preferences, never the installed library or private objects. */
+export function getPetRenderPreferences(): PetRenderPreferences {
+  const preferences = getInitializedState().preferences;
+  return Object.freeze({
+    defaultPetId: preferences.defaultPetId,
+    openDefaultPetOnLaunch: preferences.openDefaultPetOnLaunch,
+    speechBubblesEnabled: preferences.speechBubblesEnabled,
+    petScale: preferences.petScale,
+    hudScale: preferences.hudScale,
+    bubbleScale: preferences.bubbleScale,
+    bubbleDurationScale: preferences.bubbleDurationScale,
+    bubbleTheme: preferences.bubbleTheme,
+    waitingAnimationDurationMs: preferences.waitingAnimationDurationMs,
+    reactionAnimationOverrides: preferences.reactionAnimationOverrides
+      ? Object.freeze({ ...preferences.reactionAnimationOverrides })
+      : undefined,
+    showChatButton: preferences.showChatButton,
+    showTalkButton: preferences.showTalkButton,
+    petButtonsPosition: preferences.petButtonsPosition,
+    petButtonsSize: preferences.petButtonsSize,
+    petName: preferences.personality.petName,
+  });
+}
+
+/** A detached, immutable record for one pet; callers cannot mutate the state owner. */
+export function getInstalledPetState(petId: string): InstalledPetState | undefined {
+  const pet = getInitializedState().pets.installed.find((candidate) => candidate.id === petId);
+  if (!pet) return undefined;
+  return Object.freeze({
+    ...pet,
+    ...(pet.source ? { source: Object.freeze({ ...pet.source }) } : {}),
+    ...(pet.libraryMetadata ? { libraryMetadata: Object.freeze({ ...pet.libraryMetadata, tags: Object.freeze([...pet.libraryMetadata.tags]) }) } : {}),
+  });
+}
+
+/** Hot cursor sampling needs one preference, not a clone of the entire pet library. */
+export function isIdleCursorGazeEnabled(): boolean {
+  return getInitializedState().preferences.idleCursorGazeEnabled;
+}
+
 export function updatePreferences(patch: OpenPetsPreferencePatch): OpenPetsStateV1 {
   const state = getInitializedState();
   const preferences = normalizePreferences({
@@ -218,7 +283,7 @@ export function updatePreferences(patch: OpenPetsPreferencePatch): OpenPetsState
   const nextState = normalizeState({
     ...state,
     preferences,
-  });
+  }, state.pets.installed);
 
   commitState(nextState);
   return getAppStateSnapshot();
@@ -468,15 +533,15 @@ export function setPetGravityEnabled(value: boolean): OpenPetsStateV1 {
   return updatePreferences({ petGravityEnabled: value });
 }
 
-export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: number = Date.now()): OpenPetsStateV1 {
+export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: number = Date.now()): void {
   publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction, petId: activity.petId, surface: activity.surface });
   const state = getInitializedState();
   const current = state.activity;
-  const reaction = activity.kind === "react" ? activity.reaction : activity.reaction;
+  const reaction = activity.reaction;
   const petId = activity.petId;
-  const nextState = normalizeState({
+  const nextState: OpenPetsStateV1 = {
     ...state,
-    activity: {
+    activity: normalizeActivity({
       messagesSent: current.messagesSent + (activity.kind === "say" ? 1 : 0),
       reactionsSent: current.reactionsSent + (reaction ? 1 : 0),
       reactionCounts: reaction
@@ -486,11 +551,10 @@ export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: nu
         ? { ...current.perPetActivityCounts, [petId]: (current.perPetActivityCounts[petId] ?? 0) + 1 }
         : current.perPetActivityCounts,
       lastActivityAt: normalizeTimestamp(now) ?? Date.now(),
-    },
-  });
+    }),
+  };
 
   commitState(nextState);
-  return getAppStateSnapshot();
 }
 
 export function installPetState(pet: Omit<InstalledPetState, "builtIn" | "protected" | "installed">): OpenPetsStateV1 {
@@ -513,7 +577,7 @@ export function installPetState(pet: Omit<InstalledPetState, "builtIn" | "protec
         },
       ],
     },
-  });
+  }, state.pets.installed);
 
   commitState(nextState);
   return getAppStateSnapshot();
@@ -535,7 +599,7 @@ export function upsertPetState(pet: Omit<InstalledPetState, "builtIn" | "protect
         ? state.pets.installed.map((installedPet) => installedPet.id === pet.id ? nextPet : installedPet)
         : [...state.pets.installed, nextPet],
     },
-  });
+  }, state.pets.installed);
 
   commitState(nextState);
   return getAppStateSnapshot();
@@ -660,13 +724,16 @@ function readStateFile(path: string): unknown {
   }
 }
 
-function normalizeState(value: unknown): OpenPetsStateV1 {
+function normalizeState(
+  value: unknown,
+  previousInstalledPets: readonly InstalledPetState[] = [],
+): OpenPetsStateV1 {
   const record = isRecord(value) ? value : {};
   const defaultPetRecord = isRecord(record.defaultPet) ? record.defaultPet : {};
   const preferencesRecord = isRecord(record.preferences) ? record.preferences : {};
   const defaultState = createDefaultState();
   const defaultPet = normalizeDefaultPetPositionState(defaultPetRecord);
-  const installedPets = normalizeInstalledPets(record);
+  const installedPets = normalizeInstalledPets(record, previousInstalledPets);
   const defaultPetId = typeof preferencesRecord.defaultPetId === "string"
     && installedPets.some((pet) => pet.id === preferencesRecord.defaultPetId && !pet.broken)
     ? preferencesRecord.defaultPetId
@@ -775,6 +842,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     opencodeCommandPath: normalizeCommandPath(value.opencodeCommandPath),
     openclawCommandPath: normalizeCommandPath(value.openclawCommandPath),
     petPoolOrder: normalizePetPoolOrder(value.petPoolOrder),
+    favoritePetIds: normalizeFavoritePetIds(value.favoritePetIds),
     petPoolEnabled: typeof value.petPoolEnabled === "boolean"
       ? value.petPoolEnabled
       : defaultState.preferences.petPoolEnabled,
@@ -834,13 +902,22 @@ function normalizeCommandPath(value: unknown, requireSafeNodeCommand = false): s
   return requireSafeNodeCommand ? trimmed : normalized;
 }
 
-function normalizeInstalledPets(value: Record<string, unknown>): InstalledPetState[] {
+function normalizeInstalledPets(
+  value: Record<string, unknown>,
+  previousInstalledPets: readonly InstalledPetState[],
+): InstalledPetState[] {
   const installed = isRecord(value.pets) && Array.isArray(value.pets.installed)
     ? value.pets.installed
     : [];
+  // Only the private, already-normalized state can supply reusable objects.
+  // New/replaced rows still validate their files, and disk-loaded state never
+  // supplies this map, so startup always checks the complete installed library.
+  const previousByIdentity = new Map<unknown, InstalledPetState>(
+    previousInstalledPets.map((pet) => [pet, pet]),
+  );
 
   const normalized = installed
-    .map((pet) => normalizeInstalledPet(pet))
+    .map((pet) => previousByIdentity.get(pet) ?? normalizeInstalledPet(pet))
     .filter((pet): pet is InstalledPetState => Boolean(pet && pet.id !== builtInPet.id));
 
   return [builtInPet, ...normalized];
@@ -868,6 +945,7 @@ function normalizeInstalledPet(value: unknown): InstalledPetState | null {
     protected: value.id === builtInPet.id ? true : value.protected === true,
     installed: true,
     source,
+    libraryMetadata: source?.kind === "codex" ? normalizePetLibraryMetadata(value.libraryMetadata) : undefined,
     broken: brokenReason ? true : typeof value.broken === "boolean" ? value.broken : undefined,
     brokenReason: brokenReason ?? (typeof value.brokenReason === "string" ? value.brokenReason : undefined),
   };

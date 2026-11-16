@@ -79,6 +79,11 @@ existing one.
 
 ## Change Discipline
 
+- Keep the internal Windows and macOS editions in feature parity. Change shared
+  behavior in the common owner rather than adding separate platform forks, and
+  update both platform workflows when their contract changes. Validate shared
+  behavior for both platforms; state explicitly when a native package or GUI
+  check was only performed on one host.
 - Read the relevant codemap, conceptual documentation, owner module, and direct
   callers before editing. Reuse established helpers, names, types, limits, and
   error conventions instead of recreating them.

@@ -58,7 +58,13 @@ assert.throws(
 const stagedFixtureRoot = join(fixtureRoot, "staged");
 mkdirSync(stagedFixtureRoot, { recursive: true });
 writeFileSync(join(stagedFixtureRoot, "payload-marker.bin"), randomBytes(1_100_000));
+const runRpmFixtures = process.platform === "linux"
+  || (commandAvailable("rpmbuild") && commandAvailable("rpm2cpio"));
 for (const format of ["deb", "rpm"] as const) {
+  if (format === "rpm" && !runRpmFixtures) {
+    console.error("Skipping RPM artifact fixtures: this non-Linux host requires both rpmbuild and rpm2cpio.");
+    continue;
+  }
   for (const defect of ["plugin", "sharp"] as const) {
     const defectRoot = join(stagedFixtureRoot, `${format}-${defect}`);
     cpSync(join(fixtureRoot, "resources"), join(defectRoot, "resources"), { recursive: true });
@@ -154,6 +160,11 @@ function buildRpmFixture(payloadRoot: string, artifact: string): void {
 function runCommand(command: string, args: string[], cwd?: string): void {
   const result = spawnSync(command, args, { cwd, stdio: "pipe", encoding: "utf8" });
   assert.equal(result.status, 0, `${command} ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
+}
+
+function commandAvailable(command: string): boolean {
+  const result = spawnSync(command, ["--version"], { stdio: "ignore" });
+  return result.error === undefined;
 }
 
 function makeArArchive(members: Array<[string, Buffer]>): Buffer {

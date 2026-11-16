@@ -1,8 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createPetBodyCoordinator } = require('../src/pet-body-coordinator.cjs');
+const { createPetBodyCoordinator, restartClassicFiniteAnimation } = require('../src/pet-body-coordinator.cjs');
 
 function fixture(classic = false) {
+  let now = 0;
+  let random = 0;
+  let classicIdleAllowed = classic;
+  let nextTimer = 0;
+  const timers = new Map();
+  const idleGestures = [];
+  const classicEvents = [];
   const calls = [];
   const bodyResults = [];
   const activityResults = [];
@@ -14,7 +21,16 @@ function fixture(classic = false) {
     stop() {}, clear() {}, setPaused() {}, remaining: () => 1000, mount() {}, hitTest: () => true, dispose() {},
   };
   const coordinator = createPetBodyCoordinator({
-    player, now: () => 0, random: () => 0, onResult: result => bodyResults.push(result),
+    player, now: () => now, random: () => random, onResult: result => bodyResults.push(result),
+    setTimeout(callback, delay) {
+      const id = ++nextTimer;
+      timers.set(id, { callback, at: now + delay });
+      return id;
+    },
+    clearTimeout: id => timers.delete(id),
+    canPlayClassicIdle: () => classicIdleAllowed,
+    onClassicIdleVariation: state => idleGestures.push(state),
+    onClassicEvent: event => classicEvents.push(event),
     onActivityResult: result => activityResults.push(result),
     playExternalActivity: (command, callback) => external.push({ command, callback }),
     stopExternalActivity: generation => stops.push(generation),
@@ -36,8 +52,308 @@ function fixture(classic = false) {
   const motion = generation => ({ kind: 'play', format: 'motion', generation, activityId: 'test', target, animation: 'wave' });
   const strip = generation => ({ kind: 'play', format: 'classic', generation, activityId: 'test', imageUrl: 'data:image/webp;base64,AA==', frameCount: 4, fps: 4, scale: 1 });
   const update = (revision, overrides = {}, nextAppearance = classic ? null : appearance) => coordinator.update({ input: { ...input, revision, ...overrides }, motion: nextAppearance });
-  return { coordinator, calls, bodyResults, activityResults, visibility, external, stops, motion, strip, update, appearance };
+  return {
+    coordinator, calls, bodyResults, activityResults, visibility, external, stops, motion, strip, update, appearance, idleGestures, classicEvents,
+    setClassicIdleAllowed(value) { classicIdleAllowed = value; },
+    setRandom(value) { random = value; },
+    advance(ms) {
+      now += ms;
+      for (const [id, timer] of [...timers]) {
+        if (timer.at <= now && timers.delete(id)) timer.callback();
+      }
+    },
+  };
 }
+
+test('Classic replays each new finite semantic event while snapshots and HUD refreshes retain its phase', () => {
+  const f = fixture(true);
+  const first = { id: 'first', reaction: 'success', classicSpriteState: 'jumping' };
+  f.update(2, { event: first });
+  f.update(3, { event: first });
+  f.coordinator.refresh();
+  assert.deepEqual(f.classicEvents, [first]);
+  const second = { ...first, id: 'second' };
+  f.update(4, { event: second });
+  f.update(4, { event: { ...second, id: 'stale-revision' } });
+  assert.deepEqual(f.classicEvents, [first, second]);
+  const overridden = { id: 'thinking-finite', reaction: 'thinking', classicSpriteState: 'jumping' };
+  f.update(5, { context: 'thinking', event: overridden });
+  assert.equal(f.classicEvents.at(-1), overridden);
+  f.update(6, { event: { id: 'loop', reaction: 'success', classicSpriteState: 'review' } });
+  assert.equal(f.classicEvents.length, 3);
+  f.coordinator.dispose();
+});
+
+test('Classic finite events obey pause, visibility, interaction and renderer lifecycle guards', () => {
+  for (const blocker of ['pause', 'suspend', 'reduced', 'drag', 'movement', 'plugin', 'disposed']) {
+    const f = fixture(true);
+    if (blocker === 'reduced') f.coordinator.setReducedMotion(true);
+    if (blocker === 'drag') f.coordinator.setDragDirection('run-left');
+    if (blocker === 'movement') f.coordinator.setMotionState('run-right');
+    if (blocker === 'plugin') f.coordinator.setPlugin(true);
+    if (blocker === 'disposed') f.coordinator.dispose();
+    const event = { id: `blocked-${blocker}`, reaction: 'waving', classicSpriteState: 'waving' };
+    f.update(2, { paused: blocker === 'pause', suspended: blocker === 'suspend', event });
+    assert.deepEqual(f.classicEvents, [], `${blocker} blocks replay`);
+    f.coordinator.setReducedMotion(false);
+    f.coordinator.setDragDirection(null);
+    f.coordinator.setMotionState('idle');
+    f.coordinator.setPlugin(false);
+    f.update(3, { event });
+    assert.deepEqual(f.classicEvents, [], 'unblocking cannot replay an already observed event');
+    if (blocker !== 'disposed') {
+      f.update(4, { event: { ...event, id: `fresh-${blocker}` } });
+      assert.equal(f.classicEvents.length, 1);
+    }
+    f.coordinator.dispose();
+  }
+});
+
+test('Classic WebAnimations replay targets only a matching finite unpaused sprite clock', () => {
+  const animation = (animationName, iterations, playState = 'running') => ({
+    animationName, currentTime: 1200, playState, plays: 0,
+    effect: { getTiming: () => ({ iterations }) },
+    play() { this.plays += 1; },
+  });
+  const loop = animation('pet-frames-review', Infinity);
+  const bubble = animation('bubble-in', 1);
+  const finite = animation('pet-frames-jumping', 2, 'finished');
+  const sprite = { getAnimations: () => [loop, bubble, finite] };
+  assert.equal(restartClassicFiniteAnimation(sprite, 'review'), false);
+  assert.equal(restartClassicFiniteAnimation(sprite, 'waving'), false);
+  assert.equal(restartClassicFiniteAnimation(sprite, 'jumping'), true);
+  assert.equal(finite.currentTime, 0);
+  assert.equal(finite.plays, 1);
+  assert.equal(loop.currentTime, 1200);
+  assert.equal(bubble.currentTime, 1200);
+  finite.currentTime = 900;
+  finite.playState = 'paused';
+  assert.equal(restartClassicFiniteAnimation(sprite, 'jumping'), false);
+  assert.equal(finite.currentTime, 900);
+});
+
+test('a finished finite CSS animation can replay without selecting a looping or unrelated rule', () => {
+  const declarations = new Map([['animation-name', 'pet-frames-jumping']]);
+  const writes = [];
+  let flushes = 0;
+  const computed = { animationName: 'pet-frames-jumping', animationIterationCount: '2', animationPlayState: 'running' };
+  const sprite = {
+    getAnimations() { flushes += 1; return []; },
+    ownerDocument: { defaultView: { getComputedStyle: () => computed } },
+    style: {
+      getPropertyValue: name => declarations.get(name) || '',
+      getPropertyPriority: () => 'important',
+      setProperty(name, value, priority = '') { declarations.set(name, value); writes.push({ name, value, priority }); },
+      removeProperty(name) { declarations.delete(name); },
+    },
+  };
+  assert.equal(restartClassicFiniteAnimation(sprite, 'jumping'), true);
+  assert.equal(flushes, 2, 'the none state is flushed before the existing CSS rule is restored');
+  assert.equal(declarations.get('animation-name'), 'pet-frames-jumping');
+  assert.equal(writes.at(-1).priority, 'important');
+  const afterFinite = writes.length;
+  computed.animationIterationCount = 'infinite';
+  assert.equal(restartClassicFiniteAnimation(sprite, 'jumping'), false);
+  computed.animationIterationCount = '2';
+  computed.animationPlayState = 'paused';
+  assert.equal(restartClassicFiniteAnimation(sprite, 'jumping'), false);
+  computed.animationPlayState = 'running';
+  assert.equal(restartClassicFiniteAnimation(sprite, 'waving'), false);
+  assert.equal(writes.length, afterFinite);
+});
+
+test('V1 idle waves and short jumps finish without emitting semantic or activity results', () => {
+  const f = fixture(true);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), true);
+  assert.deepEqual(f.idleGestures, ['waving']);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), false);
+  f.advance(1399);
+  assert.deepEqual(f.idleGestures, ['waving']);
+  f.advance(1);
+  assert.deepEqual(f.idleGestures, ['waving', null]);
+  f.setRandom(0.99);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), true);
+  assert.deepEqual(f.idleGestures, ['waving', null, 'jumping']);
+  f.advance(1680);
+  assert.equal(f.idleGestures.at(-1), null);
+  assert.deepEqual(f.bodyResults, []);
+  assert.deepEqual(f.activityResults, []);
+  assert.deepEqual(f.external, []);
+  f.coordinator.dispose();
+});
+
+test('V1 idle hover jumps once per entry and leaving cancels only the hover-owned gesture', () => {
+  const f = fixture(true);
+  f.coordinator.setClassicHover(true, false);
+  assert.deepEqual(f.idleGestures, [], 'a transparent frame corner cannot start hover feedback');
+  f.coordinator.setClassicHover(true);
+  assert.deepEqual(f.idleGestures, ['jumping']);
+  f.coordinator.setClassicHover(true);
+  f.coordinator.setClassicHover(true, false);
+  f.update(2);
+  f.coordinator.refresh();
+  assert.deepEqual(f.idleGestures, ['jumping'], 'changing frame alpha, child mouseover and HUD updates do not retrigger hover');
+  f.advance(1680);
+  f.coordinator.setClassicHover(true);
+  assert.deepEqual(f.idleGestures, ['jumping', null], 'staying hovered does not loop the finite gesture');
+  f.coordinator.setClassicHover(false);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), true);
+  f.coordinator.setClassicHover(true);
+  f.coordinator.setClassicHover(false);
+  assert.deepEqual(f.idleGestures, ['jumping', null, 'waving'], 'leaving hover preserves a naturally scheduled quiet gesture');
+  f.advance(1400);
+  f.coordinator.setClassicHover(true);
+  assert.equal(f.idleGestures.at(-1), 'jumping');
+  f.advance(100);
+  f.coordinator.setClassicHover(false);
+  assert.equal(f.idleGestures.at(-1), null);
+  f.advance(2000);
+  assert.deepEqual(f.bodyResults, []);
+  assert.deepEqual(f.activityResults, []);
+  f.coordinator.dispose();
+});
+
+test('a stationary body press preserves the admitted hover gesture and its original completion time', () => {
+  const f = fixture(true);
+  f.coordinator.setClassicHover(true);
+  f.advance(400);
+  // Body left-press and a delayed host quiet-stop both release only the
+  // host's quiet gesture, not the renderer's currently admitted hover.
+  f.coordinator.cancelIdleVariation('quiet');
+  f.coordinator.setClassicHover(true, false);
+  f.update(2);
+  f.coordinator.refresh();
+  assert.deepEqual(f.idleGestures, ['jumping'], 'press/jitter within the stable body frame must not switch to idle');
+  f.advance(1279);
+  assert.deepEqual(f.idleGestures, ['jumping']);
+  f.advance(1);
+  assert.deepEqual(f.idleGestures, ['jumping', null], 'the original finite gesture completes without restarting');
+  f.coordinator.dispose();
+});
+
+test('press preservation still cancels quiet gestures and yields hover to real manipulation or terminal intent', () => {
+  const quiet = fixture(true);
+  quiet.coordinator.offerClassicIdleVariation();
+  quiet.coordinator.cancelIdleVariation('quiet');
+  assert.deepEqual(quiet.idleGestures, ['waving', null]);
+  quiet.coordinator.dispose();
+  for (const interrupt of [
+    f => f.coordinator.setDragDirection('run-right'),
+    f => f.coordinator.setMotionState('run-left'),
+    f => f.update(2, { event: { id: 'complete', reaction: 'success', classicSpriteState: 'jumping' } }),
+    f => f.coordinator.cancelIdleVariation(), // right/contextmenu or a panel/control press
+    f => f.coordinator.setClassicHover(false),
+  ]) {
+    const f = fixture(true);
+    f.coordinator.setClassicHover(true);
+    f.coordinator.cancelIdleVariation('quiet');
+    interrupt(f);
+    assert.deepEqual(f.idleGestures, ['jumping', null]);
+    f.advance(10_000);
+    assert.deepEqual(f.idleGestures, ['jumping', null], 'cancelled hover cannot resume from its old timer');
+    f.coordinator.dispose();
+  }
+});
+
+test('V1 hover feedback yields to busy rendering, direct manipulation and lifecycle gates', () => {
+  for (const interrupt of [
+    f => { f.setClassicIdleAllowed(false); f.update(2, { context: 'working' }); },
+    f => f.coordinator.setDragDirection('run-left'),
+    f => f.coordinator.setMotionState('run-right'),
+    f => f.coordinator.setPlugin(true),
+    f => f.update(2, { paused: true }),
+    f => f.update(2, { suspended: true }),
+    f => f.coordinator.setReducedMotion(true),
+    f => f.coordinator.dispose(),
+  ]) {
+    const f = fixture(true);
+    f.coordinator.setClassicHover(true);
+    interrupt(f);
+    assert.deepEqual(f.idleGestures, ['jumping', null]);
+    f.coordinator.setClassicHover(false);
+    f.coordinator.setClassicHover(true);
+    assert.deepEqual(f.idleGestures, ['jumping', null], 'blocked hover cannot override the current owner');
+    f.coordinator.dispose();
+  }
+  const motion = fixture();
+  motion.coordinator.setClassicHover(true);
+  assert.deepEqual(motion.idleGestures, []);
+  motion.coordinator.dispose();
+});
+
+test('V1 idle gestures yield immediately to interaction, live intent and lifecycle changes', () => {
+  for (const interrupt of [
+    f => f.update(2, { context: 'working' }),
+    f => f.update(2, { event: { id: 'success', reaction: 'success' } }),
+    f => f.coordinator.setDragDirection('run-left'),
+    f => f.coordinator.setMotionState('run-right'),
+    f => f.coordinator.setPlugin(true),
+    f => f.update(2, { paused: true }),
+    f => f.update(2, { suspended: true }),
+    f => f.update(2, { epoch: 'new-window' }),
+    f => f.update(2, {}, f.appearance),
+    f => f.coordinator.setReducedMotion(true),
+    f => f.coordinator.cancelIdleVariation(),
+    f => f.coordinator.dispose(),
+  ]) {
+    const f = fixture(true);
+    assert.equal(f.coordinator.offerClassicIdleVariation(), true);
+    interrupt(f);
+    assert.deepEqual(f.idleGestures, ['waving', null]);
+    f.advance(10_000);
+    assert.deepEqual(f.idleGestures, ['waving', null], 'cancelled timers cannot clear a later body state');
+    f.coordinator.dispose();
+  }
+});
+
+test('a cancelled gesture timer cannot clear a later cosmetic animation', () => {
+  const f = fixture(true);
+  f.coordinator.offerClassicIdleVariation();
+  f.advance(700);
+  f.coordinator.cancelIdleVariation();
+  f.setRandom(0.99);
+  f.coordinator.offerClassicIdleVariation();
+  f.advance(700);
+  assert.deepEqual(f.idleGestures, ['waving', null, 'jumping']);
+  f.advance(980);
+  assert.deepEqual(f.idleGestures, ['waving', null, 'jumping', null]);
+  f.coordinator.dispose();
+});
+
+test('V1 current presentation gates cosmetic playback while stale Classic context does not', () => {
+  const f = fixture(true);
+  f.update(2, { context: 'working' });
+  f.setClassicIdleAllowed(false);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), false, 'busy or V2 artwork never plays V1 gestures');
+  f.setClassicIdleAllowed(true);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), true, 'expired Classic display may be idle with retained body context');
+  f.update(3, { context: 'working' });
+  assert.deepEqual(f.idleGestures, ['waving'], 'a HUD-only update does not restart or cancel a gesture');
+  f.coordinator.cancelIdleVariation();
+  f.coordinator.setReducedMotion(true);
+  assert.equal(f.coordinator.offerClassicIdleVariation(), false);
+  f.coordinator.dispose();
+  assert.equal(f.coordinator.offerClassicIdleVariation(), false);
+});
+
+test('native Classic activities preempt cosmetic gestures and Motion keeps its own idle variation', () => {
+  const classic = fixture(true);
+  classic.coordinator.offerClassicIdleVariation();
+  assert.equal(classic.coordinator.startActivity(classic.strip(1)), true);
+  assert.deepEqual(classic.idleGestures, ['waving', null]);
+  assert.equal(classic.coordinator.offerClassicIdleVariation(), false);
+  classic.external[0].callback('started');
+  classic.external[0].callback('completed');
+  assert.equal(classic.coordinator.offerClassicIdleVariation(), true);
+  classic.coordinator.dispose();
+  const motion = fixture();
+  assert.equal(motion.coordinator.offerClassicIdleVariation(), false);
+  assert.equal(motion.coordinator.offerVariation(), true);
+  motion.calls.at(-1).callbacks.onEnd();
+  assert.equal(motion.calls.at(-1).clip, 'alternate');
+  assert.deepEqual(motion.idleGestures, []);
+  motion.coordinator.dispose();
+});
 
 test('motion reports first frame and completes only after all finite phases', () => {
   const f = fixture(); const initial = f.bodyResults.length;

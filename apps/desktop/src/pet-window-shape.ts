@@ -24,6 +24,7 @@ export type PetInteractiveShapeOptions = {
   readonly motionDocumentScale?: number;
   readonly hasBubble: boolean;
   readonly hasPinned?: boolean;
+  readonly hasTokenDock?: boolean;
   readonly hudScale?: number;
   /** Preferred speech bubble scale; the effective scale is capped by {@link getEffectiveBubbleScale}. */
   readonly bubbleScale?: number;
@@ -69,6 +70,7 @@ export const compactComposerGeometry = Object.freeze({
 
 export const petBottom = 22;
 export const petWindowHitPadding = 28;
+export const petTokenDockHeight = 36;
 const petWindowPinnedLiftUnit = 28;
 const bubbleHeight = 156;
 const companionLauncherSize = 22;
@@ -107,9 +109,21 @@ export function getPetWindowPinnedLift(hasPinned: boolean, hudScale = 1): number
   return hasPinned ? Math.round(petWindowPinnedLiftUnit * hudScale) : 0;
 }
 
-/** Distance from the carrier bottom to the sprite bottom, including the pinned-HUD lift. */
-export function getPetWindowSpriteBottomInset(hasPinned: boolean, hudScale = 1): number {
-  return petWindowHitPadding + getPetWindowPinnedLift(hasPinned, hudScale);
+export function getPetWindowTokenDockLift(hasTokenDock: boolean, hudScale = 1): number {
+  return hasTokenDock ? Math.ceil(petTokenDockHeight * hudScale) + 6 : 0;
+}
+
+/** Reuse the pet's existing transparent foot padding when only the thin dock is shown. */
+export function getPetWindowOverlayLift(hasPinned: boolean, hudScale = 1, hasTokenDock = false): number {
+  const tokenDockLift = getPetWindowTokenDockLift(hasTokenDock, hudScale);
+  if (hasPinned) return getPetWindowPinnedLift(true, hudScale) + tokenDockLift;
+  if (!hasTokenDock) return 0;
+  return Math.max(0, tokenDockLift + 6 - petWindowHitPadding);
+}
+
+/** Distance from the carrier bottom to the sprite bottom, including both HUDs. */
+export function getPetWindowSpriteBottomInset(hasPinned: boolean, hudScale = 1, hasTokenDock = false): number {
+  return petWindowHitPadding + getPetWindowOverlayLift(hasPinned, hudScale, hasTokenDock);
 }
 
 /**
@@ -124,7 +138,8 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
   const overlayHeight = options.motionLayout
     ? Math.ceil(defaultPetSprite.frameHeight * (options.motionDocumentScale ?? options.scale))
     : scaledHeight;
-  const pinnedLift = getPetWindowPinnedLift(options.hasPinned ?? false, options.hudScale ?? 1);
+  const tokenDockLift = getPetWindowTokenDockLift(options.hasTokenDock ?? false, options.hudScale ?? 1);
+  const overlayLift = getPetWindowOverlayLift(options.hasPinned ?? false, options.hudScale ?? 1, options.hasTokenDock ?? false);
 
   if (options.isSessionOpen) {
     const fullWindow: PetShapeRectangle = { x: 0, y: 0, width: options.windowWidth, height: options.windowHeight };
@@ -137,7 +152,7 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
 
   const classicHitbox: PetShapeRectangle = {
     x: Math.round((options.windowWidth - (scaledWidth + petWindowHitPadding * 2)) / 2),
-    y: Math.round(options.windowHeight - Math.max(0, petBottom - petWindowHitPadding) - pinnedLift - (scaledHeight + petWindowHitPadding * 2)),
+    y: Math.round(options.windowHeight - Math.max(0, petBottom - petWindowHitPadding) - overlayLift - (scaledHeight + petWindowHitPadding * 2)),
     width: scaledWidth + petWindowHitPadding * 2,
     height: scaledHeight + petWindowHitPadding * 2,
   };
@@ -166,9 +181,21 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
     const hudHeight = Math.ceil(64 * effectiveHudScale);
     shape.push({
       x: Math.round((options.windowWidth - hudWidth) / 2),
-      y: Math.max(0, options.windowHeight - hudHeight - 6),
+      y: Math.max(0, options.windowHeight - hudHeight - 6 - tokenDockLift),
       width: hudWidth,
-      height: Math.min(hudHeight + 6, options.windowHeight),
+      height: Math.min(hudHeight + 6, options.windowHeight - tokenDockLift),
+    });
+  }
+
+  if (options.hasTokenDock) {
+    const hudScale = options.hudScale ?? 1;
+    const width = Math.min(Math.max(0, options.windowWidth - 16), Math.ceil(188 * hudScale));
+    const height = Math.ceil(petTokenDockHeight * hudScale);
+    shape.push({
+      x: Math.round((options.windowWidth - width) / 2),
+      y: Math.max(0, options.windowHeight - 6 - height),
+      width,
+      height: Math.min(height, options.windowHeight),
     });
   }
 
@@ -177,7 +204,7 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
   if (options.isExpanded) {
     const width = options.panelWidth ?? defaultPanelWidth;
     const height = options.panelHeight ?? defaultPanelHeight;
-    const panelBottom = options.panelBottom ?? calculateChatPanelBottom(overlayHeight, petBottom, defaultPetChatPanelLayout.gap, pinnedLift);
+    const panelBottom = options.panelBottom ?? calculateChatPanelBottom(overlayHeight, petBottom, defaultPetChatPanelLayout.gap, overlayLift);
     const y = options.panelTop !== undefined
       ? options.panelTop
       : calculateChatPanelY(options.windowHeight, height, panelBottom);
@@ -191,7 +218,7 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
   } else if (options.isCompactOpen) {
     const width = Math.min(compactComposerGeometry.maxWidth, Math.max(0, options.windowWidth - compactComposerGeometry.horizontalInset * 2));
     const height = Math.min(compactComposerGeometry.maxHeight, options.windowHeight);
-    const compactComposerBottom = Math.ceil(petBottom + overlayHeight + compactComposerGeometry.bottomGap) + pinnedLift;
+    const compactComposerBottom = Math.ceil(petBottom + overlayHeight + compactComposerGeometry.bottomGap) + overlayLift;
     compactComposer = {
       x: Math.round((options.windowWidth - width) / 2),
       y: options.windowHeight - compactComposerBottom - height,
@@ -202,7 +229,7 @@ export function calculatePetInteractiveShape(options: PetInteractiveShapeOptions
   }
 
   if (options.hasBubble && !options.isExpanded && !options.isCompactOpen) {
-    const bubbleBottom = Math.ceil(petBottom + overlayHeight + 8) + pinnedLift;
+    const bubbleBottom = Math.ceil(petBottom + overlayHeight + 8) + overlayLift;
     const hasMedia = options.bubbleHasMedia === true;
     const bubbleScale = getEffectiveBubbleScale(options.bubbleScale ?? 1, options.windowWidth, options.windowHeight, bubbleBottom, hasMedia);
     const scaledBubbleHeight = Math.ceil(getBubbleMaxHeight(hasMedia) * bubbleScale);

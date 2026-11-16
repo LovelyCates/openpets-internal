@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { createLocalIpcRequestHandler, type LocalIpcMediaOptions, type LocalIpcRequestHandlerDeps, type LocalIpcStateSnapshot } from "../src/local-ipc-request-handler.js";
 import type { LeaseSnapshot } from "../src/lease-manager.js";
+import { maxIpcMessageBytes } from "../src/local-ipc-protocol.js";
 
 const state: LocalIpcStateSnapshot = {
   preferences: { defaultPetId: "builtin", openDefaultPetOnLaunch: true, speechBubblesEnabled: true },
@@ -84,6 +85,21 @@ function makeDeps(overrides: Partial<LocalIpcRequestHandlerDeps> = {}): LocalIpc
     target: { kind: "default" },
     reading: { tokensPerSecond: null, outputTokens: 420, source: "reported" },
   });
+
+  const averageReadings: unknown[] = [];
+  for (const reading of [
+    { tokensPerSecond: 28.5, averageTokensPerSecond: 24.7, source: "estimated" },
+    { tokensPerSecond: null, averageTokensPerSecond: 24.7, outputTokens: 420, source: "reported" },
+  ]) {
+    const response = await handle(request("pet.tokenRate", { sessionId: "ses_avg", ...reading }), {
+      updateTokenRate: (_sessionId, _leaseId, _target, receivedReading) => { averageReadings.push(receivedReading); },
+    });
+    assert.equal(response.ok, true);
+  }
+  assert.deepEqual(averageReadings, [
+    { tokensPerSecond: 28.5, averageTokensPerSecond: 24.7, outputTokens: undefined, source: "estimated" },
+    { tokensPerSecond: null, averageTokensPerSecond: 24.7, outputTokens: 420, source: "reported" },
+  ], "AVG is delivered to the display owner for both live and final readings");
 }
 
 {
@@ -92,6 +108,10 @@ function makeDeps(overrides: Partial<LocalIpcRequestHandlerDeps> = {}): LocalIpc
     { sessionId: "ses_1", tokensPerSecond: 10_001, source: "estimated" },
     { sessionId: "ses_1", tokensPerSecond: -1, source: "estimated" },
     { sessionId: "ses_1", tokensPerSecond: null, outputTokens: 12, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: 12, averageTokensPerSecond: -1, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: 12, averageTokensPerSecond: 10_001, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: 12, averageTokensPerSecond: Number.NaN, source: "estimated" },
+    { sessionId: "ses_1", tokensPerSecond: null, averageTokensPerSecond: 12, source: "estimated" },
   ]) {
     const response = await handle(request("pet.tokenRate", badParams));
     assert.equal(response.ok, false);
@@ -368,6 +388,121 @@ async function handle(raw: string, deps: Partial<LocalIpcRequestHandlerDeps> = {
   });
   assert.deepEqual(response.error, { code: "internal_error", message: "stat failed" });
   assert.equal(installed, false);
+}
+
+{
+  const calls: unknown[] = [];
+  const libraryMetadata = {
+    sourceSite: "codex-pets.net", sourcePetId: "source-id", kind: "animal", tags: ["cat", "white"], creatorName: "Uploader",
+  };
+  const dependencies: Partial<LocalIpcRequestHandlerDeps> = {
+    stat: async () => ({ size: 1, isDirectory: () => true, isFile: () => false }),
+    installPetFromFolderWithResult: async (...args) => {
+      calls.push(args);
+      return { state, petId: "builtin" };
+    },
+  };
+  const plain = await handle(request("pets.install-local", { path: "/tmp/source-pet", kind: "folder" }), dependencies);
+  const codex = await handle(request("pets.install-local", { path: "/tmp/codex-download", kind: "folder", origin: "codex" }), dependencies);
+  const catalogLabels = await handle(request("pets.install-local", { path: "/tmp/codex-download", kind: "folder", origin: "codex", libraryMetadata }), dependencies);
+  assert.equal(plain.ok, true);
+  assert.equal(codex.ok, true);
+  assert.equal(catalogLabels.ok, true);
+  assert.deepEqual(calls, [
+    ["/tmp/source-pet"], ["/tmp/codex-download", { origin: "codex" }],
+    ["/tmp/codex-download", { origin: "codex", libraryMetadata }],
+  ], "only explicit folder provenance and validated source labels reach the existing installer");
+  for (const params of [
+    { kind: "zip", origin: "catalog" },
+    { kind: "folder", origin: "catalog" },
+    { kind: "folder", origin: null },
+    { kind: "folder", origin: { kind: "codex" } },
+    { kind: "folder", libraryMetadata },
+    { kind: "folder", origin: "codex", libraryMetadata: { ...libraryMetadata, kind: "unknown" } },
+    { kind: "folder", origin: "codex", libraryMetadata: { ...libraryMetadata, sourceSite: "other.example" } },
+    { kind: "folder", origin: "codex", libraryMetadata: { ...libraryMetadata, tags: ["bad\nlabel"] } },
+    { kind: "folder", origin: "codex", libraryMetadata: { ...libraryMetadata, extra: "unknown" } },
+  ]) {
+    const response = await handle(request("pets.install-local", { path: "/tmp/source-pet", ...params }), {
+      stat: async () => { throw new Error("invalid origin must be rejected before filesystem access"); },
+    });
+    assert.equal(response.ok, false);
+    assert.equal(response.error?.code, "invalid_params");
+  }
+  const notFolder = await handle(request("pets.install-local", { path: "/tmp/pet.zip", kind: "folder", origin: "codex" }), {
+    stat: async () => ({ size: 1, isDirectory: () => false, isFile: () => true }),
+    installPetFromFolderWithResult: async () => { throw new Error("Codex provenance cannot bypass folder checks"); },
+  });
+  assert.equal(notFolder.error?.code, "invalid_params");
+  const zipCalls: unknown[] = [];
+  const zipDeps: Partial<LocalIpcRequestHandlerDeps> = {
+    stat: async () => ({ size: 1, isDirectory: () => false, isFile: () => true }),
+    installPetFromZipFileWithResult: async (...args) => {
+      zipCalls.push(args);
+      return { state, petId: "builtin" };
+    },
+  };
+  assert.equal((await handle(request("pets.install-local", { path: "/tmp/pet.zip", kind: "zip" }), zipDeps)).ok, true);
+  assert.equal((await handle(request("pets.install-local", { path: "/tmp/codex.zip", kind: "zip", origin: "codex", libraryMetadata }), zipDeps)).ok, true);
+  assert.deepEqual(zipCalls, [["/tmp/pet.zip"], ["/tmp/codex.zip", { origin: "codex", libraryMetadata }]],
+    "ZIP provenance reaches the same installation owner while ordinary calls stay unchanged");
+}
+
+{
+  const installed = Array.from({ length: 1_336 }, (_, index) => ({
+    id: `pet-${index}`,
+    displayName: `猫咪 🐱 ${index} "friend" ${"爱".repeat(index % 11)}`,
+    builtIn: index === 0,
+    broken: index % 23 === 0,
+  }));
+  const largeState = { ...state, preferences: { ...state.preferences, defaultPetId: "pet-777" }, pets: { installed } };
+  const deps = { getAppStateSnapshot: () => largeState };
+  const received: unknown[] = [];
+  let offset = 0;
+  let revision: string | undefined;
+  let pages = 0;
+  while (true) {
+    // Escapes and multibyte text in the largest allowed request ID count too.
+    const id = '\\"猫'.repeat(40);
+    const response = await handle(request("pets.list", { offset, ...(revision === undefined ? {} : { revision }) }, id), deps);
+    assert.equal(response.ok, true);
+    assert.ok(Buffer.byteLength(`${JSON.stringify(response)}\n`, "utf8") <= maxIpcMessageBytes, "full page envelope stays within 16KiB");
+    const page = response.result as { pets: unknown[]; defaultPetId: string; total: number; revision: string; nextOffset: number | null };
+    assert.equal(page.defaultPetId, "pet-777");
+    assert.equal(page.total, installed.length);
+    if (revision !== undefined) assert.equal(page.revision, revision);
+    revision = page.revision;
+    received.push(...page.pets);
+    pages += 1;
+    if (page.nextOffset === null) break;
+    assert.equal(page.nextOffset, received.length);
+    assert.ok(page.nextOffset > offset, "every continuation makes progress");
+    offset = page.nextOffset;
+    assert.ok(pages < installed.length, "large lists must terminate");
+  }
+  assert.deepEqual(received, installed, "all 1336 entries and every existing field survive pagination");
+  assert.ok(pages > 1);
+  const legacy = await handle(request("pets.list"), deps);
+  assert.equal(legacy.ok, false, "legacy clients get a clear error instead of a truncated list");
+  assert.match(legacy.error?.message ?? "", /pagination/);
+
+  const changed = await handle(request("pets.list", { offset: 1, revision }), {
+    getAppStateSnapshot: () => ({ ...largeState, pets: { installed: installed.map((pet, index) => index === 20 ? { ...pet, displayName: "Changed" } : pet) } }),
+  });
+  assert.equal(changed.ok, false, "metadata changes cannot mix snapshots between pages");
+  const missingRevision = await handle(request("pets.list", { offset: 1 }), deps);
+  assert.equal(missingRevision.ok, false);
+  for (const invalidOffset of [-1, 0.5, "0", 1_337]) {
+    assert.equal((await handle(request("pets.list", { offset: invalidOffset }), deps)).ok, false);
+  }
+  const oversizedItem = await handle(request("pets.list", { offset: 0 }), {
+    getAppStateSnapshot: () => ({ ...state, pets: { installed: [{ id: "large", displayName: "猫".repeat(6_000), builtIn: false }] } }),
+  });
+  assert.equal(oversizedItem.ok, false, "a single oversized entry fails instead of returning an empty continuation");
+  assert.ok(Buffer.byteLength(`${JSON.stringify(oversizedItem)}\n`, "utf8") <= maxIpcMessageBytes);
+  assert.deepEqual((await handle(request("pets.list"))).result, {
+    ok: true, pets: [{ id: "builtin", displayName: "Hoodie Cat", builtIn: true, broken: false }], defaultPetId: "builtin",
+  }, "unpaged small-list behavior is unchanged");
 }
 
 console.log("local IPC request handler tests passed.");

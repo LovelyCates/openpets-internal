@@ -5,7 +5,7 @@ import {
   normalizeIdleCursorGazeEnabled,
 } from "../src/app-state-core.js";
 import { validatePreferencePatch } from "../src/preference-patch.js";
-import { codexV2GazeIdleResetMs, isCodexV2GazeActive, shouldTrackCodexV2Gaze } from "../src/codex-pets-core.js";
+import { codexV2GazeIdleResetMs, isCodexV2GazeActive, resolveCodexV2GazeDirection, shouldTrackCodexV2Gaze } from "../src/codex-pets-core.js";
 
 assert.equal(defaultIdleCursorGazeEnabled, true, "idle cursor gaze is enabled by default");
 assert.equal(normalizeIdleCursorGazeEnabled(true), true);
@@ -40,5 +40,28 @@ assert.equal(isCodexV2GazeActive(10_000, 10_000), true, "a recent cursor movemen
 assert.equal(isCodexV2GazeActive(10_000, 10_000 + codexV2GazeIdleResetMs - 1), true, "the glance remains active until the idle timeout");
 assert.equal(isCodexV2GazeActive(10_000, 10_000 + codexV2GazeIdleResetMs), false, "the glance resets at the idle timeout");
 assert.equal(isCodexV2GazeActive(null, 10_000), false, "an unobserved cursor does not create an initial stare");
+
+const anchor = { x: 100, y: 100 };
+const pointAt = (degrees: number, radius = 100) => ({
+  x: anchor.x + Math.sin(degrees * Math.PI / 180) * radius,
+  y: anchor.y - Math.cos(degrees * Math.PI / 180) * radius,
+});
+let direction = resolveCodexV2GazeDirection(pointAt(10), anchor, null);
+assert.equal(direction, 0);
+for (const degrees of [12, 10, 13, 11, 14]) {
+  direction = resolveCodexV2GazeDirection(pointAt(degrees), anchor, direction);
+  assert.equal(direction, 0, "tiny movement around a sector edge must not alternate whole-body poses");
+}
+direction = resolveCodexV2GazeDirection(pointAt(18), anchor, direction);
+assert.equal(direction, 1, "a deliberate move past the margin selects the next direction");
+assert.equal(resolveCodexV2GazeDirection(pointAt(10), anchor, direction), 1);
+assert.equal(resolveCodexV2GazeDirection(pointAt(4), anchor, direction), 0);
+assert.equal(resolveCodexV2GazeDirection(pointAt(-12), anchor, 0), 0, "sector hysteresis wraps through north");
+assert.equal(resolveCodexV2GazeDirection(pointAt(-18), anchor, 0), 15);
+assert.equal(resolveCodexV2GazeDirection(pointAt(90, 25), anchor, null), null, "the entry margin prevents neutral/look flicker");
+assert.equal(resolveCodexV2GazeDirection(pointAt(90, 29), anchor, null), 4);
+assert.equal(resolveCodexV2GazeDirection(pointAt(90, 23), anchor, 4), 4, "an active look survives small movement at the dead zone edge");
+assert.equal(resolveCodexV2GazeDirection(pointAt(90, 19), anchor, 4), null);
+assert.equal(resolveCodexV2GazeDirection({ x: Number.NaN, y: 0 }, anchor, 4), null);
 
 console.log("Idle cursor gaze preference and gate behavior passed.");

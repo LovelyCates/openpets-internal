@@ -21,9 +21,12 @@ export type IpcEndpoint =
   | { readonly kind: "path"; readonly path: string };
 
 export function getDiscoveryFilePath(): string {
-  // The internal Windows build keeps its IPC token in its own fixed profile.
+  // Internal native builds keep their IPC token in a fixed, separate profile.
   if (process.platform === "win32" && !remoteNetworkEnabled) {
     return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets Internal", "runtime", "ipc.json");
+  }
+  if (process.platform === "darwin" && !remoteNetworkEnabled) {
+    return join(homedir(), "Library", "Application Support", "OpenPets Internal", "runtime", "ipc.json");
   }
 
   if (process.env.OPENPETS_DISCOVERY_FILE) {
@@ -31,7 +34,7 @@ export function getDiscoveryFilePath(): string {
   }
 
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "OpenPets", "runtime", "ipc.json");
+    return join(homedir(), "Library", "Application Support", "OpenPets Internal", "runtime", "ipc.json");
   }
 
   if (process.platform === "win32") {
@@ -62,6 +65,10 @@ export function getIpcEndpointConfig(): IpcEndpointConfig {
   if (process.platform === "win32" && !remoteNetworkEnabled) {
     const pipePath = `\\\\.\\pipe\\openpets-${randomEndpointPart()}-${process.pid}`;
     return { bindEndpoint: { kind: "path", path: pipePath }, advertisedEndpoint: pipePath };
+  }
+
+  if (process.platform === "darwin" && !remoteNetworkEnabled) {
+    return createUnixSocketEndpointConfig();
   }
 
   const bindEnv = process.env.OPENPETS_IPC_BIND;
@@ -115,6 +122,10 @@ export function getIpcEndpointConfig(): IpcEndpointConfig {
     return { bindEndpoint: { kind: "path", path: pipePath }, advertisedEndpoint: pipePath };
   }
 
+  return createUnixSocketEndpointConfig();
+}
+
+function createUnixSocketEndpointConfig(): IpcEndpointConfig {
   const runtimeDir = getSocketRuntimeDir();
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   ensurePrivateRuntimeDir(runtimeDir);

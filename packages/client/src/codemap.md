@@ -11,20 +11,26 @@ Main client implementation (193 lines). `createOpenPetsClient()` factory, all cl
 **Client Methods:**
 - `hello()` - Protocol handshake
 - `status(options?)` - App connectivity check with graceful error handling
-- `listPets()` - Fetch installed pets with metadata
+- `listPets()` - Fetch all installed metadata through bounded sequential IPC pages, preserving its complete-list return shape
 - `installPet(petId)` - Install pet with 60s timeout
+- `installLocalPet(path, options)` - Local absolute folder/ZIP install; explicit `origin: "codex"` can carry typed `libraryMetadata` source labels for either kind. Origin associations are checked before discovery; ordinary request shapes stay unchanged. The server owns the shared strict metadata schema and the normal 16 KiB frame cap remains in force.
 - `acquireLease(options?)` - Get lease for targeted pet operations
 - `heartbeatLease(leaseId)` - Keep lease alive
 - `releaseLease(leaseId)` - Release acquired lease
 - `react(reaction, options?)` - Send reaction (lease-aware)
 - `say(message, options?)` - Display message (lease-aware, optional reaction)
-- `tokenRate(update)` - Send bounded OpenCode token-rate or reported output-token updates to the local pet badge; unavailable in remote mode
+- `tokenRate(update)` - Send bounded live token-rate, optional observed-segment `averageTokensPerSecond` estimate, or reported output-token updates to the local usage dock; unavailable in remote mode
 
 **Result Parsers:**
-- `parsePetListResult()` - Validates pet list response
+- `parsePetListResult()` - Re-exported installed-list result validation from `pet-list.ts`
 - `parsePetInstallResult()` - Validates install response
 - `validatePetId()` - Pet ID format validation (regex: `^[a-z0-9][a-z0-9_-]{0,63}$`)
-- `validateTokenRateUpdate()` - Reject unsafe session identifiers and out-of-range numeric telemetry before local IPC
+- `validateTokenRateUpdate()` - Reject unsafe session identifiers and out-of-range/nonfinite telemetry before local IPC. Optional AVG uses the same `0..10000` range as live speed; clears cannot retain an AVG. Provider-reported output counts do not make AVG exact.
+
+`OpenPetsLocalPetInstallOptions` and `OpenPetsPetLibraryMetadata` mirror the local
+import wire contract without a runtime dependency on private pet-format. The
+optional Codex source label is classification provenance, not authentication;
+metadata validation and transactional persistence remain desktop-owned.
 
 **Socket Management:**
 - Node.js `net.createConnection()` for TCP/Unix sockets/Windows named pipes
@@ -53,12 +59,22 @@ IPC protocol constants, request/response types, `parseIpcResponse()`, `validateR
 - `validateReaction()` - Ensures reaction is in allowed enum
 - `parseIpcResponse()` - Discriminated union parsing (ok: true/false)
 
+### pet-list.ts
+
+Owns installed-list item/result types, result parsing, and the complete-list
+pagination loop. Pages carry an offset, total, metadata revision, and next offset;
+the client checks stable metadata, exact progress, unique IDs and completion.
+Aggregation is capped at 100,000 pets, 4,096 pages and 64 MiB without increasing
+the 16 KiB wire-frame limit. Released servers returning an unpaged small list
+remain accepted. Public types and `parsePetListResult()` stay exported by
+`index.ts`.
+
 ### discovery.ts
 
 Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFile()`, `validateDiscovery()`, `validateEndpoint()`, platform-specific path logic, XDG security checks.
 
 **Platform Paths:**
-- macOS: `~/Library/Application Support/OpenPets/runtime/ipc.json`
+- macOS internal edition: `~/Library/Application Support/OpenPets Internal/runtime/ipc.json`
 - Windows internal edition: `%APPDATA%/OpenPets Internal/runtime/ipc.json`
 - Linux: `$XDG_RUNTIME_DIR/openpets/ipc.json` (preferred) or `~/.config/OpenPets/runtime/ipc.json`
 
@@ -68,6 +84,7 @@ Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFil
 - TCP: `tcp://<host>:<port>` (IPv4 only, private/local addresses)
 
 **TCP/WSL Support:**
+- Native macOS clients reject TCP local discovery and require an OpenPets Unix socket
 - Cross-platform discovery for Windows desktop → WSL client
 - Native Windows clients reject TCP local discovery and require `\\.\pipe\openpets-*`
 - Validates private/local IPv4: loopback (127.x), private (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x)

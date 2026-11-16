@@ -26,6 +26,51 @@ function sendResult(state: ReturnType<typeof createPetBodyState>, snapshots: Pet
   state.result({ ...result, presentationId: appearance?.presentationId ?? "missing", outfitId: appearance?.outfitId ?? "default" });
 }
 
+it("retains Classic work timing through presentation refreshes and separates it from Motion intent", () => {
+  const snapshots: PetBodySnapshot[] = [];
+  const state = createPetBodyState((snapshot) => snapshots.push(snapshot), () => {});
+  // Semantic ingress can precede selection of the first artwork.
+  state.react("waiting", "waiting", 2200);
+  state.clearMotion();
+  state.ready();
+  assert.deepEqual(snapshots.at(-1)!.input.classic, {
+    reaction: "waiting", spriteState: "waiting", cycleDurationMs: 2200,
+  });
+  state.setPaused(true);
+  state.clearMotion();
+  state.setPaused(false);
+  assert.equal(snapshots.at(-1)!.input.classic?.cycleDurationMs, 2200);
+  state.react("success", "jumping", 840);
+  assert.equal(snapshots.at(-1)!.input.classic?.reaction, "success", "a terminal event replaces the busy presentation without falsifying context");
+  assert.equal(snapshots.at(-1)!.input.context, "waiting");
+  setMotion(state, { snapshotId: "motion" } as MotionBodyDescriptor);
+  assert.equal(snapshots.at(-1)!.input.classic, undefined);
+  state.react("editing", "running", 820);
+  assert.equal(snapshots.at(-1)!.input.classic, undefined, "Motion never inherits Classic's three-cycle policy");
+  assert.equal(snapshots.at(-1)!.input.context, "editing");
+});
+
+it("applies animation settings during ongoing Classic work without minting another semantic event", () => {
+  const snapshots: PetBodySnapshot[] = [];
+  const state = createPetBodyState((snapshot) => snapshots.push(snapshot), () => {});
+  state.clearMotion();
+  state.react("thinking", "review", 1030);
+  state.configureClassicAnimation({ thinking: "waiting" }, 2200);
+  assert.deepEqual(snapshots.at(-1)!.input.classic, {
+    reaction: "thinking", spriteState: "waiting", cycleDurationMs: 2200,
+  });
+  assert.equal(snapshots.at(-1)!.input.context, "thinking");
+  assert.equal(snapshots.at(-1)!.input.event, undefined);
+  const count = snapshots.length;
+  state.configureClassicAnimation({ thinking: "waiting" }, 2200);
+  assert.equal(snapshots.length, count, "HUD/content commits with unchanged settings do not publish another intent");
+  state.configureClassicAnimation({ thinking: "waiting" }, 1010);
+  assert.equal(snapshots.at(-1)!.input.classic?.cycleDurationMs, 1010, "speed changes do not wait for an integration heartbeat");
+  state.configureClassicAnimation({ thinking: "jumping" }, 1010);
+  assert.equal(snapshots.at(-1)!.input.classic?.spriteState, "jumping");
+  assert.equal(snapshots.at(-1)!.input.event, undefined, "a settings edit is not a new finite semantic reaction");
+});
+
 it("preserves an event before the first Motion appearance is selected", () => {
   const snapshots: PetBodySnapshot[] = [];
   const state = createPetBodyState((snapshot) => snapshots.push(snapshot), () => {});
@@ -48,7 +93,7 @@ it("treats a lost Classic document as unknown until its replacement is selected"
   assert.equal(snapshots.at(-1)!.input.event?.id, eventId);
 });
 
-it("discards Motion-only event intent for Classic and admits it again after switching to Motion", () => {
+it("keeps Classic finite event identity through content commits without leaking it into Motion", () => {
   const snapshots: PetBodySnapshot[] = [];
   const state = createPetBodyState((snapshot) => snapshots.push(snapshot), () => {});
   state.react("success");
@@ -57,7 +102,14 @@ it("discards Motion-only event intent for Classic and admits it again after swit
   assert.equal(snapshots.at(-1)!.input.event, undefined);
   const afterClassic = snapshots.length;
   state.react("error");
-  assert.equal(snapshots.length, afterClassic);
+  assert.equal(snapshots.length, afterClassic + 1);
+  const classicEvent = snapshots.at(-1)!.input.event;
+  assert.equal(classicEvent?.classicSpriteState, "failed");
+  state.ready();
+  state.clearMotion();
+  assert.equal(snapshots.at(-1)!.input.event?.id, classicEvent?.id, "HUD/content commits retain the event identity");
+  state.react("error");
+  assert.notEqual(snapshots.at(-1)!.input.event?.id, classicEvent?.id, "a real repeated finite react is a new event");
   state.react("working");
   assert.equal(snapshots.at(-1)!.input.context, "working");
   assert.equal(snapshots.at(-1)!.input.event, undefined);
@@ -67,10 +119,29 @@ it("discards Motion-only event intent for Classic and admits it again after swit
   const snapshot = snapshots.at(-1)!;
   const event = snapshot.input.event;
   assert.ok(event);
+  assert.equal(event.classicSpriteState, undefined, "Motion retains its existing semantic event path");
   sendResult(state, snapshots, { epoch: snapshot.input.epoch, snapshotId: "motion", playbackId: 1, intentId: event.id, outcome: "started" });
   sendResult(state, snapshots, { epoch: snapshot.input.epoch, snapshotId: "motion", playbackId: 1, intentId: event.id, outcome: "completed" });
   assert.equal(snapshots.at(-1)!.input.event, undefined);
   assert.equal(snapshots.at(-1)!.input.context, "working");
+});
+
+it("Classic events follow resolved finite overrides rather than the semantic reaction name", () => {
+  const snapshots: PetBodySnapshot[] = [];
+  const state = createPetBodyState((snapshot) => snapshots.push(snapshot), () => {});
+  state.clearMotion();
+  state.react("thinking", "jumping");
+  const first = snapshots.at(-1)!.input;
+  assert.equal(first.context, "thinking");
+  assert.equal(first.event?.reaction, "thinking");
+  assert.equal(first.event?.classicSpriteState, "jumping");
+  state.react("thinking", "jumping");
+  assert.notEqual(snapshots.at(-1)!.input.event?.id, first.event?.id);
+  state.react("success", "review");
+  assert.equal(snapshots.at(-1)!.input.event, undefined, "a looping override is not forcibly restarted");
+  state.react("thinking", "jumping");
+  setMotion(state, { snapshotId: "motion" } as MotionBodyDescriptor);
+  assert.equal(snapshots.at(-1)!.input.event, undefined, "a Classic-only override cannot become a Motion event");
 });
 
 it("suspends a hidden pet, discards events, and resumes its latest context", () => {

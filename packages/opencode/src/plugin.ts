@@ -22,11 +22,11 @@ const plugin = definePlugin({
     try {
       const events = context.event.subscribe({ signal: abortController.signal });
       eventConsumer = consumeEvents(events, abortController.signal, runtime);
-      registrations.push(await context.session.hook("prompt", () => {
-        runtime.prompt();
+      registrations.push(await context.session.hook("prompt", (event) => {
+        runtime.prompt(event.sessionID);
       }));
       registrations.push(await context.tool.hook("execute.before", (event) => {
-        runtime.toolBefore(event.tool, event.input);
+        runtime.toolBefore(event.tool, event.input, event.sessionID, event.id);
       }));
       registrations.push(await context.tool.hook("execute.after", (event) => {
         runtime.toolAfter(event);

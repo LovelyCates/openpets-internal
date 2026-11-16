@@ -1,4 +1,5 @@
 import { allowedReactions, type OpenPetsReaction } from "@open-pets/pet-format/reactions";
+import { validatePetLibraryMetadata, type PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
 export { allowedReactions, type OpenPetsReaction } from "@open-pets/pet-format/reactions";
 import { randomUUID } from "node:crypto";
 import { extname, isAbsolute } from "node:path";
@@ -99,6 +100,7 @@ export type ValidatedTokenRate = {
   readonly leaseId?: string;
   readonly sessionId: string;
   readonly tokensPerSecond: number | null;
+  readonly averageTokensPerSecond?: number;
   readonly outputTokens?: number;
   readonly source: "estimated" | "reported";
 };
@@ -115,6 +117,17 @@ export function validateTokenRateParams(value: unknown): ValidatedTokenRate {
   if (value.outputTokens !== undefined && (typeof value.outputTokens !== "number" || !Number.isSafeInteger(value.outputTokens) || value.outputTokens < 0 || value.outputTokens > 1_000_000_000)) {
     throw new IpcProtocolError("invalid_params", "Invalid output token count.");
   }
+  if (value.averageTokensPerSecond !== undefined && (
+    typeof value.averageTokensPerSecond !== "number"
+    || !Number.isFinite(value.averageTokensPerSecond)
+    || value.averageTokensPerSecond < 0
+    || value.averageTokensPerSecond > 10_000
+  )) {
+    throw new IpcProtocolError("invalid_params", "Invalid average tokens-per-second value.");
+  }
+  if (value.tokensPerSecond === null && value.outputTokens === undefined && value.averageTokensPerSecond !== undefined) {
+    throw new IpcProtocolError("invalid_params", "A cleared token rate cannot include an average.");
+  }
   if (value.source !== "estimated" && value.source !== "reported") {
     throw new IpcProtocolError("invalid_params", "Invalid token rate source.");
   }
@@ -125,6 +138,7 @@ export function validateTokenRateParams(value: unknown): ValidatedTokenRate {
     ...(leaseId ? { leaseId } : {}),
     sessionId: value.sessionId,
     tokensPerSecond: value.tokensPerSecond,
+    ...(value.averageTokensPerSecond === undefined ? {} : { averageTokensPerSecond: value.averageTokensPerSecond }),
     ...(value.outputTokens !== undefined ? { outputTokens: value.outputTokens } : {}),
     source: value.source,
   };
@@ -255,4 +269,24 @@ export function validateInstallLocalKind(value: unknown): "zip" | "folder" {
     throw new IpcProtocolError("invalid_params", "Local install kind must be zip or folder.");
   }
   return value;
+}
+
+export function validateInstallLocalOrigin(value: unknown): "codex" | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "codex") {
+    throw new IpcProtocolError("invalid_params", "Local install origin must be codex when specified.");
+  }
+  return value;
+}
+
+export function validateInstallLocalLibraryMetadata(value: unknown, origin: "codex" | undefined): PetLibraryMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (origin !== "codex") {
+    throw new IpcProtocolError("invalid_params", "Pet library metadata requires a Codex-origin local import.");
+  }
+  try {
+    return validatePetLibraryMetadata(value);
+  } catch (error) {
+    throw new IpcProtocolError("invalid_params", error instanceof Error ? error.message : "Invalid pet library metadata.");
+  }
 }

@@ -1,4 +1,4 @@
-import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
+import { getPetRenderPreferences, recordOpenPetsActivity } from "./app-state.js";
 import { applyExternalPetMoveBy, applyExternalPetMoveToHome, applyExternalPetReaction, applyExternalPetSay, applyExternalPetWander, type PetMoveOptions, type PetReactionOptions, type PetWanderOptions } from "./default-pet-controller.js";
 import { debug } from "./logger.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
@@ -27,8 +27,7 @@ export const defaultPluginPetApi: PluginPetApi = {
 
 function recordPluginPetActivity(activity: { readonly kind: "say"; readonly reaction?: undefined } | { readonly kind: "react"; readonly reaction: OpenPetsReaction }): void {
   try {
-    const state = getAppStateSnapshot();
-    recordOpenPetsActivity({ ...activity, petId: state.preferences.defaultPetId });
+    recordOpenPetsActivity({ ...activity, petId: getPetRenderPreferences().defaultPetId });
   } catch (error) {
     debug("plugin", "activity record failed", { error: error instanceof Error ? error.message : String(error), kind: activity.kind, reaction: activity.reaction });
   }

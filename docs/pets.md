@@ -13,6 +13,37 @@ for the command path that triggers reactions see [IPC and remote control](/ipc).
 Source maps: `apps/desktop/src/codemap.md` (pet windows, controllers,
 installation), `packages/install-pet/codemap.md` (standalone installer).
 
+Control Center's pet library renders 24 cards per page, so importing a large
+local collection does not mount every atlas and idle animation at once. Search
+and filters cover the complete installed collection and available catalog search
+index before pagination. Changing a search or filter returns to the first page;
+removals clamp the current page. An open pet detail remains selected independently
+of the page or filter. Installed cards use local artwork, and remote catalog
+artwork metadata is requested only for visible cards or the selected detail.
+The same local paging works when the internal edition disables public catalogs.
+Library results begin with pet cards, with compact search/source controls and
+natural-height grid rows aligned at the top. Loading the first snapshot shows
+an explicit loading state rather than zero counters or an empty-library result.
+Search normalizes Unicode width and matches space-separated keywords across
+names, IDs, descriptions, verified source tags and uploader labels in memory.
+Source/layout/capability filters and the source site's type, tag and uploader
+facets show counts for the current search and other selected facets. V1/V2,
+Motion, outfits and activities use actual presentation metadata; unlabelled
+older imports remain explicitly unclassified rather than receiving guessed
+character categories. Site tags are translated for display while retaining
+their source values.
+
+Card and detail stars store an independent `favoritePetIds` preference through
+the authorized Control Center preference API. Favorites survive refresh/restart
+and removal/reinstallation of the same ID; they neither pin a desktop window nor
+change the default pet or session pool. Toggling a star updates the small settings
+snapshot without reloading installed artwork or manifests.
+Installed snapshot enrichment reads at most eight manifests concurrently,
+preserving library order and isolating an unreadable entry from the others.
+Selecting an installed pet can load its single catalog metadata page to discover
+optional wardrobe updates. Other installed cards use local artwork without
+loading catalog pages; offline entries without a catalog page make no request.
+
 ## What a pet is
 
 ### Motion packages
@@ -114,6 +145,30 @@ page, they can be played once or enabled to play automatically while idle. Each
 activity uses artwork matching the pet's rendered outfit; without a matching
 representation, it is skipped rather than switching the pet's clothes. Automatic
 play preferences and cooldowns belong to the activity and are shared across outfits.
+
+Website V1 Classic pets also use their existing waving and jumping atlas rows
+for brief cosmetic gestures during quiet idle, even when they declare no
+activities. The host offers a gesture after 15–30 seconds and shares the next
+opportunity across windows of the same pet. These gestures do not change the
+reaction, status badge, speech or window position. Busy presentation, dragging,
+movement, plugin body overrides, pause, reduced motion, native activity playback,
+artwork replacement and window teardown stop them immediately. V2 gaze and
+Motion idle behavior retain their existing paths. Declared automatic activities
+still require opt-in and keep their separate 2–4 minute opportunity cadence.
+
+An idle V1 pet also gives one short jumping gesture when the pointer first
+enters its visible artwork. The initial entry uses the existing alpha hit test;
+after admission, hover stays latched until the pointer leaves the full frame or
+enters a bubble/control, so changing transparent pixels during the jump cannot
+restart it. Repeated child mouseovers and retained HUD updates do not retrigger
+the gesture. An ordinary stationary left press on that body frame preserves an
+already-playing hover gesture and its original end time; a held press cannot
+admit another gesture. Quiet scheduled gestures still cancel on interaction.
+Actual dragging/window movement, right/context menu and bubble/control presses
+cancel hover through the existing interruption rules. Leaving cancels only a hover-owned gesture, preserving a naturally
+scheduled quiet gesture. Hover shares the same finite timer and interruption
+rules as the quiet variations and does not replace work reactions, V2 gaze or
+Motion behavior.
 
 A Classic pet package may optionally declare `pet.json.activities`: at most 16
 logical one-shot animations separate from its reaction atlas. Each entry
@@ -316,26 +371,112 @@ reaction into something visible:
    a busy status badge (`thinking`/`working`/`editing`/`running`/`testing`/
    `waiting`) survives much longer; when the display reaction is gone, a badge
    that resolves to a looping animation (`resolveEffectiveSpriteState`) keeps
-   the pet visibly animated, while a badge that resolves to a finite one-shot
+   the busy presentation eligible, while a badge that resolves to a finite one-shot
    (`waving`/`success`/`error`/`celebrating`) falls back to idle so terminal
    reactions stay bounded.
 
-The internal OpenCode integration can also show a small token usage badge to
-the lower right of the active default or agent pet, below its speech bubble.
-Streaming speed is marked as an estimate;
-reported output-token counts are shown without inventing a final speed. The
-desktop stores only bounded numeric readings and short session identifiers in
-memory. Estimates disappear after roughly five seconds without a new event;
-reported counts remain for up to eight seconds, then disappear. Releasing an
-agent pet lease clears estimates immediately. If an existing agent pet window
-shows a fresh reported count, it remains visible for the rest of that brief
-period before closing. A new lease for that pet cancels the pending close and
-clears the previous session's count. This badge has its own display path and
-does not replace the single pinned plugin HUD used by System Resources or
-Virtual Pet. Updates go
-directly to the existing pet renderer DOM, leaving its sprite animation and
-chat surface intact. The owners are `opencode-token-rate.ts`, `local-ipc.ts`,
-`pet-window-render.ts`, `pet-window-styles.ts`, and `pet-preload.cjs`.
+Classic V1 and V2 busy presentation plays its resolved looping work row for
+three cycles, then visually rests in the existing idle animation. The actual
+reaction, status badge, speech, token rate and estimated segment AVG keep their
+normal lifecycle and continue updating. Visual rest does not declare the
+session idle or enable quiet activities, hover gestures or V2 gaze during work.
+V1 keeps its authored 6.6-second idle; imported V2 keeps its existing 5.5-second
+idle and the bundled cat keeps its separate blink/ear-flick idle profile.
+
+The budget follows the effective animation row and configured cycle duration.
+Accounting begins only once the matching CSS animation has started; style
+creation and pending first-frame readiness do not consume any of its three
+cycles. This uses the animation's existing readiness promise and the same
+coordinator timer rather than a second animation clock.
+Same-row work changes such as editing → working, repeated heartbeats and
+HUD/content updates retain the running or settled budget. A different work row
+or duration starts three new cycles; an actual idle or terminal reaction ends
+that budget. Waiting uses its configured speed. Pause, reduced motion, dragging,
+window movement, plugin body ownership and native activities take precedence
+and freeze remaining eligible playback time. Releasing them resumes the
+remaining budget rather than replaying three cycles. A new document epoch starts
+a fresh bounded lifecycle, and old timers cannot settle replacement artwork.
+Finite rows and overrides keep their authored iteration counts; an override to
+idle remains idle. Motion clips retain their own bindings and playback lifecycle
+and do not use this Classic atlas budget. These renderer owners are shared by
+the Windows and macOS editions.
+
+Classic presentation updates retain the connected stage, hitbox and sprite
+when the artwork/layout/revision identity and styles are unchanged. Reaction,
+speech and HUD changes update the surrounding presentation without decoding the
+atlas again or restarting an unchanged sprite animation. Each actual sprite
+state has a distinct CSS animation name so a state change starts its own clock;
+cosmetic idle gestures use separate names as well. Artwork, outfit or revision
+changes still decode before an atomic swap. Updates for one pending revision
+share the decode and commit the latest presentation.
+
+A genuinely new Classic reaction mapped to a finite row carries a fresh
+semantic event identity through `pet-body-state.ts`. Repeating that reaction
+restarts only its matching finite CSS animation through Web Animations; it does
+not replace the sprite or change the row's iteration count. The identity
+survives content commits, while duplicate snapshots, HUD and token updates do
+not replay it. This also applies to a finite user override such as thinking →
+jumping; a looping override is left running. The coordinator admits replay only
+while unpaused, visible, outside reduced motion and free of drag, movement or
+plugin override ownership. Motion keeps its existing semantic-event path.
+
+Pressing the pet alone does not select a running row. Direct pointer drag
+feedback waits for more than four pixels of displacement, including vertical
+movement, while the existing host drag transaction still starts on press.
+The separate native-window movement publisher retains its three-pixel
+accumulated threshold. Release or window blur clears pointer feedback. This
+avoids a stationary click briefly switching to a different-looking movement
+frame while preserving feedback for actual window movement.
+
+Classic V1 playback preserves per-frame holds rather than splitting every
+animation into equally long steps. Idle uses six holds over 6.6 seconds, with
+longer resting poses and shorter intermediate poses. Active rows keep their
+existing total durations while holding their final pose longer. The waiting
+speed preference scales those holds proportionally. Finite actions finish on
+their last valid atlas cell until the host resumes idle, avoiding an unused
+endpoint cell or a brief return to the action's first pose. Settings reaction
+previews use the same frame boundaries. These holds define intended cadence;
+renderer frame pacing and event-processing cost are measured separately.
+
+The internal OpenCode integration shows a two-column usage dock below the active
+default or agent pet after its first numeric reading. Its width and scale match
+the plugin HUD. When both are visible, the plugin HUD sits above it with a gap;
+the pet, speech, chat and input geometry move together to keep the body clear.
+The dock is hidden during practice sessions.
+
+The dock shows a localized live label and `AVG`, without an agent brand name.
+Both numbers use `tk/s`. Speeds above 40 are green, above 20 through 40 are blue,
+and 0 through 20 are gray; missing values use a neutral dash. Each metric has
+its own color, so a quick current burst does not recolor a slower average.
+These colors describe speed rather than success or error.
+
+Streaming speed is marked as an estimate. AVG is also always estimated: all
+accepted characters in the current observed output segment, divided by four,
+then divided by the elapsed time from its first to latest delta. It requires
+at least one second of observed output. It is not an arithmetic mean of rolling
+speed updates, does not include a later wait for the usage report, and does not
+claim to average the entire multi-tool session. Reported totals without observed
+stream timing cannot produce an AVG.
+
+Estimates expire after roughly five
+seconds without a new event; a reported output count is current for up to eight
+seconds, without inventing a final speed. After that, the dock stays quiet with
+an idle realtime dash and the last captured AVG clearly labeled as historical.
+The reported output total remains available in its accessible description.
+No reading means no dock, and idle does not claim that OpenCode is connected.
+The desktop keeps bounded numeric readings and per-target history only in memory;
+restarting the app clears them. Releasing an agent lease clears estimates
+immediately. A fresh reported count can retain an existing agent window only for
+the remainder of its eight-second period; historical display never extends a
+lease or keeps an agent window alive. A new explicit lease clears that pet's
+previous history.
+
+The dock has its own display path and does not replace the pinned plugin slot
+used by System Resources or Virtual Pet. Presence changes refresh geometry once;
+subsequent readings update only the existing dock DOM, preserving sprite timing
+and chat. The owners are `opencode-token-rate.ts`, `local-ipc.ts`,
+`pet-window-render.ts`, `pet-window-styles.ts`, `pet-window-shape.ts`, and
+`pet-preload.cjs`. Windows and macOS use the same implementation.
 
 The waiting animation cycle is a global preference in Control Center → Settings
 → Reactions. **Normal** keeps the default `1010` ms cycle and **Relaxed** uses
@@ -501,11 +642,32 @@ undo asynchronous state side effects. ZIP imports use a separate private
 pre-metadata staging name, so the valid pet ID `local` remains independently
 fenced when it is the actual imported pet.
 
+App-state startup checks the installed files for every disk-loaded record.
+Install commits and agent activity counters reuse unchanged, already-normalized
+records from the private in-memory state by object identity; new or replaced
+records still check their files, including a changed personal/Team source root.
+Unrelated disk edits do not refresh a pet's health during those two paths;
+startup and existing full-validation actions such as selecting a default pet
+check it again, and asset reads retain their own validation. Existing broken
+records keep their status until an explicit replacement or health update.
+This avoids repeatedly opening the whole library during a large import or each
+agent response; state traversal, snapshots and atomic JSON writes still scale
+with the library size.
+
 Local pet packages can also be installed through the running app via the CLI:
 - `openpets install --from-zip <path-to-zip>`
 - `openpets install --from-folder <path-to-folder>`
 
 These send a `pets.install-local` request to the running app over IPC, which validates and imports the local zip file or folder.
+
+Control Center's localized Import pet chooser distinguishes **OpenPets /
+OpenCode Pet ZIP**, **Codex Pets ZIP**, and **Folder** before opening the file
+picker. The explicit Codex ZIP choice records Codex provenance for the library
+filter; an ordinary ZIP is never relabelled from its name or pet ID. Both ZIP
+choices use the same package validation, install transaction and shared Classic
+or Motion playback rules. ZIP source selection does not introduce an animation
+variant or change the selected default pet. The chooser's cancel action leaves
+the library and current selection untouched.
 The CLI resolves relative paths before sending them; the IPC/client protocol
 itself requires an absolute path plus an explicit `zip` or `folder` kind.
 
@@ -556,13 +718,6 @@ Links arrive through macOS `open-url`, the second-instance argv on
 Windows/Linux, or the cold-start argv; a link received before startup finishes
 is held and handled once the app is ready.
 
-The Pets page links back to Studio: a full-width **Make your own pet** banner
-(the Studio hero art, bundled as `renderer/public/studio/studio-hero.webp`)
-leads the grid on the All and Installed filters, and replaces an empty search
-result (retitled "Can't find it? Make it"). It opens `openpets.dev/studio` through the
-`openpets:open-studio` handler with `utm_source=openpets-desktop` so Studio
-sign-ups from the app can be told apart.
-
 ### Standalone installer (`install-pet`)
 
 `packages/install-pet/` is a standalone CLI (`install-pet <pet-id>` or
@@ -592,6 +747,18 @@ regenerating the catalog) lives in `web/`'s sync scripts. The contract those
 scripts produce is in [Catalogs](/catalog), with release checks in
 [Testing and validation](/testing-and-validation).
 
+The Control Center Codex filter also includes installed pets carrying explicit
+Codex import provenance, including imports from `codex-pets.net`. It does not
+mean the app has scanned an official account's cloud library. Verified website
+labels are stored as bounded `InstalledPetState.libraryMetadata`, separately
+from `pet.json`: source site/ID, the site's four kind values, tags and uploader
+name/handle. The shared `pet-format/library-metadata` validator owns this shape;
+ordinary local imports cannot acquire these labels without the Codex origin.
+Different source IDs retain distinct library records even if their pixels match,
+so importing one publisher's entry cannot overwrite another's classification.
+Uploader labels identify the source listing's publisher and do not assert who
+created or owns the depicted character.
+
 ### Codex sprite versions
 
 The bundled default Hoodie Cat uses the same V2 atlas contract as imported
@@ -609,8 +776,13 @@ grid. Any other supplied version marker, an invalid format, a non-alpha V2
 WebP, or a mismatched atlas is rejected before the atomic import writes anything.
 
 The V2 adapter uses the unchanged standard rows 0–8 for OpenPets reactions and
-horizontal run motion. Normal idle plays the six-frame breathing loop in row 0;
-the neutral pose (row 0, column 6) remains available to explicit Control Center
+horizontal run motion. Normal idle plays the six-frame breathing loop in row 0.
+The bundled Hoodie Cat and its outfits use an authored, nonuniform 5.5-second
+cycle so the closed-eye frame is a short blink and the ear movement is brief,
+rather than holding each frame for almost a second. This timing profile belongs
+only to the bundled artwork. Imported V2 atlases keep their existing cadence;
+Classic V1 uses its version-specific per-frame hold profile described above.
+The neutral pose (row 0, column 6) remains available to explicit Control Center
 previews. This matches the released
 [Malou V2 manifest](https://raw.githubusercontent.com/mySebbe/malou-codex-pet/v2.0.0/dist/malou/pet.json)
 and its [8×11 atlas specification](https://raw.githubusercontent.com/mySebbe/malou-codex-pet/v2.0.0/metadata/atlas.json).
@@ -631,8 +803,11 @@ repaired/skipped counts, and skip reasons are logged, and a migration problem
 never prevents the desktop app from starting.
 
 V2's sixteen look-direction cells (rows 9–10) are retained in the imported
-atlas and selected while an installed V2 pet is visually idle and the cursor
-glance is active. Outside a glance, the row 0 breathing loop plays. OpenPets samples
+atlas and selected while a V2 pet is visually idle and the cursor
+glance is active. The static look cell temporarily covers the sprite's visible
+background position while its idle animation clock keeps running. Leaving a
+glance therefore resumes the current idle phase instead of restarting frame 0.
+Outside a glance, the row 0 breathing loop plays. OpenPets samples
 the global cursor around the pet carrier's bottom-center anchor by default,
 preserving the existing behavior when `gazeAnchor` is omitted. A manifest may
 instead define the target within one frame; the host resolves that normalized
@@ -647,18 +822,24 @@ active per-window override after renderer reload; without an override, the
 current render scale positions both. The installed ZIP's validated `pet.json` is authoritative for this
 runtime setting, so a catalog entry that omits it does not discard the package
 value. OpenPets quantizes the
-direction into sixteen clockwise 22.5° sectors, and resumes the idle loop inside
-a small dead zone. Reactions, movement, dragging, plugin sprite
-overrides, and paused pets suspend gaze; V1 pets retain their existing idle
+direction into sixteen clockwise 22.5° sectors with a four-degree retention
+margin, and uses separate entry/exit radii around the dead zone. Small cursor
+movements at either boundary do not alternate whole-body poses. Reactions,
+movement, dragging, native activities, plugin sprite overrides, paused pets and
+reduced motion suspend gaze; V1 pets retain their existing idle
 behavior. A paused V2 pet retains the static neutral pose. Horizontal flips
 compensate the selected atlas cell so the pet still
 looks toward the cursor. Control Center → Settings → General exposes the
 persisted **Idle cursor gaze** setting, enabled by default; disabling it keeps
 all V2 pets on the animated idle loop and stops the shared ticker, without
-changing reactions, movement, or V1 behavior. When enabled, cursor movement
-drives a short glance: the current direction is held while the cursor is moving
-and for about 1.2 seconds afterward, then eligible idle V2 pets resume the
-row 0 breathing loop. No additional blink frames are used.
+changing reactions, movement, or V1 behavior. When enabled, meaningful cursor
+movement drives a glance lasting at most 900 milliseconds, followed by at least
+1.6 seconds of idle breathing before another glance. A stopped cursor cannot
+start another glance once its last movement is 1.2 seconds old. Even continuous
+cursor movement leaves breathing and blink time between looks. The shared
+50-millisecond sampler runs only while an eligible visible renderer has reported
+that reduced motion is off. No additional artwork or interpolated atlas frames
+are used.
 
 The main-process gaze controller owns the active per-window plugin scale
 override and replays it after full renderer loads. The pet preload applies that

@@ -32,6 +32,10 @@
       "types": "./dist/metadata.d.ts",
       "default": "./dist/metadata.js"
     },
+    "./library-metadata": {
+      "types": "./dist/library-metadata.d.ts",
+      "default": "./dist/library-metadata.js"
+    },
     "./motion": {
       "types": "./dist/motion.d.ts",
       "default": "./dist/motion.js"

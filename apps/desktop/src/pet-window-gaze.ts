@@ -1,10 +1,10 @@
 import { screen, type BrowserWindow } from "electron";
 
-import { getAppStateSnapshot } from "./app-state.js";
+import { isIdleCursorGazeEnabled } from "./app-state.js";
 import { defaultPetScale } from "./app-state-core.js";
 import { codexV2SpriteLayout } from "@open-pets/pet-format/sprite-layout";
 import { type CodexPetGazeAnchor } from "@open-pets/pet-format/metadata";
-import { getCodexV2GazeAnchorPoint, getCodexV2GazeSpritePosition, isCodexV2GazeActive, mirrorCodexV2GazeIndex, quantizeCodexV2GazeDirection, shouldTrackCodexV2Gaze } from "./codex-pets-core.js";
+import { codexV2GazeMaxGlanceMs, codexV2GazeRestMs, getCodexV2GazeAnchorPoint, getCodexV2GazeSpritePosition, isCodexV2GazeActive, mirrorCodexV2GazeIndex, resolveCodexV2GazeDirection, shouldTrackCodexV2Gaze } from "./codex-pets-core.js";
 import type { Point } from "./display.js";
 import { getPetWindowSpriteBottomInset } from "./pet-window-shape.js";
 import type { PetContentRender } from "./pet-window-types.js";
@@ -24,17 +24,21 @@ interface PetGazeEntry {
   pluginSpriteOverride: boolean;
   activityOverride: boolean;
   rendererReady: boolean;
+  reducedMotion: boolean | null;
   dragging: boolean;
   movementSuspended: boolean;
   movementTimer: NodeJS.Timeout | null;
   movementGeneration: number;
   lastBounds: Electron.Rectangle | null;
   lastDirection: number | null;
+  trackedDirection: number | null;
+  glanceStartedAt: number | null;
+  nextGlanceAt: number;
 }
 
 const petGazeEntries = new Map<BrowserWindow, PetGazeEntry>();
 let petGazeTicker: NodeJS.Timeout | null = null;
-const petGazeTickerIntervalMs = 100;
+const petGazeTickerIntervalMs = 50;
 let petGazeCursorPoint: Point | null = null;
 let petGazeLastCursorMovedAt: number | null = null;
 
@@ -54,12 +58,16 @@ export function registerPetGazeWindow(window: BrowserWindow): void {
     pluginSpriteOverride: false,
     activityOverride: false,
     rendererReady: false,
+    reducedMotion: null,
     dragging: false,
     movementSuspended: false,
     movementTimer: null,
     movementGeneration: 0,
     lastBounds: null,
     lastDirection: null,
+    trackedDirection: null,
+    glanceStartedAt: null,
+    nextGlanceAt: 0,
   };
   petGazeEntries.set(window, entry);
 
@@ -131,7 +139,7 @@ function syncPetGazeTicker(): void {
 function isPetGazeEligible(entry: PetGazeEntry): boolean {
   return shouldTrackCodexV2Gaze({
     spriteVersion: entry.codexSpriteVersion,
-    idleCursorGazeEnabled: getAppStateSnapshot().preferences.idleCursorGazeEnabled,
+    idleCursorGazeEnabled: isIdleCursorGazeEnabled(),
     paused: entry.paused,
     reactionState: entry.reactionState,
     motionState: entry.motionState,
@@ -140,6 +148,7 @@ function isPetGazeEligible(entry: PetGazeEntry): boolean {
     && !entry.dragging
     && !entry.activityOverride
     && !entry.movementSuspended
+    && entry.reducedMotion === false
     && entry.rendererReady
     && !entry.window.isDestroyed()
     && entry.window.isVisible()
@@ -148,7 +157,7 @@ function isPetGazeEligible(entry: PetGazeEntry): boolean {
 
 /** Apply an idle cursor-gaze preference change without waiting for the ticker. */
 export function refreshPetGazePreference(): void {
-  const enabled = getAppStateSnapshot().preferences.idleCursorGazeEnabled;
+  const enabled = isIdleCursorGazeEnabled();
   for (const entry of petGazeEntries.values()) {
     resetPetGazeDirection(entry);
     if (enabled) forcePetGazeEvaluation(entry.window);
@@ -166,8 +175,20 @@ function sendPetGaze(entry: PetGazeEntry, direction: number | null): void {
 function resetPetGazeDirection(entry: PetGazeEntry): void {
   const hadDirection = entry.lastDirection !== null;
   entry.lastDirection = null;
+  entry.trackedDirection = null;
+  entry.glanceStartedAt = null;
+  entry.nextGlanceAt = 0;
   if (!hadDirection || !entry.rendererReady || entry.window.isDestroyed() || entry.window.webContents.isDestroyed()) return;
   entry.window.webContents.send("openpets:pet-gaze", { index: null });
+}
+
+function finishPetGazeGlance(entry: PetGazeEntry, now: number): void {
+  if (entry.glanceStartedAt !== null) {
+    entry.nextGlanceAt = now + codexV2GazeRestMs;
+  }
+  entry.glanceStartedAt = null;
+  entry.trackedDirection = null;
+  sendPetGaze(entry, null);
 }
 
 function evaluatePetGaze(entry: PetGazeEntry, cursor: Point, now = Date.now()): void {
@@ -176,8 +197,10 @@ function evaluatePetGaze(entry: PetGazeEntry, cursor: Point, now = Date.now()): 
     else resetPetGazeDirection(entry);
     return;
   }
-  if (!isCodexV2GazeActive(petGazeLastCursorMovedAt, now)) {
-    sendPetGaze(entry, null);
+  if (!isCodexV2GazeActive(petGazeLastCursorMovedAt, now)
+    || now < entry.nextGlanceAt
+    || (entry.glanceStartedAt !== null && now - entry.glanceStartedAt >= codexV2GazeMaxGlanceMs)) {
+    finishPetGazeGlance(entry, now);
     return;
   }
   let bounds: Electron.Rectangle;
@@ -187,7 +210,7 @@ function evaluatePetGaze(entry: PetGazeEntry, cursor: Point, now = Date.now()): 
     resetPetGazeDirection(entry);
     return;
   }
-  const direction = quantizeCodexV2GazeDirection(
+  const direction = resolveCodexV2GazeDirection(
     cursor,
     getCodexV2GazeAnchorPoint(
       bounds,
@@ -198,9 +221,16 @@ function evaluatePetGaze(entry: PetGazeEntry, cursor: Point, now = Date.now()): 
       entry.flipped,
       entry.gazeSpriteBottomInset,
     ),
+    entry.trackedDirection,
   );
-  const selected = direction === null ? null : getCodexV2GazeSpritePosition(direction, entry.flipped);
-  const selectedDirection = direction === null ? null : (entry.flipped ? mirrorCodexV2GazeIndex(direction) : direction);
+  if (direction === null) {
+    finishPetGazeGlance(entry, now);
+    return;
+  }
+  if (entry.glanceStartedAt === null) entry.glanceStartedAt = now;
+  entry.trackedDirection = direction;
+  const selected = getCodexV2GazeSpritePosition(direction, entry.flipped);
+  const selectedDirection = entry.flipped ? mirrorCodexV2GazeIndex(direction) : direction;
   sendPetGaze(entry, selected ? selectedDirection : null);
 }
 
@@ -209,7 +239,7 @@ function updatePetGazeCursor(cursor: Point, now: number): void {
     petGazeCursorPoint = cursor;
     return;
   }
-  if (petGazeCursorPoint.x === cursor.x && petGazeCursorPoint.y === cursor.y) return;
+  if (Math.hypot(petGazeCursorPoint.x - cursor.x, petGazeCursorPoint.y - cursor.y) < 3) return;
   petGazeCursorPoint = cursor;
   petGazeLastCursorMovedAt = now;
 }
@@ -256,6 +286,7 @@ export function resetPetGazeWindow(window: BrowserWindow): void {
   }
   entry.movementGeneration += 1;
   entry.rendererReady = false;
+  entry.reducedMotion = null;
   entry.dragging = false;
   entry.motionState = "idle";
   entry.movementSuspended = false;
@@ -272,6 +303,16 @@ export function setPetGazeRendererReady(window: BrowserWindow): void {
     window.webContents.send("openpets:pet-scale-override", entry.petScaleOverride);
   }
   forcePetGazeEvaluation(window);
+}
+
+/** Only the current renderer's validated motion-preference report may enable gaze. */
+export function setPetGazeReducedMotion(window: BrowserWindow, reducedMotion: boolean | null): void {
+  const entry = petGazeEntries.get(window);
+  if (!entry || entry.reducedMotion === reducedMotion) return;
+  entry.reducedMotion = reducedMotion;
+  resetPetGazeDirection(entry);
+  if (reducedMotion === false) forcePetGazeEvaluation(window);
+  syncPetGazeTicker();
 }
 
 export function updatePetGazeConfiguration(window: BrowserWindow, render: PetContentRender, flipped: boolean): void {

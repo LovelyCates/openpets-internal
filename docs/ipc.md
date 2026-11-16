@@ -37,13 +37,14 @@ The client and server pick a transport per platform:
 - **TCP (IPv4)** - used for cross-platform/WSL: a WSL client connects to the
   Windows desktop app over a private IP.
 
-Native Windows clients reject a TCP endpoint in local discovery, including a
-loopback address; they require an OpenPets named pipe. Linux/WSL clients retain
-the validated Windows-to-WSL TCP parser, but the internal Windows desktop does
-not expose a TCP listener for them.
+Native macOS and Windows clients reject a TCP endpoint in local discovery,
+including a loopback address; they require an OpenPets Unix socket or named
+pipe, respectively. Linux/WSL clients retain the validated Windows-to-WSL TCP
+parser, but the internal native desktops do not expose a TCP listener for them.
 
 TCP is the one that touches the network, so it is locked down (see Security).
-The internal Windows build always binds a named pipe. It ignores legacy
+The internal macOS build always binds a Unix socket, and the internal Windows
+build always binds a named pipe. They ignore legacy
 `OPENPETS_IPC_BIND` and `OPENPETS_IPC_ENDPOINT` values, including settings that
 would otherwise bind a LAN address.
 
@@ -51,10 +52,13 @@ would otherwise bind a LAN address.
 
 The app writes a **discovery file** at a platform-specific path
 (`local-ipc-paths.ts` on the server, `discovery.ts` on the client). The file
-contains the endpoint to connect to and an auth **token**. The Windows internal
-edition writes it at `%APPDATA%/OpenPets Internal/runtime/ipc.json`, separate
-from public OpenPets installs; the desktop server ignores the legacy
-`OPENPETS_DISCOVERY_FILE` override. A client:
+contains the endpoint to connect to and an auth **token**. Internal editions
+write it at `~/Library/Application Support/OpenPets Internal/runtime/ipc.json`
+on macOS and `%APPDATA%/OpenPets Internal/runtime/ipc.json` on Windows, separate
+from public OpenPets installs. Both native desktop servers ignore the legacy
+`OPENPETS_DISCOVERY_FILE` override. Clients retain an explicit discovery-file
+override for controlled local integrations and tests, subject to the same native
+endpoint validation. A client:
 
 1. Reads and validates the discovery file (size, permissions, symlink checks;
    on Linux, `XDG_RUNTIME_DIR` must be `0o700` and owned by the user).
@@ -93,7 +97,7 @@ shapes before returning.
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
 | `pet.showMedia` | Show a local image inside a pet's speech bubble |
-| `pet.tokenRate` | Update the short-lived OpenCode token rate badge on a pet |
+| `pet.tokenRate` | Update the expiring OpenCode reading in a pet's usage dock |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
@@ -102,11 +106,78 @@ Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
 absolute path and an explicit `zip`/`folder` kind. `react()`/`say()`/
 `showMedia()` and `tokenRate()` accept an optional `leaseId` to target a specific pet.
 
+Local folder and ZIP imports may explicitly declare `origin: "codex"`, for example
+`installLocalPet(path, { kind: "zip", origin: "codex" })`. The existing package
+validation and installation transaction still run; only its installed source is
+recorded as `{ kind: "codex", path: canonicalSourcePath }` for the Codex library
+classification. This is caller-supplied provenance, including community sources
+such as codex-pets.net, not official certification or an author/ownership claim.
+It grants no additional filesystem or network access, does not copy into
+`~/.codex/pets`, and does not change native Codex settings. Ordinary folder/ZIP
+imports retain their existing behavior. Source paths identify the canonical
+folder or original local archive; legacy native-folder repair skips archive
+sources rather than treating them as `~/.codex/pets/{id}`. Both sources use the
+same ZIP extraction limits, package validation, V1 marker normalization, V2
+layout and installation transaction. Unknown origins are rejected before
+filesystem access.
+
+An explicit Codex-origin local import may also supply optional `libraryMetadata`:
+`{ sourceSite: "codex-pets.net", sourcePetId, kind, tags, creatorName?, creatorHandle? }`.
+The four source kinds are `animal`, `person`, `creature`, and `object`. The source
+ID is nonblank and at most 256 characters; at most 64 tags are accepted, each
+nonblank and at most 80 characters; optional uploader labels are at most 160
+characters. Control characters, unknown fields and other sites are rejected.
+The desktop's shared `pet-format/library-metadata` schema trims/deduplicates these
+labels before reading the source and again at the installer boundary. Labels
+are saved through the installation transaction in installed state, outside
+`pet.json`; failed validation or replacement leaves the existing install intact.
+The public client mirrors the wire type, enforces the metadata/origin association
+and retains the complete 16 KiB frame limit; strict metadata validation belongs
+to the desktop, so the client does not depend on the private pet-format package.
+This optional surface requires a desktop that supports provenance imports.
+
+`listPets()` continues to return every installed pet and the default pet ID.
+Internally it requests `pets.list` with `{ offset: 0 }`, then follows the returned
+`nextOffset` with the same `revision`. Each page includes `ok`, `pets`,
+`defaultPetId`, `total`, `revision`, and `nextOffset` (`null` on the last page).
+Every pet retains `id`, `displayName`, `builtIn`, and `broken`. The server packs
+pages by the UTF-8 size of the complete response, including the request ID,
+envelope and newline, within the existing 16 KiB cap. An individual entry that
+cannot fit fails explicitly instead of producing an empty continuation.
+
+The revision covers the installed metadata, its ordering and the default pet.
+If these change between pages, the request fails and the caller can retry
+`listPets()`; pages from different snapshots are never silently combined. The
+client validates exact offset progress, stable totals/revision/default, unique
+IDs and final count, with aggregation limits of 100,000 pets, 4,096 pages and
+64 MiB. Low-level requests without an offset retain the original complete small
+list response. A larger unpaged list returns `pagination_required` with an
+instruction to request offset zero. New clients also accept the original small
+list response from released servers that ignore pagination parameters.
+
 `pet.tokenRate` is local-only and carries only a bounded opaque session id,
 an estimated token rate or a reported output-token count, and an optional
 lease id. It carries no prompt, model response, file path, or tool argument.
-The host validates numeric bounds and the lease before updating a separate
-short-lived badge; a null rate without an output count clears that session.
+It can also carry optional `averageTokensPerSecond` in the same finite
+`0..10000` range as the live rate. AVG always remains an estimate, including
+when `source: "reported"` identifies an exact provider output count. Omitting
+AVG preserves the original payload contract; a null-rate clear without an
+output count cannot carry AVG.
+
+The OpenCode adapter computes AVG from all accepted stream characters divided
+by four, divided by the actual elapsed time from the first to the latest delta
+in the current observed output segment. It needs at least one second of
+observations. It is not an arithmetic mean of rolling rates or a whole-session
+average. A report freezes the segment's AVG before resetting live sampling;
+reporting delays do not lower it. The next stream segment, a different session,
+or a clear resets sampling, and initial historical V1 full-text snapshots do
+not contribute. Historical usage with no observed stream has no AVG.
+
+The host validates numeric bounds and the lease before updating the usage dock;
+a null rate without an output count clears that session's current reading.
+Live readings expire, while bounded in-memory per-target history lets the dock
+remain idle with a clearly labeled last reported output. This history does not
+extend leases or the brief final-count window retention.
 The method is absent from the remote-control protocol.
 
 Experimental multi-pet LAN mode converts only default-target `working`,

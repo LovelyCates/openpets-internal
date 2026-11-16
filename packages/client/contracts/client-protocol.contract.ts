@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import net from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
+import { getDiscoveryFilePath, parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
 import { createOpenPetsClient, parsePetInstallResult, parsePetListResult, validateTokenRateUpdate } from "../src/index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
 import { maxRemoteMessageBytes, parseRemoteEndpoint, validateRemoteMessage, validateRemoteToken } from "../src/remote-protocol.js";
@@ -17,13 +19,44 @@ const baseDiscovery = {
 };
 
 validateDiscovery(baseDiscovery);
-if (process.platform === "win32") {
+if (process.platform === "win32" || process.platform === "darwin") {
   assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" }));
   assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://192.168.1.100:37645" }));
 } else {
   validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" });
 }
 assert.deepEqual(parseIpcEndpoint("tcp://127.0.0.1:37645"), { kind: "tcp", host: "127.0.0.1", port: 37645 });
+
+// Internal macOS clients find the isolated desktop and reject TCP discovery;
+// Linux retains its explicit WSL transport.
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+assert.ok(platformDescriptor);
+const previousDiscoveryOverride = process.env.OPENPETS_DISCOVERY_FILE;
+try {
+  delete process.env.OPENPETS_DISCOVERY_FILE;
+  for (const platform of ["darwin", "win32", "linux"] as const) {
+    Object.defineProperty(process, "platform", { value: platform });
+    const discovery = {
+      ...baseDiscovery,
+      platform,
+      endpoint: platform === "win32" ? "\\\\.\\pipe\\openpets-test-123" : "/tmp/openpets-501/openpets-123.sock",
+    };
+    validateDiscovery(discovery);
+    if (platform === "darwin") {
+      assert.equal(getDiscoveryFilePath(), join(homedir(), "Library", "Application Support", "OpenPets Internal", "runtime", "ipc.json"));
+      assertRejects(() => validateDiscovery({ ...discovery, endpoint: "tcp://127.0.0.1:37645" }));
+    } else if (platform === "win32") {
+      assert.equal(getDiscoveryFilePath(), join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "OpenPets Internal", "runtime", "ipc.json"));
+      assertRejects(() => validateDiscovery({ ...discovery, endpoint: "tcp://127.0.0.1:37645" }));
+    } else {
+      validateDiscovery({ ...discovery, endpoint: "tcp://127.0.0.1:37645" });
+      validateDiscovery({ ...discovery, platform: "win32", endpoint: "tcp://192.168.1.10:37645" });
+    }
+  }
+} finally {
+  Object.defineProperty(process, "platform", platformDescriptor);
+  restoreEnvironment("OPENPETS_DISCOVERY_FILE", previousDiscoveryOverride);
+}
 
 // Test private/local IPv4 addresses for WSL NAT mode
 assert.deepEqual(parseIpcEndpoint("tcp://10.0.0.1:37645"), { kind: "tcp", host: "10.0.0.1", port: 37645 });
@@ -84,6 +117,34 @@ assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerS
 assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: null, outputTokens: -1, source: "reported" }));
 assertRejects(() => validateTokenRateUpdate({ sessionId: "session-1", tokensPerSecond: null, outputTokens: 10, source: "estimated" }));
 
+for (const averageTokensPerSecond of [0, 24.7, 10_000]) {
+  assert.deepEqual(validateTokenRateUpdate({
+    sessionId: "session-avg", tokensPerSecond: 52.4, averageTokensPerSecond, source: "estimated",
+  }), {
+    sessionId: "session-avg", tokensPerSecond: 52.4, averageTokensPerSecond, source: "estimated",
+  }, "the client preserves an optional bounded source-computed average");
+}
+assert.deepEqual(validateTokenRateUpdate({
+  sessionId: "session-avg", tokensPerSecond: null, averageTokensPerSecond: 24.7, outputTokens: 123, source: "reported",
+}), {
+  sessionId: "session-avg", tokensPerSecond: null, averageTokensPerSecond: 24.7, outputTokens: 123, source: "reported",
+}, "a reported final count can carry the independently estimated average");
+for (const averageTokensPerSecond of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0.1, 10_000.1]) {
+  assertRejects(() => validateTokenRateUpdate({ sessionId: "session-avg", tokensPerSecond: 52.4, averageTokensPerSecond, source: "estimated" }));
+}
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-avg", tokensPerSecond: null, averageTokensPerSecond: 0, source: "estimated" }));
+assertRejects(() => validateTokenRateUpdate({ sessionId: "session-avg", tokensPerSecond: null, averageTokensPerSecond: 24.7, source: "reported" }));
+
+const invalidLocalInstallClient = createOpenPetsClient({ remote: false, discoveryPath: "/missing-openpets-discovery-must-not-be-read.json" });
+const installUnknown = invalidLocalInstallClient.installLocalPet as (path: string, options: unknown) => Promise<unknown>;
+for (const options of [
+  { kind: "zip", origin: "catalog" }, { kind: "folder", origin: "catalog" },
+  { kind: "folder", origin: null }, { kind: "folder", libraryMetadata: {} },
+]) {
+  await assert.rejects(installUnknown("/tmp/local-pet", options), (error: unknown) => error instanceof OpenPetsClientError && error.code === "invalid_params",
+    "invalid local provenance must fail before discovery or connection");
+}
+
 console.log("Client protocol validation passed.");
 
 assert.deepEqual(parseRemoteEndpoint("tcp://127.0.0.1:37645"), { kind: "tcp", host: "127.0.0.1", port: 37645 });
@@ -119,6 +180,8 @@ try {
   assert.equal(remoteClient.transport, "remote");
   assert.deepEqual(await remoteClient.status(), { ok: true, appRunning: true });
   await assert.rejects(remoteClient.listPets(), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
+  await assert.rejects(remoteClient.installLocalPet("/tmp/codex-pet", { kind: "folder", origin: "codex" }), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
+  await assert.rejects(remoteClient.installLocalPet("/tmp/codex-pet.zip", { kind: "zip", origin: "codex" }), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
   await assert.rejects(remoteClient.tokenRate!({ sessionId: "session-1", tokensPerSecond: 30, source: "estimated" }), (error: unknown) => error instanceof OpenPetsClientError && error.code === "remote_method_not_supported");
 } finally {
   if (previousDiscovery === undefined) delete process.env.OPENPETS_DISCOVERY_FILE;

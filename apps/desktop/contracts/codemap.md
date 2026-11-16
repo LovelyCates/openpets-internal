@@ -49,4 +49,5 @@ Assert openpets.plugin.json filename constant
 
 - `catalog-fixture.contract.ts`: Validates catalog V2 schema against fixture and invalid cases (duplicate IDs, bad URL schemes, wrong hosts, reserved "builtin" ID)
 - `local-ipc-protocol.contract.ts`: Validates IPC protocol parsing, token auth, reaction types, message constraints, and error response formatting
+  including optional local Codex provenance and rejection of unsupported import origins.
 - `plugin-manifest.contract.ts`: Validates plugin manifest filename, declarative timer manifest schema, permission requirements, config references, action constraints, and expected validation error codes

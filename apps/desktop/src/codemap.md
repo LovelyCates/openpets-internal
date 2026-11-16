@@ -6,7 +6,7 @@ Core TypeScript source for the OpenPets desktop application. Organized into: lif
 
 ## Design/Patterns
 
-- **Internal network boundary**: `internal-network-policy.ts` centralizes disabled public services, optional listeners, and unreviewed plugin execution. Transport owners reject network requests before dispatch while local IPC and local pet imports remain available. On Windows, `local-ipc-paths.ts` ignores legacy TCP bind and discovery-file overrides, keeping the server on a local named pipe.
+- **Internal network boundary**: `internal-network-policy.ts` centralizes disabled public services, optional listeners, and unreviewed plugin execution. Transport owners reject network requests before dispatch while local IPC and local pet imports remain available. On macOS and Windows, `local-ipc-paths.ts` fixes discovery in the isolated OpenPets Internal profile and ignores legacy TCP bind and discovery-file overrides, keeping the server on a Unix socket or named pipe.
 
 - **Modular Controllers**: Separate controllers for default pet vs agent pets (lease-based)
 - **Protocol-First IPC**: Versioned JSON protocol over TCP/Unix sockets with token auth
@@ -94,11 +94,14 @@ pet-window.ts
 OpenCode token usage display:
 `local-ipc-protocol.ts` validates the bounded `pet.tokenRate` payload →
 `local-ipc-request-handler.ts` resolves its lease target →
-`opencode-token-rate.ts` owns short-lived per-session readings and expiry →
-`local-ipc.ts` sends the formatted badge directly to the target pet window →
-`pet-preload.cjs` updates only the badge DOM. `pet-window-render.ts` supplies
-initial badge markup when a pet window loads, and `pet-window-styles.ts` keeps
-the badge separate from the shared pinned plugin HUD slot. Lease release clears
+`opencode-token-rate.ts` owns expiring per-session live/segment-AVG readings,
+independent speed tiers, and bounded per-target idle history → `local-ipc.ts`
+sends the formatted two-column dock to the target pet window,
+refreshing geometry only when its presence changes → `pet-preload.cjs` updates
+the existing dock DOM. `pet-window-render.ts` supplies initial dock markup;
+`pet-window-shape.ts` shares its lift across gaze, Motion, input and overlay
+geometry. `pet-window-styles.ts` stacks it below the separate pinned plugin HUD
+slot. Lease release clears
 estimates immediately; a fresh reported count can hold an existing explicit pet
 window open for no more than eight seconds. A new lease cancels that hold.
 pet-window-interaction.ts
@@ -309,7 +312,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `main.ts`: Application bootstrap after backend selection, single-instance lock, JavaScript plugin host construction, and dev-only Control Center route opening
 - `lifecycle.ts`: App event handlers (quit, window-all-closed, second-instance, open-url routing of Teams enrollment and pet install links) with logging; stops plugin service, IPC, and pet windows on quit
 - `state.ts`: Simple shell pause state
-- `app-state.ts`: Persistent JSON state with V1 schema, atomic writes, reaction animation overrides, validated waiting animation duration, persisted idle cursor-gaze preference, and host Pet Assistant personality preferences
+- `app-state.ts`: Persistent JSON state with V1 schema, atomic writes, reaction animation overrides, validated waiting animation duration, persisted idle cursor-gaze preference, and host Pet Assistant personality preferences. Pet rendering reads a bounded immutable preference projection and a detached single-pet record instead of cloning the library. Activity updates normalize only counters and retain synchronous atomic persistence without returning an unused full snapshot. `updatePreferences()`, including favorites, reuses unchanged validated private pet records without a synchronous library health sweep. Startup fully checks installed files; install commits reuse only unchanged private records by identity and validate new/replaced rows.
 - `default-pet-position-state.ts`: Electron-free default-pet position shape, coordinate/display-key normalization, and bounded per-monitor LRU updates
 - `app-state-core.ts`: Pet scale options, waiting-duration options/normalization, idle cursor-gaze default/normalization, onboarding normalization
 - `pet-assistant-host.ts` / `pet-assistant-service.ts`: Host-owned provider-neutral assistant lifecycle, per-turn prompt composition, terminal outcome reduction, and generation-pinned capability routing
@@ -345,7 +348,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `announcements-core.ts`: Dependency-light campaign validation and active/version-compatible priority selection.
 - `announcements-service.ts`: Bounded main-process feed retrieval/cache and dedicated persistent campaign dismissal state; development-only preview.
 - `control-center-announcements-ipc.ts`: Authorized Control Center campaign snapshots, dismissal by ID, and host-owned CTA opening.
-- `control-center-pet-management-ipc.ts`: Injected Electron-free Control Center pet/catalog management IPC registrations, state/layout snapshots, installation/import mutations, pool ordering, and position reset
+- `control-center-pet-management-ipc.ts`: Injected Electron-free Control Center pet/catalog management IPC registrations, state/layout snapshots with at most eight concurrent manifest reads and ordered, per-entry error isolation, installation/import mutations, pool ordering, and position reset. Localized explicit ZIP provenance selection avoids filename/ID inference; cancelling import preserves the current selection.
 - `preference-patch.ts`: Pure validation of Control Center preference patches (`validatePreferencePatch`/`PreferencePatch`) for the `update-preferences` IPC path, including waiting animation duration, idle cursor gaze, `petCrossDisplayEnabled`, and Pet Assistant personality fields; consumed by `windows.ts`
 - `assets.ts`: Tray icon loading with generated fallback
 - `display.ts`: Screen geometry helpers, pet window positioning
@@ -363,32 +366,35 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 **Pets**:
 - `local-ipc-transport.ts`: Single-request socket framing with separate bounded read-idle and in-flight processing deadlines and close-time timer cleanup.
 - `pet-window.ts`: Public pet-window lifecycle facade: transparent frameless window creation, HTML/CSS composition, sprite and transient presentation updates, gaze configuration, and plugin scale override updates; companion launcher, attached chat styling, bubble suppression, status badges, validated atlas layout selection, context-menu installation delegation, and Linux X11 show/hide gating
-- `pet-activities.ts`: Native activity runtime adapter: exact rendered-outfit carrier registration, raw busy/interruption signals, outfit-specific validated assets and previews, saved logical opt-ins, Control Center snapshots, and dedicated generation-guarded playback IPC.
-- `pet-activity-service.ts` / `pet-activity-policy.ts`: Artwork-neutral logical activity reservations and the single timed quiet-opportunity owner; first-frame history, per-pet cooldowns, cancellation/watchdog policy and injectable time/random. Unused opportunities may request a neutral variation through the carrier.
-- `pet-activity-contract.ts`: Format-discriminated play/cancel/variation commands and activity-only results; Motion targets include epoch, immutable snapshot, presentation and outfit identities.
+- `pet-activities.ts`: Native activity runtime adapter: exact rendered-outfit carrier registration, raw busy/interruption signals, outfit-specific validated assets and previews, saved logical opt-ins, Control Center snapshots, generation-guarded playback IPC, and V1-only cosmetic idle carrier commands.
+- `pet-activity-service.ts` / `pet-activity-policy.ts`: Artwork-neutral logical activity reservations and the single timed quiet-opportunity owner; first-frame history, per-pet cooldowns, cancellation/watchdog policy and injectable time/random. V1 cosmetic idle opportunities share a 15–30 second cadence across carriers of the same pet, without changing native activity opt-ins or cadence.
+- `pet-activity-contract.ts`: Format-discriminated play/cancel/variation commands, cosmetic Classic idle play/stop commands, and activity-only results; Motion targets include epoch, immutable snapshot, presentation and outfit identities.
 - `pet-motion-activity-assets.ts`: Exact committed-outfit activity options, verified finite duration and static first-phase previews from retained immutable Motion snapshots.
 - `pet-activity-asset-cache.ts`: Snapshot-only outfit-specific asset validation cache, keyed by activity and outfit with filesystem freshness checks and bounded installed-pet ownership.
 - `pet-activity-player.cjs`: Dedicated finite rectangular-strip preload player, with image-load/completion generations, cleanup, baseline/scale preservation, and isolation from plugin overrides.
-- `pet-body-contract.ts` / `pet-body-state.ts`: Clone-safe semantic body snapshots and results, window-local raw context/event identity independent of bubble expiration, and validated playback commitment.
+- `pet-body-contract.ts` / `pet-body-state.ts`: Clone-safe semantic body snapshots and results, window-local raw context/event identity independent of bubble expiration, and validated playback commitment. Genuine Classic reacts carry their resolved row and configured cycle duration; finite rows also carry fresh event IDs, including generic overrides. Content commits retain that intent, updating its row/timing only if animation settings change; Classic-only projections/events do not leak into Motion appearances.
 - `pet-window-body-cleanup.ts`: Captured-WebContents teardown for the per-window body bridge, listener/state removal and unconditional snapshot release without destroyed-window getters.
 - `pet-wardrobe-types.ts` / `pet-wardrobe-render-state.ts`: Canonical clone-safe wardrobe snapshots and pure per-window requested/committed outfit projections with narrow change notifications.
 - `pet-window-document.ts` / `pet-motion-render.ts`: Shared pet document/CSP envelope and focused Motion appearance markup adapter; window-local presentation generations remain outside rendering composition.
+- `pet-window-render.ts`: Built-in, Classic and Motion render preparation uses one immutable `PetRenderPreferences` projection per render, including across asynchronous manifest reads; body markup, reaction mapping, cache identity and CSS consume that same revision. Installed-pet selection reads one detached record, while manifest/atlas validation remains with its existing asset owners.
 - `pet-motion-layout.ts`: Pure foot-anchored containment and CSS variables shared by initial Motion presentation, remembered scale overrides and committed native input geometry; fits logical display bounds without resizing source artwork.
 - `pet-motion-snapshot.ts`: Installed-revision validation and immutable clip copies under the existing install lock, per-window pending/current ownership, byte authorization, and cleanup.
-- `pet-body-coordinator.cjs`: Renderer body arbitration for direct manipulation, plugin overrides, events, activities and context; phase completion, event settlement and restrained idle variation.
+- `pet-body-coordinator.cjs`: Renderer body arbitration for direct manipulation, plugin overrides, events, activities and context; phase completion and event settlement. Classic looping busy rows have a three-cycle eligible-time budget, then a renderer-local idle presentation that preserves semantic reactions and HUD data. The matching CSS animation's ready/start state gates only timer admission; its promise subscription is deduplicated per current animation promise and late readiness refreshes only the live owner. Same effective row/timing retains its budget across heartbeats/content commits; interruption freezes remaining time and epoch/dispose invalidates it. New Classic finite IDs replay only their matching unpaused CSS animation through Web Animations; duplicate snapshots/HUD retain phase. V1 quiet and once-per-entry hover gestures share one interruptible cosmetic timer, with stable frame-boundary hover latching and source-filtered cancellation: stationary body left-press preserves an admitted hover gesture, while quiet host stops cannot accidentally cancel it. Pointer leave cannot cancel a quiet gesture.
 - `pet-motion-player.cjs`: Named animated WebP clip decoding and canvas playback with native durations and authored clip pace, first-frame commitment, current-frame alpha testing, pause, the shared accepted clip-byte ceiling, a separate bounded encoded cache and decoder/frame cleanup.
 - `pet-activities-types.ts` / `control-center-pet-activities-ipc.ts`: Clone-safe activity UI snapshot and authorized narrow get/enable/play IPC contracts.
-- `pet-window-styles.ts`: Pet-window CSS generation for reaction/movement sprite states and V2 cursor-glance atlas overrides; V2 idle keeps its animated row-zero loop outside an active glance, and paused V2 idle holds the static neutral cell
-- `pet-content-stage.cjs`: Pet-preload DOM stage replacement and renderer-side retention/application of the host-owned scale override; Motion stages use their own serialized layout input and shared fitted CSS variables rather than a raw sprite transform.
+- `pet-window-styles.ts`: Pet-window CSS generation with separate animation clocks per reaction/movement state and V1 cosmetic gesture, shared V1 frame-hold offsets from `pet-format/animation.ts` expressed as explicit step-end cells, finite reactions ending on their last valid cell, and a bundled-Hoodie-Cat-only nonuniform idle profile. Classic busy-rest styling uses the existing idle profile without changing the reaction attribute or admitting gaze. V2 look-cell position overrides preserve the idle clock; paused V2 idle holds the static neutral cell. Settings SMIL previews consume the same V1 offsets.
+- `pet-content-stage.cjs`: Identity-aware Classic presentation patches that preserve the connected sprite during same-artwork updates, coalesce pending same-revision image decodes, and swap changed artwork atomically; renderer-side retention/application of the host-owned scale override. Motion stages use their own serialized layout input and shared fitted CSS variables rather than a raw sprite transform.
 - `x11-pet-window-state.ts`: X11 client adapter that subscribes to StructureNotify before show, waits for matching MapNotify, sends post-map EWMH state additions, and observes `_NET_WM_STATE` until standard exclusion atoms and the KDE switcher atom when advertised by root `_NET_SUPPORTED` are present
 - `x11-pet-window-state-core.ts`: Electron-free EWMH atom/property helpers for merging existing state and checking required atoms
 - `pet-window-x11-map-core.ts`: Electron-free matching/cancellation state for the target window's MapNotify transition
 - `pet-window-show-coordinator.ts`: Generation-based readiness gate that prevents stale asynchronous completion from showing a pet after a later hide
 - `pet-window-interaction.ts`: Per-window interaction controller owning mouse passthrough, drag and renderer lifecycle IPC, recovery/watchdog timers, dragging state, and process-wide speech-completion subscriptions
+- `pet-window-motion.ts`: Accumulated native-window movement classification, deduplicated directional motion states, and idle/load/close lifecycle for the existing window-motion publisher.
+- `pet-drag-feedback.cjs`: Pointer-drag visual threshold and direction; normal presses stay in their current animation, displacement beyond four pixels admits horizontal/vertical feedback, and release/blur clears its origin.
 - `wayland-layer-backend.ts`: Electron adapter that owns the native helper process/socket, reconnect generations, timers, frame scheduling, `NativeImage` conversion, renderer pointer replay, drag/menu behavior, and patched pet-window methods
 - `wayland-layer-protocol.ts`: Electron-free layer-shell wire encoders, incremental helper-message decoder, transparent BGRA cropping, and pointer button/coordinate mapping
 - `pet-window-context-menu.ts`: Native/layer-shell pet context-menu lifecycle, scale/flip actions, Outfit submenu (always-wear/automatic choice plus "Edit Wardrobe…" deep link) for pets with a wardrobe, plugin command layout (root commands grouped per plugin above the plugin submenus), and plugin command form handling
-- `pet-window-gaze.ts`: Shared preference-gated, movement-driven V2 idle cursor-glance controller; active glances select static gaze cells while expiration, dead-zone, and disable reset the sprite to animated idle, including custom manifest gaze-anchor geometry and flipped gaze IPC updates
+- `pet-window-gaze.ts`: Shared 50ms, preference- and reduced-motion-gated V2 cursor sampling; reads the narrow gaze preference without cloning the pet library. Bounded glances/rest intervals, meaningful movement, angular/radial hysteresis, custom anchor/scale/flip geometry, deduplicated gaze IPC and navigation/visibility/timer cleanup. Static look cells preserve the renderer's idle animation clock.
 - `default-pet-chat.ts`: Host-side in-pet chat and Manager Check-in coordinator managing expanded/collapsed carrier states, IPC authorization, conversation transcript streams, Talk subscriptions, and the private check-in card lifecycle
 - `pet-transient-duration.ts`: Pure display duration for transient bubbles/reactions: reading time from message length, scaled by the speech bubble duration preference; explicit caller and media durations unchanged
 - `pet-transient-presentation.ts`: Reusable per-pet owner for transient display/badge state, transition-unique opaque render-composition tokens, independent display/badge timer guards, timer cleanup, and deterministic transition callbacks; default/agent controllers retain window/voice/lease role ownership
@@ -405,6 +411,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 **IPC**:
 - `local-ipc.ts`: net.Server implementation, socket transport facade, discovery file management, network security (loopback/private address filtering), logging, and request-handler/confinement composition
 - `local-ipc-request-handler.ts`: Electron-free injected local IPC parsing, validation, request routing, side-effect ordering, and protocol response handling
+- `local-ipc-pet-list.ts`: Stateless installed-metadata pagination bound to a SHA-256 revision; budgets the complete response envelope in UTF-8 under 16 KiB, preserves small unpaged results and explicitly rejects oversized entries or changed lists
 - `local-ipc-confinement.ts`: Electron-free module-lifetime coordination between explicit leases, terminal tracking, confinement state updates, and tracker cancellation
 - `local-ipc-protocol.ts`: Protocol constants, request/response types, validation functions
 - `local-ipc-paths.ts`: Platform-specific socket paths and discovery file locations
@@ -415,7 +422,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `lease-manager.ts`: Lease lifecycle (acquire, heartbeat, release, cleanup), target resolution
 
 **Installation**:
-- `pet-installation.ts`: ZIP download, yauzl extraction with safety limits, pet validation; catalog installs prefer an entry's `wardrobeZip`, and `installPetWardrobe` swaps an installed catalog pet to its wardrobe package ("Get/Update outfits")
+- `pet-installation.ts`: ZIP download, yauzl extraction with safety limits, pet validation; catalog installs prefer an entry's `wardrobeZip`, and `installPetWardrobe` swaps an installed catalog pet to its wardrobe package ("Get/Update outfits"). Explicit local ZIP/folder `origin: "codex"` records the canonical archive/folder source plus optional shared-schema library labels through the same validated candidate/upsert transaction, without touching the native Codex directory or changing ordinary import behavior.
 - `pet-install-link-protocol.ts`: Electron-free parser/validator for `openpets://install` website links
 - `pet-install-link-handler.ts`: Confirm → download → shared ZIP install → feedback flow for install links; Electron dialogs/windows injected by `main.ts`
 - `pet-install-transaction-protocol.ts`: Electron-free stable pet-install journal/schema, managed naming, topology classifiers, and recovery decision policy
@@ -426,7 +433,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `pet-wardrobe.ts`: Wardrobe owner — render-time outfit resolution for every pet window role, minute-aligned schedule timer that re-renders pets whose scheduled outfit changed, Control Center wardrobe snapshot, and validated preference updates (always-wear choice, user schedule, reset)
 - `pet-window-refresh.ts`: Re-renders every window showing one pet id across default, agent, plugin, LAN, and pinned roles after a per-pet presentation change (flip, outfit), or every pet window after a global one (speech bubble size)
 - `codex-pets.ts`: Import from `~/.codex/pets/` with validation
-- `codex-pets-core.ts`: Desktop gaze geometry and Codex enumeration limits; metadata, layout, and atlas policy belong to `@open-pets/pet-format`.
+- `codex-pets-core.ts`: Desktop gaze geometry, direction hysteresis, glance timing and Codex enumeration limits; metadata, layout, and atlas policy belong to `@open-pets/pet-format`.
 - `codex-pet-migration.ts`: Idempotent startup repair for legacy Codex V2 imports gated by canonical source, exact local atlas validation, and byte hash equality
 - `installed-pet-layout.ts`: Bounded installed-manifest reader shared by pet windows and Control Center sprite previews, preserving metadata such as gaze anchors; resolves and validates manifest-selected atlas bytes/MIME (base or one declared outfit) for image protocols
 - `catalog-remote.ts`: Shared V3 client adapter, V3-to-V2 conversion, and V2 fallback cache

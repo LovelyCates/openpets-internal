@@ -7,6 +7,8 @@ export const codexV2GazeSectorCount = 16;
 export const codexV2GazeSectorAngle = (Math.PI * 2) / codexV2GazeSectorCount;
 export const codexV2GazeDeadZonePx = 24;
 export const codexV2GazeIdleResetMs = 1_200;
+export const codexV2GazeMaxGlanceMs = 900;
+export const codexV2GazeRestMs = 1_600;
 
 export interface CodexV2GazePoint {
   readonly x: number;
@@ -97,6 +99,31 @@ export function quantizeCodexV2GazeDirection(
   const angle = Math.atan2(dx, -dy);
   const sector = Math.floor((angle + codexV2GazeSectorAngle / 2) / codexV2GazeSectorAngle);
   return (sector + codexV2GazeSectorCount) % codexV2GazeSectorCount;
+}
+
+/** Keep tiny pointer movements from flipping whole-body look cells back and forth. */
+export function resolveCodexV2GazeDirection(
+  cursor: CodexV2GazePoint,
+  anchor: CodexV2GazePoint,
+  previousDirection: number | null,
+): number | null {
+  const previous = previousDirection !== null && isCodexV2GazeIndex(previousDirection)
+    ? previousDirection
+    : null;
+  const direction = quantizeCodexV2GazeDirection(
+    cursor,
+    anchor,
+    codexV2GazeDeadZonePx + (previous === null ? 4 : -4),
+  );
+  if (direction === null || previous === null) return direction;
+
+  const angle = Math.atan2(cursor.x - anchor.x, anchor.y - cursor.y);
+  const previousAngle = previous * codexV2GazeSectorAngle;
+  const difference = Math.atan2(Math.sin(angle - previousAngle), Math.cos(angle - previousAngle));
+  const boundaryMargin = 4 * Math.PI / 180;
+  return Math.abs(difference) <= codexV2GazeSectorAngle / 2 + boundaryMargin
+    ? previous
+    : direction;
 }
 
 /** Mirror a gaze index before the renderer applies its horizontal CSS flip. */

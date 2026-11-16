@@ -1,3 +1,5 @@
+import { getSpriteFrameOffsets } from "@open-pets/pet-format/animation";
+
 export interface PetSpriteLayout {
   readonly version: 1 | 2;
   readonly frameWidth: number;
@@ -94,8 +96,8 @@ export function buildReactionPreviewModel<State extends string>(
     readonly previewWidth?: number;
     readonly previewHeight?: number;
     readonly sprite: PetSpriteLayout & {
-      readonly states: Record<State, { readonly row: number; readonly frames: number; readonly durationMs: number }> & {
-        readonly idle: { readonly row: number; readonly frames: number; readonly durationMs: number };
+      readonly states: Record<State, { readonly row: number; readonly frames: number; readonly durationMs: number; readonly frameDurationsMs?: readonly number[] }> & {
+        readonly idle: { readonly row: number; readonly frames: number; readonly durationMs: number; readonly frameDurationsMs?: readonly number[] };
       };
     };
   },
@@ -114,6 +116,7 @@ export function buildReactionPreviewModel<State extends string>(
     x: -(preview.frameColumns[0] ?? 0) * frame.width,
     y: -preview.row * frame.height,
     xValues: preview.frameColumns.map((column) => String(-column * frame.width)).join(";"),
+    keyTimes: preview.animated ? getSpriteFrameOffsets(sprite).join(";") : "0",
     atlasWidth: frame.width * preview.atlasColumns,
     atlasHeight: frame.height * preview.atlasRows,
     animated: preview.animated,

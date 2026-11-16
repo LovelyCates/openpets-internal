@@ -2,10 +2,10 @@ import { app } from "electron";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { getAppStateSnapshot, type BubbleTheme, type HudScaleValue, type PetScaleValue } from "./app-state.js";
+import { getPetRenderPreferences, type BubbleTheme, type HudScaleValue, type PetRenderPreferences, type PetScaleValue } from "./app-state.js";
 import { getCodexPetSpritePosition, type CodexPetSpriteLayout } from "@open-pets/pet-format/sprite-layout";
 import { getCodexV2GazeSpritePosition } from "./codex-pets-core.js";
-import { compactComposerGeometry, getEffectiveBubbleScale, getPetWindowPinnedLift, petBottom, petWindowHitPadding } from "./pet-window-shape.js";
+import { compactComposerGeometry, getEffectiveBubbleScale, getPetWindowOverlayLift, getPetWindowPinnedLift, getPetWindowTokenDockLift, petTokenDockHeight, petBottom, petWindowHitPadding } from "./pet-window-shape.js";
 import { defaultPetWindowSize } from "./display.js";
 import {
   calculateChatPanelBottom,
@@ -17,7 +17,7 @@ import {
   sessionOrbGlowReach,
 } from "./default-pet-chat-geometry.js";
 import { defaultPetSprite } from "@open-pets/pet-format/animation";
-import { mirrorDirectionalSpriteState, motionToSpriteState, type PetMotionState, type SpriteStateDefinition, type UniversalSpriteState } from "@open-pets/pet-format/animation";
+import { getSpriteFrameOffsets, mirrorDirectionalSpriteState, motionToSpriteState, type PetMotionState, type SpriteStateDefinition, type UniversalSpriteState } from "@open-pets/pet-format/animation";
 
 // Dark colors for transient speech bubbles. The pinned plugin HUD keeps its own look.
 const darkBubbleCss = `
@@ -58,7 +58,13 @@ function createBubbleThemeCss(theme: BubbleTheme): string {
   return "";
 }
 
-export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudScale: HudScaleValue, petDragRegion: "drag" | "no-drag"): string {
+export function createPetWindowCss(
+  paused: boolean,
+  scale: PetScaleValue,
+  hudScale: HudScaleValue,
+  petDragRegion: "drag" | "no-drag",
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
+): string {
   const opacity = paused ? "0.62" : "1";
   const playState = paused ? "paused" : "running";
   const scaledWidth = Math.ceil(defaultPetSprite.frameWidth * scale);
@@ -69,13 +75,19 @@ export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudSca
   // The pet and transient bubbles are lifted above the pinned plugin bubble
   // (HUD); the lift grows with the HUD's own scale so they never overlap.
   const pinnedLift = getPetWindowPinnedLift(true, hudScale);
-  const buttonPreferences = getAppStateSnapshot().preferences;
+  const tokenDockLift = getPetWindowTokenDockLift(true, hudScale);
+  const tokenOnlyLift = getPetWindowOverlayLift(false, hudScale, true);
+  const buttonPreferences = preferences;
   // Speech bubbles scale from their arrow tip; the cap differs when the
   // pinned HUD lifts the bubble higher in the window.
   const bubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom);
   const pinnedBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + pinnedLift);
   const mediaBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom, true);
   const pinnedMediaBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + pinnedLift, true);
+  const tokenBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + tokenOnlyLift);
+  const tokenPinnedBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + pinnedLift + tokenDockLift);
+  const tokenMediaBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + tokenOnlyLift, true);
+  const tokenPinnedMediaBubbleScale = getEffectiveBubbleScale(buttonPreferences.bubbleScale, defaultPetWindowSize.width, defaultPetWindowSize.height, bubbleBottom + pinnedLift + tokenDockLift, true);
   const petButtonsSide = buttonPreferences.petButtonsPosition === "left" ? "left" : "right";
   const petButtonSizePx = buttonPreferences.petButtonsSize === "small" ? 18 : buttonPreferences.petButtonsSize === "large" ? 28 : 22;
   const petButtonIconPx = Math.round(petButtonSizePx * 0.55);
@@ -94,6 +106,10 @@ export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudSca
     .stage.has-pinned { --bubble-scale: ${pinnedBubbleScale}; }
     .stage .bubble.has-media { --bubble-scale: ${mediaBubbleScale}; }
     .stage.has-pinned .bubble.has-media { --bubble-scale: ${pinnedMediaBubbleScale}; }
+    .stage.has-token-dock { --bubble-scale: ${tokenBubbleScale}; }
+    .stage.has-token-dock.has-pinned { --bubble-scale: ${tokenPinnedBubbleScale}; }
+    .stage.has-token-dock .bubble.has-media { --bubble-scale: ${tokenMediaBubbleScale}; }
+    .stage.has-token-dock.has-pinned .bubble.has-media { --bubble-scale: ${tokenPinnedMediaBubbleScale}; }
     .openpets-pet-buttons { position: absolute; ${petButtonsSide}: 12px; top: 4px; z-index: 5; display: flex; flex-direction: column; gap: 4px; pointer-events: auto; -webkit-app-region: no-drag; }
     .openpets-companion-launcher { width: ${petButtonSizePx}px; height: ${petButtonSizePx}px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.92); border-radius: 50%; background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(239, 246, 255, 0.94) 100%); color: #2563eb; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14), 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95); display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease, color 140ms ease, background 140ms ease; }
     .openpets-companion-launcher svg { width: ${petButtonIconPx}px; height: ${petButtonIconPx}px; }
@@ -183,9 +199,40 @@ export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudSca
       display: none !important;
     }
     .pet-hitbox { position: absolute; left: 50%; bottom: ${Math.max(0, petBottom - petWindowHitPadding)}px; z-index: 1; width: ${scaledWidth + petWindowHitPadding * 2}px; height: ${scaledHeight + petWindowHitPadding * 2}px; display: grid; place-items: center; transform: translateX(-50%); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
-    .opencode-token-rate { position: absolute; top: 60%; right: 2px; z-index: 6; display: inline-flex; flex-direction: column; gap: 1px; max-width: 125px; padding: 3px 6px; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 9px; background: rgba(15, 23, 42, 0.88); color: #f8fafc; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25); font: 700 10px/12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; transform: translateY(-50%); pointer-events: none; -webkit-app-region: no-drag; }
-    .opencode-token-rate-speed { color: #a7f3d0; }
-    .opencode-token-rate-total { font-size: 9px; color: #cbd5e1; }
+    .opencode-token-rate {
+      position: absolute;
+      left: 50%;
+      bottom: 6px;
+      z-index: 4;
+      width: 188px;
+      max-width: calc((100% - 16px) / ${hudScale});
+      height: ${petTokenDockHeight}px;
+      box-sizing: border-box;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(226, 232, 240, 0.93));
+      color: #475569;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(8px);
+      font: 600 10px/14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      white-space: nowrap;
+      transform: translateX(-50%) scale(${hudScale});
+      transform-origin: bottom center;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+    }
+    .opencode-token-rate::after { content: ""; position: absolute; left: 50%; top: 8px; bottom: 8px; width: 1px; background: rgba(148, 163, 184, 0.25); }
+    .opencode-token-rate-metric { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+    .opencode-token-rate-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: #64748b; font: 600 8.5px/10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.02em; }
+    .opencode-token-rate-number { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: #94a3b8; font: 650 10px/14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .opencode-token-rate-metric[data-tier="fast"] .opencode-token-rate-number { color: #047857; }
+    .opencode-token-rate-metric[data-tier="medium"] .opencode-token-rate-number { color: #2563eb; }
+    .opencode-token-rate-metric[data-tier="slow"] .opencode-token-rate-number { color: #64748b; }
     .pet-shell { position: relative; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
     html[data-flip-x="true"] .pet-shell { transform: scaleX(-1); }
     /* Wayland native drag starts on the CSS drag region without consulting the
@@ -291,6 +338,17 @@ export function createPetWindowCss(paused: boolean, scale: PetScaleValue, hudSca
     .stage.has-pinned ~ .openpets-compact-composer { bottom: ${compactComposerBottom + pinnedLift}px; }
     .stage.has-pinned ~ .openpets-chat-panel,
     .stage.has-pinned ~ .openpets-check-in-panel { bottom: ${chatPanelBottom + pinnedLift}px; }
+    .stage.has-token-dock .pet-hitbox { bottom: ${Math.max(0, petBottom - petWindowHitPadding) + tokenOnlyLift}px; }
+    .stage.has-token-dock .bubble.is-pinned { bottom: ${6 + tokenDockLift}px; }
+    .stage.has-token-dock .bubble:not(.is-pinned) { bottom: ${bubbleBottom + tokenOnlyLift}px; }
+    .stage.has-token-dock ~ .openpets-compact-composer { bottom: ${compactComposerBottom + tokenOnlyLift}px; }
+    .stage.has-token-dock ~ .openpets-chat-panel,
+    .stage.has-token-dock ~ .openpets-check-in-panel { bottom: ${chatPanelBottom + tokenOnlyLift}px; }
+    .stage.has-token-dock.has-pinned .pet-hitbox { bottom: ${Math.max(0, petBottom - petWindowHitPadding) + pinnedLift + tokenDockLift}px; }
+    .stage.has-token-dock.has-pinned .bubble:not(.is-pinned) { bottom: ${bubbleBottom + pinnedLift + tokenDockLift}px; }
+    .stage.has-token-dock.has-pinned ~ .openpets-compact-composer { bottom: ${compactComposerBottom + pinnedLift + tokenDockLift}px; }
+    .stage.has-token-dock.has-pinned ~ .openpets-chat-panel,
+    .stage.has-token-dock.has-pinned ~ .openpets-check-in-panel { bottom: ${chatPanelBottom + pinnedLift + tokenDockLift}px; }
     .bubble.is-plugin.accent-blue { background: linear-gradient(135deg, rgba(219, 234, 254, 0.97), rgba(191, 219, 254, 0.94)); }
     .bubble.is-plugin.accent-purple { background: linear-gradient(135deg, rgba(237, 233, 254, 0.97), rgba(221, 214, 254, 0.94)); }
     .bubble.is-plugin.accent-green { background: linear-gradient(135deg, rgba(220, 252, 231, 0.97), rgba(187, 247, 208, 0.94)); }
@@ -1552,11 +1610,30 @@ export function createSpriteStateCss(selector: ".sprite" | ".installed-sprite", 
   const motionRules = (Object.entries(motionToSpriteState) as Array<[PetMotionState, UniversalSpriteState]>)
     .filter(([motion]) => motion !== "idle")
     .map(([motion, state]) => rulesFor(`[data-motion-state="${motion}"]`, state));
-  return [...reactionRules, ...motionRules].join("\n");
+  // Rest is renderer-local presentation, not a false idle reaction. Keeping
+  // reactionState busy also keeps quiet gestures and V2 gaze ineligible.
+  const restRule = rulesFor(classicRestClause(), "idle");
+  // A retained sprite keeps its CSS animation clock when only duration/row
+  // changes. Each visual state needs a distinct name so an idle-to-finite
+  // transition starts at frame zero while HUD-only updates keep their clock.
+  const keyframes = (Object.keys(stateRows) as UniversalSpriteState[])
+    .map((state) => createSpriteKeyframes(`pet-frames-${state}`, stateRows[state], layout.frameWidth));
+  return [...reactionRules, restRule, ...motionRules, ...keyframes].join("\n");
+}
+
+function classicRestClause(): string {
+  return '[data-classic-rest="true"][data-motion-state="idle"][data-paused="false"]:is([data-reaction-state="review"], [data-reaction-state="running"], [data-reaction-state="waiting"])';
 }
 
 export function createInstalledSpriteStateCss(stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>, layout: CodexPetSpriteLayout): string {
-  if (layout.version === 1) return createSpriteStateCss(".installed-sprite", stateRows);
+  if (layout.version === 1) {
+    const idleGestures = (["waving", "jumping"] as const).map((state) => {
+      const selector = `html[data-codex-sprite-version="1"][data-paused="false"][data-reaction-state="idle"][data-motion-state="idle"][data-idle-animation="${state}"] .installed-sprite`;
+      const name = `pet-idle-${state}`;
+      return `${createSpriteRule(selector, state, stateRows, layout, false, name)}\n${createSpriteKeyframes(name, stateRows[state], layout.frameWidth)}`;
+    });
+    return [createSpriteStateCss(".installed-sprite", stateRows, layout), ...idleGestures].join("\n");
+  }
   return `${createSpriteStateCss(".installed-sprite", stateRows, layout)}\n${createCodexV2GazeCss(".installed-sprite", layout)}`;
 }
 
@@ -1567,20 +1644,54 @@ export function createCodexV2GazeCss(selector: ".sprite" | ".installed-sprite", 
     if (!position) return "";
     const x = -(position.column * layout.frameWidth);
     const y = -(position.row * layout.frameHeight);
-    return `html[data-codex-sprite-version="2"][data-paused="false"][data-reaction-state="idle"][data-motion-state="idle"][data-codex-gaze-index="${index}"] ${selector} { --sprite-row-y: ${y}px; --sprite-offset-x: ${x}px; --sprite-end-offset-x: ${x}px; --sprite-animation: none; animation: none; background-position: ${x}px ${y}px; }`;
+    // Important presentation overrides outrank CSS animation output without
+    // removing its clock. A glance can therefore reveal the current idle
+    // phase when it ends instead of restarting breathing at frame zero.
+    return `html[data-codex-sprite-version="2"][data-paused="false"][data-reaction-state="idle"][data-motion-state="idle"][data-codex-gaze-index="${index}"] ${selector} { background-position: ${x}px ${y}px !important; }`;
   }).join("\n");
 }
 
-export function createSpriteRule(selector: string, state: UniversalSpriteState, stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>, layout: CodexPetSpriteLayout, useNeutralPose = false): string {
+/** Authored for the six verified bundled Hoodie Cat atlases, not third-party pets. */
+export function createBuiltInIdleSpriteCss(): string {
+  // Column 2 closes the eyes; equal 917ms holds made a blink look stuck.
+  // All bundled outfits share column 2's blink and column 4's ear flick.
+  const frameDurationsMs = [3000, 250, 110, 1400, 240, 500];
+  const durationMs = frameDurationsMs.reduce((sum, duration) => sum + duration, 0);
+  let elapsedMs = 0;
+  const frames = frameDurationsMs.map((duration, column) => {
+    const percentage = Number((elapsedMs / durationMs * 100).toFixed(6));
+    elapsedMs += duration;
+    return `${percentage}% { background-position: ${-column * defaultPetSprite.frameWidth}px 0px; }`;
+  });
+  frames.push("100% { background-position: 0px 0px; }");
+  const animation = `--sprite-animation: pet-builtin-idle ${durationMs}ms step-end infinite;`;
+  return `html[data-reaction-state="idle"] .sprite { ${animation} }\nhtml${classicRestClause()} .sprite { ${animation} }\n@keyframes pet-builtin-idle { ${frames.join(" ")} }`;
+}
+
+export function createSpriteRule(selector: string, state: UniversalSpriteState, stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>, layout: CodexPetSpriteLayout, useNeutralPose = false, animationName = `pet-frames-${state}`): string {
   const row = stateRows[state];
   const iterations = "iterations" in row ? row.iterations : "infinite";
   const position = getCodexPetSpritePosition(layout, row, useNeutralPose);
   const startOffset = -(position.startColumn * layout.frameWidth);
   const endOffset = -(position.endColumn * layout.frameWidth);
+  const timing = row.frameDurationsMs ? "step-end" : "steps(var(--sprite-frames))";
+  const fill = row.frameDurationsMs && typeof iterations === "number" ? " forwards" : "";
   const animation = position.animated
-    ? " --sprite-animation: pet-frames var(--sprite-duration) steps(var(--sprite-frames)) var(--sprite-iterations);"
+    ? ` --sprite-animation: ${animationName} var(--sprite-duration) ${timing} var(--sprite-iterations)${fill};`
     : " --sprite-animation: none;";
   return `${selector} { --sprite-row-y: -${row.row * layout.frameHeight}px; --sprite-offset-x: ${startOffset}px; --sprite-end-offset-x: ${endOffset}px; --sprite-frames: ${row.frames}; --sprite-duration: ${row.durationMs}ms; --sprite-iterations: ${iterations};${animation} }`;
+}
+
+function createSpriteKeyframes(name: string, state: SpriteStateDefinition, frameWidth: number): string {
+  if (state.frameDurationsMs) {
+    const frames = getSpriteFrameOffsets(state).map((offset, column) => {
+      const percentage = Number((offset * 100).toFixed(6));
+      return `${percentage}% { background-position: ${-column * frameWidth}px var(--sprite-row-y); }`;
+    });
+    frames.push(`100% { background-position: ${-(state.frames - 1) * frameWidth}px var(--sprite-row-y); }`);
+    return `@keyframes ${name} { ${frames.join(" ")} }`;
+  }
+  return `@keyframes ${name} { from { background-position: var(--sprite-offset-x) var(--sprite-row-y); } to { background-position: var(--sprite-end-offset-x) var(--sprite-row-y); } }`;
 }
 
 /**
@@ -1628,13 +1739,16 @@ function createSessionOverlayCss(scaledSpriteHeight: number): string {
     html[data-session-open="true"] .openpets-compact-composer,
     html[data-session-open="true"] .openpets-chat-panel,
     html[data-session-open="true"] .openpets-check-in-panel,
+    html[data-session-open="true"] .opencode-token-rate,
     html[data-session-open="true"] .bubble.is-pinned {
       display: none !important;
     }
     .pet-hitbox {
       transition: transform 1100ms cubic-bezier(0.22, 1, 0.36, 1);
     }
-    html[data-session-open="true"] .pet-hitbox {
+    html[data-session-open="true"] .stage .pet-hitbox,
+    html[data-session-open="true"] .stage.has-token-dock .pet-hitbox {
+      bottom: ${Math.max(0, petBottom - petWindowHitPadding)}px;
       transform: translateX(-50%) translateY(calc(-1 * var(--session-pet-lift)));
       cursor: default;
     }

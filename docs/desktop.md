@@ -542,6 +542,16 @@ cross-controller topology/recovery fanout. `pet-window-interaction.ts` owns the 
 IPC lifecycle, recovery/watchdog, and speech-completion bridge. This is covered
 in depth in [Pets](/pets).
 
+`pet-window-motion.ts` translates actual native-window movement into the existing
+left/right locomotion state shared by Classic sprites, Motion playback, and gaze.
+It accumulates small position changes until either axis has moved three pixels;
+vertical travel keeps the last horizontal facing, initially right. Repeated
+`move`/`moved` events at the same position do not restart the animation or extend
+its idle deadline. After 180 ms without an actual position change, locomotion
+returns to idle and its accumulated distance resets. Renderer navigation clears
+the old deadline, a completed load synchronizes idle into the new document, and
+window destruction removes the listeners and timer.
+
 Closing the default pet through the window manager temporarily hides its existing
 window: it saves the current position and runs normal hide cleanup, but does not
 change the persisted open-on-launch preference. The explicit context-menu Hide
@@ -698,6 +708,23 @@ previews, and V1 pets are unaffected. That duration is normalized to `1010` ms (
 (Relaxed), with `1010` ms as the default. `app-state-core.ts` and
 `pet-assistant-personality.ts` hold pure normalization helpers that are testable
 without Electron.
+
+Pet-window preparation uses `getPetRenderPreferences()` for a small, immutable
+copy of the rendering preferences and `getInstalledPetState()` for a detached
+record of the selected pet. A render passes the same preference revision through
+body markup, reaction mapping, CSS and cache identity, including across
+asynchronous manifest reads. Frequent reaction and plugin HUD refreshes therefore
+do not clone the installed library just to read a few preference values. The
+full `getAppStateSnapshot()` remains the detached snapshot boundary for consumers
+that need the entire document.
+
+Agent activity updates normalize only the activity counters and preserve the
+already-validated installed records and preferences. They still synchronously
+write the complete document with atomic temp-write + rename, so counts are
+persisted before the operation returns; there is no deferred write window. The
+activity recorder returns no snapshot because its callers only record the event.
+Startup and new or replaced installation records retain their existing file
+validation contracts.
 
 Installed pet records persist their source ownership. That ownership selects the
 Team or personal pet root; the app never infers ownership from whichever directory

@@ -1,3 +1,4 @@
+import type { PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { I18nProvider, useI18n, type I18nSnapshot } from "./i18n";
@@ -50,14 +51,15 @@ import { PetImage, SpriteFrame, PetPreviewCard, imageDebug, installedPetSpritesh
 import { StatusPill, statusPillToneClass, type StatusTone } from "./components/ui/StatusPill.js";
 import { WardrobePanel } from "./pets/WardrobePanel.js";
 import { ActivitiesPanel } from "./pets/ActivitiesPanel.js";
+import { buildPetLibraryView, getPetLibraryHydrationPages, initialPetLibraryPagination, petLibraryFilters, petLibraryTagLabelKeys, type PetLibraryFacets, type PetLibraryFilter } from "./pets/pet-library-state.js";
 import type { PetActivitiesSnapshot } from "../../pet-activities-types.js";
 import { WhatsNewHost, type WhatsNewApi } from "./whats-new/WhatsNewDialog.js";
 import { AnnouncementsHost, type AnnouncementsApi } from "./announcements/AnnouncementsHost.js";
 import { hasCatalogPetExtrasUpdate, type PetWardrobeSnapshot, type PetWardrobeUpdate } from "./pets/wardrobe-state.js";
 
-type Filter = "all" | "installed" | "featured" | "originals" | "codex";
-type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; format?: "classic" | "motion"; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; capabilities?: { outfits: boolean; activities: boolean; gaze: boolean }; spriteLayout?: PetSpriteLayout; source?: { kind?: "catalog"; preview?: string; zip?: string } | { kind: "codex"; path: string } };
-type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; spriteLayout?: PetSpriteLayout; spriteVersionNumber?: 2; format?: "classic" | "motion"; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; capabilities?: { outfits: boolean; activities: boolean; gaze: boolean }; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string; wardrobeZip?: string; requiresOpenPetsVersion?: string; installedZip?: string };
+type Filter = PetLibraryFilter;
+type InstalledPet = { libraryMetadata?: PetLibraryMetadata; id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; format?: "classic" | "motion"; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; capabilities?: { outfits: boolean; activities: boolean; gaze: boolean }; spriteLayout?: PetSpriteLayout; source?: { kind?: "catalog"; preview?: string; zip?: string } | { kind: "codex"; path: string } };
+type PetEntry = { libraryMetadata?: PetLibraryMetadata; id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; spriteLayout?: PetSpriteLayout; spriteVersionNumber?: 2; format?: "classic" | "motion"; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; capabilities?: { outfits: boolean; activities: boolean; gaze: boolean }; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; catalogDetailsLoaded?: boolean; sourceKind?: "installed" | "catalog" | "codex"; importedFromCodex?: boolean; installed?: boolean; favorite?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string; wardrobeZip?: string; requiresOpenPetsVersion?: string; installedZip?: string };
 type StateSnapshot = { preferences: { defaultPetId: string }; pets: { installed: InstalledPet[] } };
 type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: number; pageCount?: number; total?: number; categories?: { id: "western" | "asian"; label: string; count: number }[]; originalsCount?: number; featuredCount?: number };
 type CodexState = { pets: PetEntry[]; error?: string };
@@ -74,7 +76,7 @@ type VoiceAssistantShortcutSnapshot = {
   readonly status: VoiceAssistantShortcutStatus;
   readonly reason?: string;
 };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; appearanceTheme: AppearanceTheme; locale?: "system" | string; petScale: number; hudScale: number; bubbleScale: number; bubbleDurationScale: number; bubbleTheme: "light" | "dark" | "system"; waitingAnimationDurationMs: number; idleCursorGazeEnabled: boolean; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; pinnedPets?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; petBounciness: number; petFloorFriction: number; personality: PetAssistantPersonality; voiceAssistantShortcut?: string; chatShortcut?: string; petToggleShortcut?: string; showChatButton: boolean; showTalkButton: boolean; petButtonsPosition: "left" | "right"; petButtonsSize: "small" | "medium" | "large" }; petScaleOptions: PetScaleOption[]; hudScaleOptions: PetScaleOption[]; bubbleScaleOptions: PetScaleOption[]; bubbleDurationScaleOptions: PetScaleOption[]; petPoolCandidates: ReadonlyArray<PetPoolCandidate>; pinnedPetsLimit: number; voiceAssistantShortcutStatus?: VoiceAssistantShortcutSnapshot; chatShortcutStatus?: VoiceAssistantShortcutSnapshot; petToggleShortcutStatus?: VoiceAssistantShortcutSnapshot };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; appearanceTheme: AppearanceTheme; locale?: "system" | string; petScale: number; hudScale: number; bubbleScale: number; bubbleDurationScale: number; bubbleTheme: "light" | "dark" | "system"; waitingAnimationDurationMs: number; idleCursorGazeEnabled: boolean; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; favoritePetIds?: readonly string[]; petPoolOrder?: readonly string[]; pinnedPets?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; petBounciness: number; petFloorFriction: number; personality: PetAssistantPersonality; voiceAssistantShortcut?: string; chatShortcut?: string; petToggleShortcut?: string; showChatButton: boolean; showTalkButton: boolean; petButtonsPosition: "left" | "right"; petButtonsSize: "small" | "medium" | "large" }; petScaleOptions: PetScaleOption[]; hudScaleOptions: PetScaleOption[]; bubbleScaleOptions: PetScaleOption[]; bubbleDurationScaleOptions: PetScaleOption[]; petPoolCandidates: ReadonlyArray<PetPoolCandidate>; pinnedPetsLimit: number; voiceAssistantShortcutStatus?: VoiceAssistantShortcutSnapshot; chatShortcutStatus?: VoiceAssistantShortcutSnapshot; petToggleShortcutStatus?: VoiceAssistantShortcutSnapshot };
 type PreferencePatch = Omit<Partial<SettingsState["preferences"]>, "personality"> & { personality?: Partial<PetAssistantPersonality> };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
@@ -82,7 +84,7 @@ type LanStatusSnapshot = { mode: "off" | "server" | "client"; localHost: string;
 type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
 type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
 type DashboardSnapshot = { defaultPet: { id: string; displayName: string; assetName?: string; petName?: string; previewSpriteUrl: string; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; spriteLayout?: PetSpriteLayout }; installedPetCount: number; catalog: { source: string; total?: number; page?: number; pageCount?: number; error?: string }; plugins: { installed: number; enabled: number; broken: number }; updateStatus: UpdateStatus; activity: DashboardActivity };
-type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: PetSpriteLayout & { states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; waitingAnimationDurationMs: number; waitingAnimationDurationOptions: { value: number; label: string }[] };
+type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: PetSpriteLayout & { states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; frameDurationsMs?: readonly number[]; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; waitingAnimationDurationMs: number; waitingAnimationDurationOptions: { value: number; label: string }[] };
 type PluginFilter = "all" | "local" | "broken";
 type PluginPermission =
   | "pet:speak" | "pet:reaction" | "pet:move" | "timer" | "schedule" | "storage" | "status" | "commands" | "network"
@@ -913,12 +915,13 @@ function PlaceholderView({ route }: { route: "dashboard" }) {
   );
 }
 
-const filterIcons: Record<Filter, React.ReactNode> = {
+const filterIcons: Partial<Record<Filter, React.ReactNode>> = {
   all: <FilterAllIcon />,
   installed: <FilterInstalledIcon />,
   featured: <FilterFeaturedIcon />,
   originals: <FilterOriginalIcon />,
   codex: <FilterCodexIcon />,
+  favorites: <StarIcon />,
 };
 
 const filterLabelKeys: Record<Filter, string> = {
@@ -927,6 +930,12 @@ const filterLabelKeys: Record<Filter, string> = {
   featured: "pets.filter.featured",
   originals: "pets.filter.originals",
   codex: "pets.filter.codex",
+  favorites: "pets.filter.favorites",
+  v1: "pets.filter.v1",
+  v2: "pets.filter.v2",
+  motion: "pets.filter.motion",
+  outfits: "pets.filter.outfits",
+  activities: "pets.filter.activities",
 };
 
 function isRoute(value: string | null | undefined): value is Route {
@@ -962,6 +971,26 @@ function initialControlCenterRoute(): ControlCenterRouteTarget {
 function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   const { t } = useI18n();
   return <input className="search" placeholder={t("pets.search.placeholder")} {...props} />;
+}
+
+function PetFacetSelect({ label, allLabel, value, choices, formatLabel, onChange }: {
+  label: string;
+  allLabel: string;
+  value: string;
+  choices: readonly { readonly value: string; readonly count: number }[];
+  formatLabel: (value: string) => string;
+  onChange: (value: string) => void;
+}) {
+  const options = value && !choices.some((choice) => choice.value === value) ? [{ value, count: 0 }, ...choices] : choices;
+  return (
+    <label className="flex min-w-32 flex-1 items-center gap-2 text-xs text-slate-500">
+      <span className="shrink-0">{label}</span>
+      <select className="search h-8 w-full text-xs" value={value} disabled={!options.length} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{allLabel}</option>
+        {options.map((choice) => <option key={choice.value} value={choice.value}>{formatLabel(choice.value)} ({choice.count})</option>)}
+      </select>
+    </label>
+  );
 }
 
 function PetPoolOrderList({
@@ -1179,7 +1208,7 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
     <div className="reaction-preview-sprite-shell">
       <svg className="reaction-preview-sprite" width={preview.frame.width} height={preview.frame.height} viewBox={`0 0 ${preview.frame.width} ${preview.frame.height}`} role="img" aria-label={t("settings.reactions.previewAria", { state })}>
         <image href={preview.src} x={preview.x} y={preview.y} width={preview.atlasWidth} height={preview.atlasHeight} preserveAspectRatio="none">
-          {preview.animated && <animate attributeName="x" values={preview.xValues} dur={`${preview.durationMs}ms`} repeatCount="indefinite" calcMode="discrete" />}
+          {preview.animated && <animate attributeName="x" values={preview.xValues} keyTimes={preview.keyTimes} dur={`${preview.durationMs}ms`} repeatCount="indefinite" calcMode="discrete" />}
         </image>
       </svg>
     </div>
@@ -3829,8 +3858,8 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
   const [assistantTab, setAssistantTab] = useState<"providers" | undefined>(initialTarget.assistantTab);
   const [remoteTokenHandoff, setRemoteTokenHandoff] = useState<RemoteTokenHandoffState>(null);
   const [state, setState] = useState<StateSnapshot | null>(null);
+  const [petsLoading, setPetsLoading] = useState(true);
   const [petSettings, setPetSettings] = useState<SettingsState | null>(null);
-  const [catalog, setCatalog] = useState<CatalogState | null>(null);
   const [catalogPages, setCatalogPages] = useState<Record<number, PetEntry[]>>({});
   const [catalogSearchState, setCatalogSearchState] = useState<CatalogSearchState>(initialCatalogSearchState);
   const catalogSearchControllerRef = useRef<CatalogSearchFetchController | null>(null);
@@ -3843,14 +3872,16 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
   const [whatsNewSettled, setWhatsNewSettled] = useState(false);
   const handleWhatsNewSettled = useCallback(() => setWhatsNewSettled(true), []);
   const catalogSearch = catalogSearchState.pets;
-  const [catalogPage, setCatalogPage] = useState(0);
+  const [petPagination, setPetPagination] = useState(initialPetLibraryPagination);
   const [codex, setCodex] = useState<CodexState>({ pets: [] });
   const [selectedId, setSelectedId] = useState(initialTarget.route === "pets" ? initialTarget.petId ?? "" : "");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [petFacets, setPetFacets] = useState<PetLibraryFacets>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const petDetailDialogRef = useRef<HTMLDivElement | null>(null);
+  const petsGridRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const petsRequestOwnerRef = useRef({ mounted: false, generation: 0 });
   const petOperationPendingRef = useRef(false);
@@ -3877,6 +3908,7 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
         // A pet link must open even if the current search or filter hides it.
         setFilter("all");
         setQuery("");
+        setPetFacets({});
         setSelectedId(target.petId);
       }
     }
@@ -3886,20 +3918,23 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
     const owner = petsRequestOwnerRef.current;
     const generation = ++owner.generation;
     setError("");
-    const [nextState, nextCatalog, nextCodex, nextSettings] = await Promise.all([
-      api.getPetsState(),
-      api.getCatalog(),
-      api.getCodexPets(),
-      api.getSettingsState(),
-    ]);
-    if (!owner.mounted || owner.generation !== generation) return;
-    logPetsEvent("load-complete", { installed: nextState.pets.installed.length, defaultPetId: nextState.preferences.defaultPetId, catalogSource: nextCatalog.source, catalogPets: nextCatalog.pets.length, catalogPage: nextCatalog.page, catalogPageCount: nextCatalog.pageCount, codexPets: nextCodex.pets.length, catalogError: nextCatalog.error, codexError: nextCodex.error, firstCatalogPet: nextCatalog.pets[0] ? { id: nextCatalog.pets[0].id, preview: imageDebug(nextCatalog.pets[0].preview), thumbnail: imageDebug(nextCatalog.pets[0].thumbnail), spritesheet: imageDebug(nextCatalog.pets[0].spritesheet) } : null });
-    setState(nextState); setCatalog(nextCatalog); setCodex(nextCodex);
-    setPetSettings(nextSettings);
-    setCatalogPage(nextCatalog.page ?? 0);
-    setCatalogPages({ [nextCatalog.page ?? 0]: nextCatalog.pets });
-    const visiblePetIds = new Set<string>([...nextState.pets.installed.map((pet) => pet.id), ...nextCatalog.pets.map((pet) => pet.id), ...nextCodex.pets.map((pet) => pet.id)]);
-    setSelectedId((current) => current && visiblePetIds.has(current) ? current : "");
+    setPetsLoading(true);
+    try {
+      const [nextState, nextCatalog, nextCodex, nextSettings] = await Promise.all([
+        api.getPetsState(),
+        api.getCatalog(),
+        api.getCodexPets(),
+        api.getSettingsState(),
+      ]);
+      if (!owner.mounted || owner.generation !== generation) return;
+      logPetsEvent("load-complete", { installed: nextState.pets.installed.length, defaultPetId: nextState.preferences.defaultPetId, catalogSource: nextCatalog.source, catalogPets: nextCatalog.pets.length, catalogPage: nextCatalog.page, catalogPageCount: nextCatalog.pageCount, codexPets: nextCodex.pets.length, catalogError: nextCatalog.error, codexError: nextCodex.error, firstCatalogPet: nextCatalog.pets[0] ? { id: nextCatalog.pets[0].id, preview: imageDebug(nextCatalog.pets[0].preview), thumbnail: imageDebug(nextCatalog.pets[0].thumbnail), spritesheet: imageDebug(nextCatalog.pets[0].spritesheet) } : null });
+      setState(nextState);
+      setCodex(nextCodex);
+      setPetSettings(nextSettings);
+      setCatalogPages({ [nextCatalog.page ?? 0]: nextCatalog.pets });
+    } finally {
+      if (owner.mounted && owner.generation === generation) setPetsLoading(false);
+    }
   }
   useEffect(() => {
     if (currentRoute !== "pets") return;
@@ -3913,12 +3948,14 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
     });
   }, [currentRoute]);
 
-  const pets = useMemo(() => {
+  const allPets = useMemo(() => {
     const installed = new Map((state?.pets.installed ?? []).map((p) => [p.id, p]));
-    const catalogMap = new Map<string, PetEntry>();
+    // The lightweight search index covers unloaded catalog pages. Full artwork
+    // metadata is fetched only when its card or detail is actually visible.
+    const catalogMap = new Map<string, PetEntry>((catalogSearch ?? []).map((pet) => [pet.id, pet]));
     for (const pagePets of Object.values(catalogPages)) {
       for (const p of pagePets) {
-        catalogMap.set(p.id, p);
+        catalogMap.set(p.id, { ...catalogMap.get(p.id), ...p, catalogDetailsLoaded: true });
       }
     }
     const codexMap = new Map<string, PetEntry>((codex.pets ?? []).map((p) => [p.id, p]));
@@ -3926,10 +3963,10 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
     const rows: PetEntry[] = (state?.pets.installed ?? []).map((p) => {
       const catalogPet = catalogMap.get(p.id);
       const codexPet = codexMap.get(p.id);
-      const localSpritesheet = p.id && !catalogPet && !codexPet && !p.builtIn ? installedPetSpritesheetUrl(p.id) : undefined;
-      const spritesheet = safePetImage(codexPet?.spritesheet) || safePetImage(catalogPet?.spritesheet) || safePetImage(localSpritesheet);
+      const localSpritesheet = p.id && !p.builtIn ? installedPetSpritesheetUrl(p.id) : undefined;
+      const spritesheet = safePetImage(localSpritesheet) || safePetImage(codexPet?.spritesheet) || safePetImage(catalogPet?.spritesheet);
       const preview = safePetImage(codexPet?.preview) || safePetImage(catalogPet?.preview) || safePetImage(catalogPet?.thumbnail) || safePetImage(p.source && "preview" in p.source ? (p.source as { preview?: string }).preview : undefined) || safePetImage(localSpritesheet) || defaultThumbUrl;
-      const spriteLayout = codexPet?.spriteLayout ?? catalogPet?.spriteLayout ?? getCatalogPetSpriteLayout(catalogPet?.spriteVersionNumber) ?? p.spriteLayout;
+      const spriteLayout = p.spriteLayout ?? codexPet?.spriteLayout ?? catalogPet?.spriteLayout ?? getCatalogPetSpriteLayout(catalogPet?.spriteVersionNumber);
       const category = catalogPet?.category;
       const original = catalogPet?.original;
       const featured = catalogPet?.featured;
@@ -3938,9 +3975,7 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
       const previewWidth = p.previewWidth ?? catalogPet?.previewWidth ?? codexPet?.previewWidth;
       const previewHeight = p.previewHeight ?? catalogPet?.previewHeight ?? codexPet?.previewHeight;
       const capabilities = p.capabilities ?? catalogPet?.capabilities ?? codexPet?.capabilities;
-      const spriteVersionNumber = catalogPet?.spriteVersionNumber
-        ?? codexPet?.spriteVersionNumber
-        ?? (p.spriteLayout?.version === 2 ? 2 : undefined);
+      const spriteVersionNumber = spriteLayout?.version === 2 ? 2 : undefined;
       return {
         ...p,
         spritesheet,
@@ -3955,9 +3990,12 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
         previewHeight,
         capabilities,
         spriteVersionNumber,
+        searchText: catalogPet?.searchText,
+        catalogPage: catalogPet?.catalogPage,
         wardrobeZip: catalogPet?.wardrobeZip,
         installedZip: p.source && "zip" in p.source ? p.source.zip : undefined,
         sourceKind: "installed" as const,
+        importedFromCodex: p.source?.kind === "codex",
         installed: true,
       };
     });
@@ -3975,6 +4013,7 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
           previewHeight: p.previewHeight,
           capabilities: p.capabilities,
           sourceKind: "catalog",
+          catalogDetailsLoaded: p.catalogDetailsLoaded === true,
           installed: false,
         });
       }
@@ -3997,17 +4036,30 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
       }
     }
 
-    return rows.filter((p) => {
-      if (filter === "installed" && !p.installed) return false;
-      if (filter === "codex" && p.sourceKind !== "codex" && !(installed.get(p.id)?.source?.kind === "codex")) return false;
-      if (filter === "originals" && !p.original && !p.builtIn) return false;
-      if (filter === "featured" && (!p.featured || p.original)) return false;
-      const q = query.trim().toLowerCase();
-      return !q || `${p.displayName} ${p.description ?? ""} ${p.searchText ?? ""} ${p.id}`.toLowerCase().includes(q);
+    const favorites = new Set(petSettings?.preferences.favoritePetIds ?? []);
+    return rows.map((pet) => {
+      const metadata = pet.libraryMetadata;
+      const labels = metadata ? [t(`pets.kind.${metadata.kind}`), ...metadata.tags.map((tag) => petLibraryTagLabelKeys[tag] ? t(petLibraryTagLabelKeys[tag]) : tag)] : [];
+      return { ...pet, favorite: favorites.has(pet.id), searchText: [pet.searchText ?? "", ...labels].join(" ") };
     });
-  }, [state, catalogPages, catalogSearch, codex, filter, query]);
+  }, [state, catalogPages, catalogSearch, codex, petSettings?.preferences.favoritePetIds, t]);
 
-  const selected = selectedId ? pets.find((p) => p.id === selectedId) ?? null : null;
+  const petLibrary = useMemo(
+    () => buildPetLibraryView(allPets, filter, query, petPagination, selectedId, petFacets),
+    [allPets, filter, query, petPagination, selectedId, petFacets],
+  );
+  const pets = petLibrary.items;
+  const selected = petLibrary.selected;
+  const petPage = petLibrary.pagination.page;
+  useEffect(() => {
+    const next = petLibrary.pagination;
+    if (petPagination.page !== next.page || petPagination.filter !== next.filter || petPagination.query !== next.query || petPagination.facetKey !== next.facetKey) {
+      setPetPagination(next);
+    }
+  }, [petPage, filter, query, petPagination, petFacets]);
+  useEffect(() => {
+    petsGridRef.current?.scrollTo({ top: 0 });
+  }, [petPage, filter, query]);
   const defaultId = state?.preferences.defaultPetId;
   const pinnedPetIds = petSettings?.preferences.pinnedPets ?? [];
   const pinLimitReached = petSettings !== null && pinnedPetIds.length >= petSettings.pinnedPetsLimit;
@@ -4119,6 +4171,26 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
     });
   }
 
+  async function handleFavorite(pet: PetEntry): Promise<void> {
+    if (!petSettings || petsLoading || petOperationPendingRef.current) return;
+    const owner = petsRequestOwnerRef.current;
+    petOperationPendingRef.current = true;
+    setBusy(pet.id);
+    setError("");
+    try {
+      const favorites = new Set(petSettings.preferences.favoritePetIds ?? []);
+      if (favorites.has(pet.id)) favorites.delete(pet.id);
+      else favorites.add(pet.id);
+      const next = await api.updatePreferences({ favoritePetIds: [...favorites] });
+      if (owner.mounted) setPetSettings(next);
+    } catch (err) {
+      if (owner.mounted) setError(String((err as Error)?.message ?? err));
+    } finally {
+      petOperationPendingRef.current = false;
+      if (owner.mounted) setBusy("");
+    }
+  }
+
   function retryCatalogSearch() {
     const controller = catalogSearchControllerRef.current;
     if (!controller) return;
@@ -4126,6 +4198,21 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
     if (currentRoute === "pets") {
       void controller.startFetch("pets", () => api.getCatalogSearch());
     }
+  }
+
+  function resetPetFilters(): void {
+    setQuery("");
+    setFilter("all");
+    setPetFacets({});
+  }
+
+  function retryPetsLoad(): void {
+    const owner = petsRequestOwnerRef.current;
+    const request = loadPetsData();
+    const generation = owner.generation;
+    void request.catch((err) => {
+      if (owner.mounted && owner.generation === generation) setError(String(err?.message ?? err));
+    });
   }
 
   useEffect(() => {
@@ -4140,68 +4227,33 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
 
   useEffect(() => {
     if (currentRoute !== "pets") return;
-    if (!catalogSearch) return;
-    const q = query.trim().toLowerCase();
-    const needsRemotePages = !!q || filter === "featured" || filter === "originals";
-
-    const pages = new Set<number>();
-
-    if (state?.pets.installed) {
-      for (const p of state.pets.installed) {
-        const searchPet = catalogSearch.find(sp => sp.id === p.id);
-        if (searchPet && typeof searchPet.catalogPage === "number" && !catalogPages[searchPet.catalogPage]) {
-          pages.add(searchPet.catalogPage);
-        }
-      }
-    }
-
-    if (needsRemotePages) {
-      for (const pet of catalogSearch) {
-        if (pages.size >= 12) break;
-        if (filter === "originals" && !pet.original) continue;
-        if (filter === "featured" && (!pet.featured || pet.original)) continue;
-        if (q && !`${pet.displayName} ${pet.searchText ?? ""} ${pet.id}`.toLowerCase().includes(q)) continue;
-        if (typeof pet.catalogPage === "number" && !catalogPages[pet.catalogPage]) pages.add(pet.catalogPage);
-      }
-    }
-
-    if (!pages.size) return;
+    const pages = getPetLibraryHydrationPages(pets, selected, catalogPages);
+    if (pages.length === 0) return;
     let cancelled = false;
-    void Promise.all([...pages].map((page) => api.getCatalogPage(page).catch((err) => ({ source: "error", pets: [], error: String((err as Error)?.message ?? err), page } as CatalogState)))).then((results) => {
+    void Promise.all(pages.map((page) => api.getCatalogPage(page)
+      .then((result) => ({ ...result, page: result.page ?? page }))
+      .catch((err) => ({ source: "error", pets: [], error: String((err as Error)?.message ?? err), page } as CatalogState)))).then((results) => {
       if (cancelled) return;
       setCatalogPages((current) => {
         const next = { ...current };
-        for (const result of results) if (result.source !== "error") next[result.page ?? 0] = result.pets;
-        return next;
+        let changed = false;
+        for (const result of results) {
+          if (result.source !== "error") {
+            next[result.page ?? 0] = result.pets;
+            changed = true;
+          }
+        }
+        return changed ? next : current;
       });
       const firstError = results.find((result) => result.source === "error")?.error;
       if (firstError) setError(firstError);
     });
     return () => { cancelled = true; };
-  }, [catalogPages, catalogSearch, filter, query, state, currentRoute]);
-
-  async function loadCatalogPage(page: number) {
-    if (catalogPages[page]) { setCatalogPage(page); return; }
-    try {
-      setBusy(t("pets.busy.loadingPage")); setError("");
-      const next = await api.getCatalogPage(page);
-      setCatalog(next); setCatalogPage(next.page ?? page); setCatalogPages((pages) => ({ ...pages, [next.page ?? page]: next.pets }));
-    } catch (err) { setError(String((err as Error)?.message ?? err)); }
-    finally { setBusy(""); }
-  }
+  }, [catalogPages, pets, selected, currentRoute]);
 
   const currentMeta = routeMetadata[currentRoute];
 
-  // Pet Studio is how people get a pet that is not in the catalog: offer it on
-  // the browsing views, and in place of an empty search result.
   const hasSearchQuery = query.trim().length > 0;
-  const showStudioCta = hasSearchQuery
-    ? pets.length === 0
-    : filter === "all" || filter === "installed";
-
-  function openStudio() {
-    void api.openStudio().catch((err) => setError(String(err?.message ?? err)));
-  }
 
   return (
     <main className="app-shell">
@@ -4259,21 +4311,10 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
       ) : (
         <div className="layout">
           <GlassCard className="gallery">
-            <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-            <div className="filter-row">
-              <div className="filters">
-                {(["all", "installed", "featured", "originals", "codex"] as Filter[]).map((f) => (
-                  <button
-                    key={f}
-                    className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
-                    onClick={() => setFilter(f)}
-                    aria-current={filter === f ? "page" : undefined}
-                  >
-                    <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-                    <span className="filter-text">{t(filterLabelKeys[f])}</span>
-                  </button>
-                ))}
-              </div>
+            <label htmlFor="pet-library-search" className="mb-1 text-sm font-bold text-navy">{t("pets.search.label")}</label>
+            <div className="toolbar">
+              <SearchInput id="pet-library-search" type="search" autoComplete="off" aria-describedby="pet-library-search-hint" value={query} onChange={(e) => setQuery(e.target.value)} />
+              {query && <Button variant="secondary" size="compact" onClick={() => setQuery("")}>{t("pets.search.clear")}</Button>}
               <div className="filter-actions">
                 <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void act(t("pets.busy.importing"), () => api.installLocalPet())}>{t("pets.import")}</Button>
                 <Button
@@ -4286,38 +4327,49 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
                 </Button>
               </div>
             </div>
-            <div className="pets-grid">
-              {showStudioCta && (
-                <section className="studio-cta" aria-labelledby="studio-cta-title">
-                  <div className="studio-cta-copy">
-                    <span className="studio-cta-eyebrow">
-                      <SparklesIcon className="w-3.5 h-3.5" />
-                      {t("pets.studio.eyebrow")}
-                    </span>
-                    <h2 id="studio-cta-title" className="studio-cta-title">
-                      {hasSearchQuery ? t("pets.studio.titleNoResults") : t("pets.studio.title")}
-                    </h2>
-                    <p className="studio-cta-body">{t("pets.studio.body")}</p>
-                    <div>
-                      <Button variant="accent" icon={<SparklesIcon />} onClick={openStudio}>
-                        {t("pets.studio.action")}
-                      </Button>
-                    </div>
-                  </div>
-                  <img
-                    className="studio-cta-art"
-                    src="studio/studio-hero.webp"
-                    alt={t("pets.studio.artAlt")}
-                    draggable={false}
-                  />
-                </section>
-              )}
-              {pets.map((pet) => {
+            <p id="pet-library-search-hint" className="mt-1 text-xs text-slate-500">{t("pets.search.hint")}</p>
+            <div className="filter-row">
+              <div className="filters">
+                {petLibraryFilters.map((f) => (
+                  <button
+                    key={f}
+                    className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
+                    disabled={state === null}
+                    onClick={() => setFilter(f)}
+                    aria-current={filter === f ? "page" : undefined}
+                  >
+                    {filterIcons[f] && <span className="filter-icon-wrapper">{filterIcons[f]}</span>}
+                    <span className="filter-text">{t(filterLabelKeys[f])}</span>
+                    <span className="rounded-md bg-slate-200/60 px-1.5 text-[10px] tabular-nums">{state ? petLibrary.counts[f] : "—"}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <PetFacetSelect label={t("pets.facet.kind")} allLabel={t("pets.facet.allKinds")} value={petFacets.kind ?? ""} choices={petLibrary.facets.kinds} formatLabel={(kind) => t(`pets.kind.${kind}`)} onChange={(kind) => setPetFacets((current) => ({ ...current, kind: kind ? kind as PetLibraryFacets["kind"] : undefined }))} />
+              <PetFacetSelect label={t("pets.facet.tag")} allLabel={t("pets.facet.allTags")} value={petFacets.tag ?? ""} choices={petLibrary.facets.tags} formatLabel={(tag) => petLibraryTagLabelKeys[tag] ? t(petLibraryTagLabelKeys[tag]) : tag} onChange={(tag) => setPetFacets((current) => ({ ...current, tag: tag || undefined }))} />
+              <PetFacetSelect label={t("pets.facet.uploader")} allLabel={t("pets.facet.allUploaders")} value={petFacets.uploader ?? ""} choices={petLibrary.facets.uploaders} formatLabel={(name) => name} onChange={(uploader) => setPetFacets((current) => ({ ...current, uploader: uploader || undefined }))} />
+              {(petFacets.kind || petFacets.tag || petFacets.uploader) && <Button variant="secondary" size="compact" onClick={() => setPetFacets({})}>{t("pets.facet.clear")}</Button>}
+            </div>
+            {filter === "codex" && <p className="mb-3 text-xs text-slate-500">{t("pets.codex.description")}{codex.error ? ` ${codex.error}` : ""}</p>}
+            {state !== null && petLibrary.total === 0 && (
+              <div className="mb-3 rounded-xl border border-slate-200 p-4 text-sm" role="status">
+                <strong>{t(filter === "favorites" && !hasSearchQuery ? "pets.favorites.empty" : filter === "codex" && !hasSearchQuery ? "pets.codex.empty" : "pets.search.empty")}</strong>
+                <p className="mt-1 text-xs text-slate-500">{t(filter === "codex" ? "pets.codex.description" : filter === "favorites" && !hasSearchQuery ? "pets.favorites.hint" : "pets.search.emptyHint")}</p>
+                <Button variant="secondary" size="compact" onClick={resetPetFilters}>{t("pets.search.reset")}</Button>
+              </div>
+            )}
+            <div ref={petsGridRef} className="pets-grid" aria-busy={petsLoading}>
+              {state === null && <div className="col-span-full rounded-xl border border-slate-200 p-5 text-sm text-slate-500" role="status">
+                {t(petsLoading ? "pets.loading" : "pets.loadFailed")}
+                {!petsLoading && <Button variant="secondary" size="compact" onClick={retryPetsLoad}>{t("common.retry")}</Button>}
+              </div>}
+              {state !== null && pets.map((pet) => {
               const isBuiltIn = pet.builtIn;
               const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
               const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
               const isDefault = pet.id === defaultId;
-              const canInstall = !pet.installed && pet.sourceKind === "catalog" && !pet.requiresOpenPetsVersion;
+              const canInstall = !pet.installed && pet.sourceKind === "catalog" && pet.catalogDetailsLoaded && !pet.requiresOpenPetsVersion;
               const canImport = !pet.installed && pet.sourceKind === "codex";
               const canSetDefault = pet.installed && !isDefault && !pet.broken;
               const canRemove = pet.installed && !pet.builtIn && !pet.protected;
@@ -4342,9 +4394,22 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
                   <div className="card-content">
                     <span className="card-title-row">
                       <b className="card-title">{pet.displayName}</b>
+                      <button
+                        type="button"
+                        className={`ml-auto rounded-lg p-1.5 ${pet.favorite ? "text-amber-600 bg-amber-100" : "text-slate-400 hover:bg-slate-100"}`}
+                        aria-pressed={pet.favorite === true}
+                        aria-label={t(pet.favorite ? "pets.favorite.remove" : "pets.favorite.add", { name: pet.displayName })}
+                        title={t(pet.favorite ? "pets.favorite.remove" : "pets.favorite.add", { name: pet.displayName })}
+                        disabled={!!busy || petsLoading || !petSettings}
+                        onClick={() => void handleFavorite(pet)}
+                      ><StarIcon /></button>
                     </span>
                     <p className="card-desc">{pet.description || pet.id}</p>
-                    <div className="badges">{isDefault && <StatusPill tone="green">{t("pets.badge.default")}</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill> : pet.featured ? <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill> : null}{pet.spriteVersionNumber === 2 && <StatusPill tone="blue">V2</StatusPill>}{pet.installed && <StatusPill>{t("pets.badge.installed")}</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">{t("pets.badge.codex")}</StatusPill>}{!pet.installed && pet.requiresOpenPetsVersion && <StatusPill tone="slate">{t("pets.badge.needsUpdate", { version: pet.requiresOpenPetsVersion })}</StatusPill>}</div>
+                    {pet.libraryMetadata && <div className="badges">
+                      <StatusPill>{t(`pets.kind.${pet.libraryMetadata.kind}`)}</StatusPill>
+                      {pet.libraryMetadata.tags.slice(0, 2).map((tag) => <StatusPill key={tag}>{petLibraryTagLabelKeys[tag] ? t(petLibraryTagLabelKeys[tag]) : tag}</StatusPill>)}
+                    </div>}
+                    <div className="badges">{isDefault && <StatusPill tone="green">{t("pets.badge.default")}</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill> : pet.featured ? <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill> : null}{pet.spriteVersionNumber === 2 && <StatusPill tone="blue">V2</StatusPill>}{pet.installed && <StatusPill>{t("pets.badge.installed")}</StatusPill>}{(pet.sourceKind === "codex" || pet.importedFromCodex) && <StatusPill tone="orange">{t("pets.badge.codex")}</StatusPill>}{!pet.installed && pet.requiresOpenPetsVersion && <StatusPill tone="slate">{t("pets.badge.needsUpdate", { version: pet.requiresOpenPetsVersion })}</StatusPill>}</div>
 
                     <div className="pet-card-actions" onClick={(event) => event.stopPropagation()}>
                       <Button
@@ -4422,32 +4487,32 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
               );
             })}
             </div>
-            <div className="pager">
-              {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+            {state !== null && <div className="pager">
+              {petLibrary.pageCount > 1 ? (
                 <Button
                   variant="secondary"
                   size="compact"
                   icon={<PrevIcon />}
-                  disabled={!!busy || catalogPage <= 0}
-                  onClick={() => void loadCatalogPage(catalogPage - 1)}
+                  disabled={!!busy || petPage <= 0}
+                  onClick={() => setPetPagination({ ...petLibrary.pagination, page: petPage - 1 })}
                 >
                   {t("pets.pager.prev")}
                 </Button>
               ) : <span />}
-              <span className="pager-text">{t("pets.pager.count", { count: pets.length })}{!!catalog?.pageCount && catalog.pageCount > 1 ? t("pets.pager.page", { page: catalogPage + 1, pageCount: catalog.pageCount }) : ""}</span>
-              {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+              <span className="pager-text" aria-live="polite">{t("pets.pager.count", { count: petLibrary.total })}{petLibrary.pageCount > 1 ? t("pets.pager.page", { page: petPage + 1, pageCount: petLibrary.pageCount }) : ""}</span>
+              {petLibrary.pageCount > 1 ? (
                 <Button
                   variant="secondary"
                   size="compact"
                   icon={<NextIcon />}
                   iconPosition="right"
-                  disabled={!!busy || catalogPage >= catalog.pageCount - 1}
-                  onClick={() => void loadCatalogPage(catalogPage + 1)}
+                  disabled={!!busy || petPage >= petLibrary.pageCount - 1}
+                  onClick={() => setPetPagination({ ...petLibrary.pagination, page: petPage + 1 })}
                 >
                   {t("pets.pager.next")}
                 </Button>
               ) : <span />}
-            </div>
+            </div>}
           </GlassCard>
 
           {selected ? (
@@ -4470,12 +4535,26 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
                     <p className="eyebrow">{t("pets.detail.eyebrow")}</p>
                     <h2>{selected.displayName}</h2>
                   </div>
+                  <Button
+                    variant={selected.favorite ? "accent" : "secondary"}
+                    size="compact"
+                    icon={<StarIcon />}
+                    ariaLabel={t(selected.favorite ? "pets.favorite.remove" : "pets.favorite.add", { name: selected.displayName })}
+                    disabled={!!busy || petsLoading || !petSettings}
+                    onClick={() => void handleFavorite(selected)}
+                  >{t(selected.favorite ? "pets.favorite.saved" : "pets.favorite.save")}</Button>
                   <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("common.close")}</Button>
                 </div>
 
                 <div className="pet-detail-content">
                   <div className="pet-detail-main">
                     <p className="desc">{selected.description || selected.id}</p>
+                    {selected.libraryMetadata && <section className="mb-4 rounded-xl border border-slate-200 p-3 text-xs text-slate-600">
+                      <p>{selected.libraryMetadata.sourceSite} · {t(`pets.kind.${selected.libraryMetadata.kind}`)}</p>
+                      {(selected.libraryMetadata.creatorName || selected.libraryMetadata.creatorHandle) && <p className="mt-1">{t("pets.facet.uploader")}: {selected.libraryMetadata.creatorName ?? selected.libraryMetadata.creatorHandle}{selected.libraryMetadata.creatorHandle && selected.libraryMetadata.creatorName ? ` (@${selected.libraryMetadata.creatorHandle})` : ""}</p>}
+                      <p className="mt-1 break-all">ID: {selected.libraryMetadata.sourcePetId}</p>
+                      <div className="badges mt-2">{selected.libraryMetadata.tags.map((tag) => <StatusPill key={tag}>{petLibraryTagLabelKeys[tag] ? t(petLibraryTagLabelKeys[tag]) : tag}</StatusPill>)}</div>
+                    </section>}
                     <div className="stage">
                       <PetPreviewCard
                         src={selected.spritesheet || selected.preview}
@@ -4552,7 +4631,7 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
 
                 <div className="actions-container mt-6 flex flex-col gap-3 pet-detail-actions">
                   {/* Main Action (Install, Import, Set Default) */}
-                  {!selected.installed && selected.sourceKind === "catalog" && (
+                  {!selected.installed && selected.sourceKind === "catalog" && selected.catalogDetailsLoaded && (
                     <Button
                       variant="primary"
                       fullWidth

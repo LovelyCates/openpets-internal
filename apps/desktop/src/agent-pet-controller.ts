@@ -1,6 +1,6 @@
 import { BrowserWindow } from "electron";
 
-import { getAppStateSnapshot, type PetScaleValue } from "./app-state.js";
+import { getInstalledPetState, getPetRenderPreferences, type PetScaleValue } from "./app-state.js";
 import type { DisplayChangeReason } from "./pet-display-coordinator.js";
 import { registerRoamingPet, unregisterRoamingPet } from "./pet-roaming-controller.js";
 import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBounds } from "./confinement-manager.js";
@@ -193,9 +193,8 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     return existing;
   }
 
-  const state = getAppStateSnapshot();
-  const scale = state.preferences.petScale as PetScaleValue;
-  const pet = state.pets.installed.find((candidate) => candidate.id === petId);
+  const scale = getPreferredPetScale();
+  const pet = getInstalledPetState(petId);
   if (!pet) throw new Error(`Installed pet is unavailable: ${petId}`);
   const offset = agentPetWindows.size + 1;
   // Use terminal bounds for initial position when confinement is active.
@@ -285,7 +284,7 @@ function getOrCreateAgentPresentation(petId: string): PetTransientPresentation {
   let presentation: PetTransientPresentation;
   presentation = createPetTransientPresentation({
     mergeDisplay: mergePetTransientDisplay,
-    getDisplayDurationMs: (preparedDisplay) => getTransientDisplayDurationMs(preparedDisplay, getAppStateSnapshot().preferences.bubbleDurationScale),
+    getDisplayDurationMs: (preparedDisplay) => getTransientDisplayDurationMs(preparedDisplay, getPetRenderPreferences().bubbleDurationScale),
     getReactionAnimationMs: getTransientReactionAnimationMs,
     clearReaction: clearTransientReaction,
     badgeExpiryMs: { busy: busyStatusBadgeMs, normal: transientDisplayMs },
@@ -310,5 +309,5 @@ function getOrCreateAgentPresentation(petId: string): PetTransientPresentation {
 }
 
 function getPreferredPetScale(): PetScaleValue {
-  return getAppStateSnapshot().preferences.petScale as PetScaleValue;
+  return getPetRenderPreferences().petScale as PetScaleValue;
 }

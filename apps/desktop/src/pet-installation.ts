@@ -6,6 +6,7 @@ import { getAppStateSnapshot, installPetState, removePetState, setDefaultPet, up
 import { getCatalogPet } from "./catalog.js";
 import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 import { maxCodexPetJsonBytes } from "@open-pets/pet-format/metadata";
+import { validatePetLibraryMetadata, type PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
 import { validatePetPackageMetadata } from "@open-pets/pet-format/package";
 import type { PetPackage } from "@open-pets/pet-format/package-types";
 import { builtInPet } from "./built-in-pet.js";
@@ -39,6 +40,28 @@ export interface LocalPetInstallResult {
   readonly state: OpenPetsStateV1;
   readonly petId: string;
   readonly displayName: string;
+}
+
+export interface LocalPetInstallOptions {
+  /** Classification provenance only; the ordinary package validation still applies. */
+  readonly origin?: "codex";
+  /** Source-catalog labels for explicit Codex-origin imports, outside pet.json. */
+  readonly libraryMetadata?: PetLibraryMetadata;
+}
+
+function readLocalInstallOptions(options: LocalPetInstallOptions): LocalPetInstallOptions {
+  const origin = options.origin;
+  const requestedMetadata = options.libraryMetadata;
+  if (origin !== undefined && origin !== "codex") {
+    throw new Error("Local pet origin must be codex when specified.");
+  }
+  if (requestedMetadata !== undefined && origin !== "codex") {
+    throw new Error("Pet library metadata requires a Codex-origin local import.");
+  }
+  const libraryMetadata = requestedMetadata === undefined
+    ? undefined
+    : validatePetLibraryMetadata(requestedMetadata);
+  return { origin, libraryMetadata };
 }
 
 export async function installPet(petId: string): Promise<OpenPetsStateV1> {
@@ -150,13 +173,22 @@ export async function installPetWardrobe(petId: string): Promise<OpenPetsStateV1
   });
 }
 
-export async function installPetFromZipFile(zipPath: string): Promise<OpenPetsStateV1> {
-  return (await installPetFromZipFileWithResult(zipPath)).state;
+export async function installPetFromZipFile(zipPath: string, options: LocalPetInstallOptions = {}): Promise<OpenPetsStateV1> {
+  return (await installPetFromZipFileWithResult(zipPath, options)).state;
 }
 
-export async function installPetFromZipFileWithResult(zipPath: string): Promise<LocalPetInstallResult> {
+export async function installPetFromZipFileWithResult(zipPath: string, options: LocalPetInstallOptions = {}): Promise<LocalPetInstallResult> {
+  const { origin, libraryMetadata } = readLocalInstallOptions(options);
+  const archivePath = resolve(zipPath);
+  if (origin === "codex" && await realpath(archivePath) !== archivePath) {
+    throw new Error("Codex pet archive path is not canonical.");
+  }
   const zip = await readBoundedRegularFile(zipPath, maxZipDownloadBytes, "pet zip");
-  return installPetFromZipBufferWithResult(zip);
+  return installPetFromZipBufferWithResult(
+    zip,
+    origin === "codex" ? { kind: "codex", path: archivePath } : undefined,
+    libraryMetadata,
+  );
 }
 
 export interface PetZipUrlInstallOptions {
@@ -180,7 +212,11 @@ export async function installPetFromZipUrlWithResult(
   return installPetFromZipBufferWithResult(zip);
 }
 
-async function installPetFromZipBufferWithResult(zip: Buffer): Promise<LocalPetInstallResult> {
+async function installPetFromZipBufferWithResult(
+  zip: Buffer,
+  source?: { readonly kind: "codex"; readonly path: string },
+  libraryMetadata?: PetLibraryMetadata,
+): Promise<LocalPetInstallResult> {
   validateZipMagic(zip);
   const petsRoot = getPetsRoot();
   const candidate = await createPetInstallStagingCandidate(petsRoot);
@@ -195,7 +231,13 @@ async function installPetFromZipBufferWithResult(zip: Buffer): Promise<LocalPetI
         const candidatePackage = await validateExtractedPet(directory);
         if (candidatePackage.metadata.id !== metadata.id) throw new Error("Pet package id changed during installation.");
       },
-      mutateState: () => upsertPetState({ id: metadata.id, displayName: metadata.displayName, description: metadata.description }),
+      mutateState: () => upsertPetState({
+        id: metadata.id,
+        displayName: metadata.displayName,
+        description: metadata.description,
+        ...(source === undefined ? {} : { source }),
+        ...(libraryMetadata === undefined ? {} : { libraryMetadata }),
+      }),
     });
     notifyPetInstallationChanged(metadata.id);
     return { state, petId: metadata.id, displayName: metadata.displayName };
@@ -205,11 +247,15 @@ async function installPetFromZipBufferWithResult(zip: Buffer): Promise<LocalPetI
   }
 }
 
-export async function installPetFromFolder(folderPath: string): Promise<OpenPetsStateV1> {
-  return (await installPetFromFolderWithResult(folderPath)).state;
+export async function installPetFromFolder(folderPath: string, options: LocalPetInstallOptions = {}): Promise<OpenPetsStateV1> {
+  return (await installPetFromFolderWithResult(folderPath, options)).state;
 }
 
-export async function installPetFromFolderWithResult(folderPath: string): Promise<LocalPetInstallResult> {
+export async function installPetFromFolderWithResult(
+  folderPath: string,
+  options: LocalPetInstallOptions = {},
+): Promise<LocalPetInstallResult> {
+  const { origin, libraryMetadata } = readLocalInstallOptions(options);
   const sourceDir = resolve(folderPath);
   const sourceStats = await lstat(sourceDir);
   if (sourceStats.isSymbolicLink()) throw new Error("Pet folder cannot be a symlink.");
@@ -234,7 +280,13 @@ export async function installPetFromFolderWithResult(folderPath: string): Promis
         const candidatePackage = await validateExtractedPet(directory);
         if (candidatePackage.metadata.id !== metadata.id) throw new Error("Pet package id changed during installation.");
       },
-      mutateState: () => upsertPetState({ id: metadata.id, displayName: metadata.displayName, description: metadata.description }),
+      mutateState: () => upsertPetState({
+        id: metadata.id,
+        displayName: metadata.displayName,
+        description: metadata.description,
+        ...(origin === "codex" ? { source: { kind: "codex" as const, path: sourceDir } } : {}),
+        ...(libraryMetadata === undefined ? {} : { libraryMetadata }),
+      }),
     });
     notifyPetInstallationChanged(metadata.id);
     return { state, petId: metadata.id, displayName: metadata.displayName };

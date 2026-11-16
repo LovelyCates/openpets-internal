@@ -54,6 +54,7 @@ toolsets:
   appimage: 1.0.3
 
 mac:
+  executableName: OpenPets Internal
   icon: assets/app-icon.icns
   category: public.app-category.utilities
   extendInfo:

@@ -19,6 +19,12 @@ import { setPetGazeActivityOverride } from "./pet-window-gaze.js";
 import type { PetContentRender } from "./pet-window-types.js";
 import type { CodexPetMetadata } from "@open-pets/pet-format/metadata";
 import type { MotionPetMetadata } from "@open-pets/pet-format/motion";
+import { defaultPetSprite } from "@open-pets/pet-format/animation";
+
+const classicIdleGestureDurationMs = Math.max(
+  defaultPetSprite.states.waving.durationMs * defaultPetSprite.states.waving.iterations,
+  defaultPetSprite.states.jumping.durationMs * defaultPetSprite.states.jumping.iterations,
+);
 
 interface WindowEntry {
   readonly window: BrowserWindow;
@@ -248,6 +254,21 @@ export function updatePetActivityRender(window: BrowserWindow, render: PetConten
         entry.contents.send("openpets:pet-activity", { kind: "cancel", format: "classic", generation, activityId: activity.id });
       }
     },
+    ...(render.codexSpriteVersion === 1 ? {
+      classicIdle: {
+        durationMs: classicIdleGestureDurationMs,
+        play: () => {
+          if (!entry.contents.isDestroyed()) {
+            entry.contents.send("openpets:pet-activity", { kind: "classic-idle", action: "play" });
+          }
+        },
+        stop: () => {
+          if (!entry.contents.isDestroyed()) {
+            entry.contents.send("openpets:pet-activity", { kind: "classic-idle", action: "stop" });
+          }
+        },
+      },
+    } : {}),
   });
 }
 

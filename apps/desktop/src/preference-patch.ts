@@ -10,6 +10,7 @@ import { isSupportedLocale, type LocalePreference } from "./i18n/index.js";
 import { validateReactionAnimationOverrides } from "@open-pets/pet-format/animation";
 import { validatePetAssistantPersonalityPatch, type PetAssistantPersonalityPatch } from "./pet-assistant-personality.js";
 import { validateVoiceAssistantShortcut } from "./voice-assistant-shortcut.js";
+import { maxFavoritePetIds, normalizeFavoritePetIds } from "./app-state-core.js";
 
 export type PreferencePatch = {
   openDefaultPetOnLaunch?: boolean;
@@ -24,6 +25,7 @@ export type PreferencePatch = {
   idleCursorGazeEnabled?: boolean;
   reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>;
   petPoolEnabled?: boolean;
+  favoritePetIds?: readonly string[];
   petConfinementEnabled?: boolean;
   petCrossDisplayEnabled?: boolean;
   petGravityEnabled?: boolean;
@@ -56,6 +58,14 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
   }
 
   const patch: PreferencePatch = {};
+
+  if ("favoritePetIds" in value) {
+    if (!Array.isArray(value.favoritePetIds) || value.favoritePetIds.length > maxFavoritePetIds
+      || value.favoritePetIds.some((id) => typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))) {
+      throw new Error("Invalid favorite pet IDs.");
+    }
+    patch.favoritePetIds = normalizeFavoritePetIds(value.favoritePetIds) ?? [];
+  }
 
   if ("openDefaultPetOnLaunch" in value) {
     if (typeof value.openDefaultPetOnLaunch !== "boolean") throw new Error("Invalid open-on-launch value.");

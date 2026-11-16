@@ -22,6 +22,11 @@ export function nextActivityOpportunityMs(random: () => number): number {
   return activityIdleDelayMs + 60_000 + Math.floor(Math.max(0, Math.min(1, random())) * 120_000);
 }
 
+/** Short, cosmetic atlas gestures do not change the opt-in activity cadence. */
+export function nextClassicIdleVariationMs(random: () => number): number {
+  return 15_000 + Math.floor(Math.max(0, Math.min(1, random())) * 15_000);
+}
+
 export function selectIdlePetActivity<T extends PetActivityIdentity>(
   activities: readonly T[],
   enabledIds: readonly string[],

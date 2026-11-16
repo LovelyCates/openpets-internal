@@ -23,6 +23,8 @@ export interface SpriteStateDefinition {
   readonly row: number;
   readonly frames: number;
   readonly durationMs: number;
+  /** Optional authored hold for each frame; their sum is the full loop duration. */
+  readonly frameDurationsMs?: readonly number[];
   readonly iterations?: number | "infinite";
 }
 
@@ -101,18 +103,77 @@ export const reactionAnimationMetadata = [
 const allowedReactionSet = new Set<OpenPetsReaction>(allowedReactions);
 const selectableAnimationSet = new Set<UserSelectableAnimationState>(selectableAnimationMetadata.map((animation) => animation.id));
 
-export function getConfiguredSpriteStates(waitingAnimationDurationMs: WaitingAnimationDurationMs = defaultWaitingAnimationDurationMs): Record<UniversalSpriteState, SpriteStateDefinition> {
-  return {
+const classicV1FrameDurationsMs = {
+  idle: [1680, 660, 660, 840, 840, 1920],
+  "running-right": [120, 120, 120, 120, 120, 120, 120, 220],
+  "running-left": [120, 120, 120, 120, 120, 120, 120, 220],
+  waving: [140, 140, 140, 280],
+  jumping: [140, 140, 140, 140, 280],
+  failed: [140, 140, 140, 140, 140, 140, 140, 240],
+  waiting: [150, 150, 150, 150, 150, 260],
+  running: [120, 120, 120, 120, 120, 220],
+  review: [150, 150, 150, 150, 150, 280],
+} as const satisfies Record<UniversalSpriteState, readonly number[]>;
+
+export function getConfiguredSpriteStates(
+  waitingAnimationDurationMs: WaitingAnimationDurationMs = defaultWaitingAnimationDurationMs,
+  spriteVersion: 1 | 2 = 2,
+): Record<UniversalSpriteState, SpriteStateDefinition> {
+  const states: Record<UniversalSpriteState, SpriteStateDefinition> = {
     ...defaultPetSprite.states,
     waiting: {
       ...defaultPetSprite.states.waiting,
       durationMs: waitingAnimationDurationMs,
     },
   };
+  if (spriteVersion !== 1) return states;
+
+  for (const state of Object.keys(classicV1FrameDurationsMs) as UniversalSpriteState[]) {
+    const authored = classicV1FrameDurationsMs[state];
+    let frameDurationsMs: readonly number[] = authored;
+    if (state === "waiting" && waitingAnimationDurationMs !== defaultWaitingAnimationDurationMs) {
+      let elapsed = 0;
+      let previousBoundary = 0;
+      frameDurationsMs = authored.map((duration) => {
+        elapsed += duration;
+        const boundary = Math.round(elapsed * waitingAnimationDurationMs / defaultWaitingAnimationDurationMs);
+        const scaledDuration = boundary - previousBoundary;
+        previousBoundary = boundary;
+        return scaledDuration;
+      });
+    }
+    states[state] = {
+      ...states[state],
+      durationMs: frameDurationsMs.reduce((sum, duration) => sum + duration, 0),
+      frameDurationsMs,
+    };
+  }
+  return states;
 }
 
-export function getConfiguredSpriteCacheKey(waitingAnimationDurationMs: WaitingAnimationDurationMs): string {
-  return `waiting-animation-duration:${waitingAnimationDurationMs}`;
+/** Normalized start offsets used by both CSS and discrete SVG previews. */
+export function getSpriteFrameOffsets(state: Pick<SpriteStateDefinition, "frames" | "durationMs" | "frameDurationsMs">): readonly number[] {
+  if (!Number.isInteger(state.frames) || state.frames < 1 || !Number.isFinite(state.durationMs) || state.durationMs <= 0) {
+    throw new Error("Sprite frame timing must have a positive frame count and duration.");
+  }
+  const durations = state.frameDurationsMs;
+  if (!durations) return Array.from({ length: state.frames }, (_, index) => index / state.frames);
+  if (durations.length !== state.frames || durations.some((duration) => !Number.isFinite(duration) || duration <= 0)) {
+    throw new Error("Sprite frame holds must match the frame count and be positive.");
+  }
+  const total = durations.reduce((sum, duration) => sum + duration, 0);
+  if (Math.abs(total - state.durationMs) > 0.001) throw new Error("Sprite frame holds must span the animation duration.");
+  let elapsed = 0;
+  return durations.map((duration) => {
+    const offset = elapsed / total;
+    elapsed += duration;
+    return offset;
+  });
+}
+
+export function getConfiguredSpriteCacheKey(waitingAnimationDurationMs: WaitingAnimationDurationMs, spriteVersion: 1 | 2 = 2): string {
+  const base = `waiting-animation-duration:${waitingAnimationDurationMs}`;
+  return spriteVersion === 1 ? `${base}:classic-v1-frame-holds` : base;
 }
 
 export function isUserSelectableAnimationState(value: unknown): value is UserSelectableAnimationState {

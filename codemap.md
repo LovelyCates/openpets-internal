@@ -21,6 +21,9 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app, a 
 - `packages/sdk/src/index.ts`: public SDK v3 type contract for plugin authors.
 - `scripts/capture.mjs`: `pnpm capture` runner for the long-running dev screenshot session (`docs/screenshots.md`); scenarios live in `scripts/capture-scenarios/`.
 - `plugins/official/`: first-party SDK v3 plugin product source consumed by desktop dev mode and plugin packaging/catalog release workflows.
+- `internal/build-macos.mjs`: internal macOS-only build, packaged-runtime validation, ad-hoc signature verification, DMG/ZIP and checksum entry point.
+- `internal/install-opencode-integration.mjs`: local Node installer for version-selected OpenCode bundles and MCP configuration, with managed-file verification and rollback.
+- `internal/import-pet-catalog.mjs`: SHA-verified, checkpointed offline collection import through the running app's local IPC, preserving existing IDs and checking final library completeness without direct profile writes.
 
 ## Directory Map
 
@@ -39,6 +42,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app, a 
 | `apps/desktop/scripts/` | Desktop package cleanup and local release automation scripts. | [View Map](apps/desktop/scripts/codemap.md) |
 | `infra/linux-vms/` | Reproducible VMware/Vagrant Linux desktop test VMs (GNOME, KDE X11, COSMIC), guest provisioning, and the host `vm` driver; see `docs/development.md`. | — |
 | `packages/` | Publishable npm package workspace for shared protocol, CLI, MCP, and coding-agent integrations. | [View Map](packages/codemap.md) |
+| `internal/` | Internal edition build/deployment records, Windows PowerShell tooling, macOS local packaging and portable OpenCode integration installation. | [Guide](internal/README.md) |
 | `packages/agent-events/` | Shared agent speech/event message pools and validation utilities. | [View Map](packages/agent-events/codemap.md) |
 | `packages/agent-events/src/` | Source implementation for agent event messages. | [View Map](packages/agent-events/src/codemap.md) |
 | `packages/claude/` | Claude Code integration package for hooks, MCP setup, and settings/memory management. | [View Map](packages/claude/codemap.md) |

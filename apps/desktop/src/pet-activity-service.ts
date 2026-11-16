@@ -1,5 +1,5 @@
 import type { AvailablePetActivity } from "./pet-activity-contract.js";
-import { nextActivityOpportunityMs, selectIdlePetActivity } from "./pet-activity-policy.js";
+import { nextActivityOpportunityMs, nextClassicIdleVariationMs, selectIdlePetActivity } from "./pet-activity-policy.js";
 
 export interface PetActivityCarrier {
   readonly id: number;
@@ -13,6 +13,12 @@ export interface PetActivityCarrier {
   readonly play: (activity: AvailablePetActivity, generation: number) => void;
   readonly stop: (activity: AvailablePetActivity, generation: number) => void;
   readonly variation?: () => void;
+  /** Cosmetic V1 atlas gestures; optional artwork activities remain opt-in. */
+  readonly classicIdle?: {
+    readonly durationMs: number;
+    readonly play: () => void;
+    readonly stop: () => void;
+  };
 }
 
 interface ActiveActivity {
@@ -26,6 +32,8 @@ interface ActiveActivity {
 interface CarrierEntry {
   carrier: PetActivityCarrier;
   opportunityAt: number | null;
+  classicIdleAt: number | null;
+  classicIdleUntil: number | null;
   active: ActiveActivity | null;
 }
 
@@ -61,7 +69,9 @@ export class PetActivityService {
     if (previous) {
       this.cancel(carrier.id);
     }
-    this.carriers.set(carrier.id, { carrier, active: null, opportunityAt: null });
+    this.carriers.set(carrier.id, {
+      carrier, active: null, opportunityAt: null, classicIdleAt: null, classicIdleUntil: null,
+    });
   }
 
   remove(id: number): void {
@@ -86,6 +96,8 @@ export class PetActivityService {
     const active = entry.active;
     entry.active = null;
     entry.opportunityAt = null;
+    entry.classicIdleAt = null;
+    this.stopClassicIdle(entry);
     if (active) {
       active.carrier.stop(active.activity, active.generation);
     }
@@ -184,29 +196,52 @@ export class PetActivityService {
       }
       if (this.getPlayingActivityId(entry.carrier.petId)) {
         entry.opportunityAt = null;
+        entry.classicIdleAt = null;
+        this.stopClassicIdle(entry);
         continue;
       }
       if (entry.opportunityAt === null) {
         entry.opportunityAt = now + nextActivityOpportunityMs(this.options.random);
       }
-      if (now < entry.opportunityAt) {
-        continue;
-      }
-      const history = this.getHistory(entry.carrier.petId);
-      const activity = selectIdlePetActivity(
-        entry.carrier.activities,
-        this.options.enabledIds(entry.carrier.petId),
-        history.playedAt,
-        history.lastId,
-        now,
-        this.options.random,
-      );
-      if (activity) {
-        this.start(entry, activity);
-      } else {
+      if (now >= entry.opportunityAt) {
+        const history = this.getHistory(entry.carrier.petId);
+        const activity = selectIdlePetActivity(
+          entry.carrier.activities,
+          this.options.enabledIds(entry.carrier.petId),
+          history.playedAt,
+          history.lastId,
+          now,
+          this.options.random,
+        );
+        if (activity) {
+          this.start(entry, activity);
+          continue;
+        }
         entry.opportunityAt = now + nextActivityOpportunityMs(this.options.random);
         entry.carrier.variation?.();
       }
+      const classicIdle = entry.carrier.classicIdle;
+      if (!classicIdle) continue;
+      if (entry.classicIdleUntil !== null && now >= entry.classicIdleUntil) {
+        entry.classicIdleUntil = null;
+      }
+      if (entry.classicIdleAt === null) {
+        entry.classicIdleAt = now + nextClassicIdleVariationMs(this.options.random);
+      }
+      if (now < entry.classicIdleAt) continue;
+      const samePetIsAnimating = [...this.carriers.values()].some((other) => {
+        return other.carrier.petId === entry.carrier.petId
+          && other.classicIdleUntil !== null && other.classicIdleUntil > now;
+      });
+      if (samePetIsAnimating) continue;
+      const nextClassicIdleAt = now + nextClassicIdleVariationMs(this.options.random);
+      for (const other of this.carriers.values()) {
+        if (other.carrier.petId === entry.carrier.petId) {
+          other.classicIdleAt = nextClassicIdleAt;
+        }
+      }
+      entry.classicIdleUntil = now + classicIdle.durationMs;
+      classicIdle.play();
     }
   }
 
@@ -236,6 +271,14 @@ export class PetActivityService {
   }
 
   private start(entry: CarrierEntry, activity: AvailablePetActivity): void {
+    // A user-requested or opted-in activity takes the same pet's playback
+    // budget immediately, including gestures in another carrier window.
+    for (const other of this.carriers.values()) {
+      if (other.carrier.petId === entry.carrier.petId) {
+        this.stopClassicIdle(other);
+        other.classicIdleAt = null;
+      }
+    }
     const generation = ++this.generation;
     entry.active = {
       activity,
@@ -246,5 +289,11 @@ export class PetActivityService {
     };
     entry.opportunityAt = null;
     entry.carrier.play(activity, generation);
+  }
+
+  private stopClassicIdle(entry: CarrierEntry): void {
+    if (entry.classicIdleUntil === null) return;
+    entry.classicIdleUntil = null;
+    entry.carrier.classicIdle?.stop();
   }
 }

@@ -278,8 +278,11 @@ executing its Linux binary. RPM payloads are first spooled to a temporary CPIO
 file, avoiding a release-host memory limit on full desktop packages. The
 focused `packaging-contract.test.ts` fixture regression proves that staged DEB
 and RPM payloads missing `openpets.system-resources` or the target Sharp runtime
-are hard failures. Release checkpoints also persist SHA-256 digests for every
-artifact output; `release-checkpoint.test.mjs` proves that a same-size mutation
+are hard failures. Linux test hosts require `rpmbuild` and `rpm2cpio`; other hosts
+run the RPM fixtures when both tools are available and explicitly skip only those
+fixtures otherwise, retaining all general and DEB checks. Release checkpoints
+also persist SHA-256 digests for every artifact output;
+`release-checkpoint.test.mjs` proves that a same-size mutation
 stales the stage while an unchanged checkpoint remains reusable.
 
 ## Release gates and ordering

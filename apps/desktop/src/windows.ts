@@ -115,7 +115,7 @@ function syncDockVisibilityForInternalUi(): void {
 }
 
 function getSettingsStateSnapshot(): {
-  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "appearanceTheme" | "petScale" | "hudScale" | "bubbleScale" | "bubbleDurationScale" | "bubbleTheme" | "waitingAnimationDurationMs" | "idleCursorGazeEnabled" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "pinnedPets" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "petBounciness" | "petFloorFriction" | "personality" | "voiceAssistantShortcut" | "chatShortcut" | "petToggleShortcut" | "showChatButton" | "showTalkButton" | "petButtonsPosition" | "petButtonsSize">;
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "appearanceTheme" | "petScale" | "hudScale" | "bubbleScale" | "bubbleDurationScale" | "bubbleTheme" | "waitingAnimationDurationMs" | "idleCursorGazeEnabled" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "favoritePetIds" | "pinnedPets" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "petBounciness" | "petFloorFriction" | "personality" | "voiceAssistantShortcut" | "chatShortcut" | "petToggleShortcut" | "showChatButton" | "showTalkButton" | "petButtonsPosition" | "petButtonsSize">;
   petScaleOptions: typeof petScaleOptions;
   hudScaleOptions: typeof hudScaleOptions;
   bubbleScaleOptions: typeof bubbleScaleOptions;
@@ -143,6 +143,7 @@ function getSettingsStateSnapshot(): {
       reactionAnimationOverrides: state.preferences.reactionAnimationOverrides,
       petPoolOrder: state.preferences.petPoolOrder,
       petPoolEnabled: state.preferences.petPoolEnabled,
+      favoritePetIds: state.preferences.favoritePetIds,
       pinnedPets: state.preferences.pinnedPets,
       petConfinementEnabled: state.preferences.petConfinementEnabled,
       petCrossDisplayEnabled: state.preferences.petCrossDisplayEnabled,
@@ -987,7 +988,14 @@ async function getReactionAnimationSettingsSnapshot(): Promise<unknown> {
       label: t(`settings.animation.${animation.id}.label`),
       description: t(`settings.animation.${animation.id}.description`),
     })),
-    sprite: { ...defaultPetSprite, ...(preview.previewFormat === "atlas" ? preview.spriteLayout : {}), states: getConfiguredSpriteStates(state.preferences.waitingAnimationDurationMs) },
+    sprite: {
+      ...defaultPetSprite,
+      ...(preview.previewFormat === "atlas" ? preview.spriteLayout : {}),
+      states: getConfiguredSpriteStates(
+        state.preferences.waitingAnimationDurationMs,
+        preview.previewFormat === "atlas" ? preview.spriteLayout.version : defaultPetSprite.version,
+      ),
+    },
     ...previewPresentation(preview),
     waitingAnimationDurationMs: state.preferences.waitingAnimationDurationMs,
     waitingAnimationDurationOptions: waitingAnimationDurationOptions.map((option) => ({

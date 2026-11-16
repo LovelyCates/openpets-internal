@@ -95,6 +95,7 @@ export interface PetContentRender {
   readonly gazeAnchor?: CodexPetGazeAnchor;
   readonly petScale: PetScaleValue;
   readonly gazeSpriteBottomInset: number;
+  readonly hasTokenDock?: boolean;
   readonly paused: boolean;
   readonly flipped: boolean;
   readonly cacheKey: string;

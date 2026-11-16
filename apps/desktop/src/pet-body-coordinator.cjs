@@ -1,4 +1,64 @@
 const { resolveMotionActivityAnimation } = require('@open-pets/pet-format/motion');
+const { defaultPetSprite, isLoopingSpriteState } = require('@open-pets/pet-format/animation');
+
+const classicBusyReactions = new Set(['thinking', 'working', 'editing', 'running', 'testing', 'waiting']);
+
+/** Admit elapsed-time accounting only after the actual CSS clock has started. */
+function createClassicBusyReadiness(getSprite, refresh) {
+  const observedReady = new WeakMap();
+  return (spriteState) => {
+    const sprite = getSprite();
+    if (!sprite || sprite.hasAttribute('data-motion-body') || typeof sprite.getAnimations !== 'function') return false;
+    // getAnimations flushes style so a matching DOM row cannot start its
+    // budget before Chromium has created and started that CSS animation.
+    const animation = sprite.getAnimations().find((item) => item.animationName === `pet-frames-${spriteState}`);
+    if (!animation) return false;
+    if (!animation.pending && animation.startTime !== null && animation.startTime !== undefined
+      && animation.playState === 'running') return true;
+    const ready = animation.ready;
+    if (ready && observedReady.get(animation) !== ready) {
+      observedReady.set(animation, ready);
+      // Retain the fulfilled promise in the WeakMap. Repeated refreshes of a
+      // paused animation must not subscribe to its already-ready promise in
+      // a microtask loop. A later play/resume can expose a new ready promise.
+      void ready.then(() => {
+        if (observedReady.get(animation) === ready) refresh();
+      }, () => {
+        // Removing/replacing CSS can cancel readiness; current content/intent
+        // refreshes admit the replacement animation through the same gate.
+      });
+    }
+    return false;
+  };
+}
+
+/** Restart only the selected finite CSS sprite animation, retaining its DOM and timing. */
+function restartClassicFiniteAnimation(sprite, spriteState) {
+  if (!sprite || typeof sprite.getAnimations !== 'function') return false;
+  const name = `pet-frames-${spriteState}`;
+  for (const animation of sprite.getAnimations()) {
+    const timing = animation.effect?.getTiming();
+    if (animation.animationName !== name || !Number.isFinite(timing?.iterations)
+      || timing.iterations <= 0 || animation.playState === 'paused') continue;
+    animation.currentTime = 0;
+    animation.play();
+    return true;
+  }
+  // Finished finite CSS animations without fill (including existing V2 rows)
+  // may no longer appear in getAnimations(). Restart only that exact finite
+  // CSS rule, keeping its authored timing and the ordinary CSS lifecycle.
+  const computed = sprite.ownerDocument?.defaultView?.getComputedStyle(sprite);
+  const iterations = Number(computed?.animationIterationCount);
+  if (computed?.animationName !== name || !Number.isFinite(iterations) || iterations <= 0
+    || computed.animationPlayState === 'paused' || !sprite.style) return false;
+  const inlineName = sprite.style.getPropertyValue('animation-name');
+  const priority = sprite.style.getPropertyPriority('animation-name');
+  sprite.style.setProperty('animation-name', 'none', 'important');
+  sprite.getAnimations();
+  if (inlineName) sprite.style.setProperty('animation-name', inlineName, priority);
+  else sprite.style.removeProperty('animation-name');
+  return true;
+}
 
 /** Arbitrates semantic body playback and the single pending appearance. */
 function createPetBodyCoordinator(options) {
@@ -19,6 +79,12 @@ function createPetBodyCoordinator(options) {
   let activity = null;
   let latestActivityGeneration = 0;
   let pendingVariation = null;
+  let classicIdleVariation = null;
+  let classicIdleTimer = null;
+  let classicHovered = false;
+  let classicBusy = null;
+  let classicBusyTimer = null;
+  let classicRest = false;
   let reducedMotion = false;
   let disposed = false;
   let playbackId = 0;
@@ -26,6 +92,127 @@ function createPetBodyCoordinator(options) {
   const contextAnimations = new Map();
   const seenEvents = new Set();
   const failedPresentations = new Set();
+
+  function setClassicRest(value) {
+    if (classicRest === value) return;
+    classicRest = value;
+    options.onClassicRest?.(value);
+  }
+
+  function pauseClassicBusy() {
+    cancelTimer(classicBusyTimer);
+    classicBusyTimer = null;
+    if (classicBusy?.startedAt !== null && classicBusy?.startedAt !== undefined) {
+      classicBusy.remaining = Math.max(0, classicBusy.remaining - (now() - classicBusy.startedAt));
+      classicBusy.startedAt = null;
+    }
+  }
+
+  function clearClassicBusy() {
+    pauseClassicBusy();
+    classicBusy = null;
+    setClassicRest(false);
+  }
+
+  function hasClassicBusyPresentation() {
+    return Boolean(classicBusy && options.canPresentClassicBusy?.(classicBusy.spriteState));
+  }
+
+  function reconcileClassicBusy() {
+    if (!classicBusy) return;
+    if (disposed || snapshot?.motion || !snapshot || snapshot.input.paused || snapshot.input.suspended
+      || reducedMotion || drag || movement || plugin || activity || !hasClassicBusyPresentation()) {
+      pauseClassicBusy();
+      setClassicRest(false);
+      return;
+    }
+    if (classicBusy.remaining <= 0) {
+      cancelIdleVariation();
+      setClassicRest(true);
+      return;
+    }
+    cancelIdleVariation();
+    setClassicRest(false);
+    if (classicBusy.startedAt !== null) return;
+    if (options.isClassicBusyReady && !options.isClassicBusyReady(classicBusy.spriteState)) return;
+    const burst = classicBusy;
+    burst.startedAt = now();
+    classicBusyTimer = armTimer(() => {
+      if (disposed || classicBusy !== burst) return;
+      pauseClassicBusy();
+      reconcileClassicBusy();
+    }, burst.remaining);
+  }
+
+  function updateClassicBusy() {
+    const intent = snapshot?.input.classic;
+    if (snapshot?.motion || !intent || !classicBusyReactions.has(intent.reaction)
+      || intent.spriteState === 'idle' || !defaultPetSprite.states[intent.spriteState]
+      || !isLoopingSpriteState(intent.spriteState) || !Number.isFinite(intent.cycleDurationMs)
+      || intent.cycleDurationMs <= 0) {
+      clearClassicBusy();
+      return;
+    }
+    // Effective row/timing changes get a new budget. Same-row heartbeats,
+    // bubbles, scale and token/HUD snapshots retain the current visual phase.
+    const key = `${intent.spriteState}:${intent.cycleDurationMs}`;
+    if (classicBusy?.key !== key) {
+      clearClassicBusy();
+      classicBusy = { key, spriteState: intent.spriteState, remaining: intent.cycleDurationMs * 3, startedAt: null };
+    }
+    reconcileClassicBusy();
+  }
+
+  function cancelIdleVariation(source) {
+    if (source !== undefined && classicIdleVariation?.source !== source) return;
+    cancelTimer(classicIdleTimer);
+    classicIdleTimer = null;
+    if (classicIdleVariation === null) return;
+    classicIdleVariation = null;
+    options.onClassicIdleVariation?.(null);
+  }
+
+  function canPlayClassicIdleVariation() {
+    // Classic semantic context may outlive its transient presentation. The
+    // carrier and renderer therefore verify the current visible idle state;
+    // an old "working" context must not disable quiet cosmetic gestures.
+    if (disposed || reducedMotion || classicIdleVariation || activity || candidate
+      || !snapshot || snapshot.motion || snapshot.input.paused || snapshot.input.suspended
+      || drag || movement || plugin || hasClassicBusyPresentation() || !options.canPlayClassicIdle?.()) return false;
+    return true;
+  }
+
+  function playClassicIdleVariation(state, source) {
+    const definition = defaultPetSprite.states[state];
+    const gesture = { state, source };
+    classicIdleVariation = gesture;
+    options.onClassicIdleVariation?.(state);
+    classicIdleTimer = armTimer(() => {
+      if (classicIdleVariation === gesture) cancelIdleVariation();
+    }, definition.durationMs * definition.iterations);
+    return true;
+  }
+
+  function offerClassicIdleVariation() {
+    if (!canPlayClassicIdleVariation()) return false;
+    const choices = ['waving', 'jumping'];
+    const state = choices[Math.min(choices.length - 1, Math.floor(Math.max(0, random()) * choices.length))];
+    return playClassicIdleVariation(state, 'quiet');
+  }
+
+  function setClassicHover(value, opaque = true) {
+    const next = Boolean(value);
+    // Alpha selects the initial visible-body entry. Once admitted, retain the
+    // hover until its stable frame boundary is left, regardless of moving art.
+    if (next && !classicHovered && !opaque) return;
+    if (next === classicHovered) return;
+    classicHovered = next;
+    if (!next) {
+      if (classicIdleVariation?.source === 'hover') cancelIdleVariation();
+      return;
+    }
+    if (canPlayClassicIdleVariation()) playClassicIdleVariation('jumping', 'hover');
+  }
 
   function send(appearance, id, outcome, intentId, epoch = snapshot?.input.epoch) {
     if (!appearance || !epoch) return;
@@ -291,6 +478,7 @@ function createPetBodyCoordinator(options) {
 
   function reconcile(immediate = false) {
     if (disposed) return;
+    reconcileClassicBusy();
     onVisibility?.({ drag: Boolean(drag), plugin, activity: activity?.request.format ?? null, motion: Boolean(snapshot?.motion), suspended: Boolean(snapshot?.input.suspended) });
     if (!snapshot?.motion || snapshot.input.suspended) {
       clearCandidateTimer();
@@ -341,6 +529,9 @@ function createPetBodyCoordinator(options) {
     if (snapshot && snapshot.input.epoch === next.input.epoch && next.input.revision <= snapshot.input.revision) return false;
     const epochChanged = snapshot?.input.epoch !== next.input.epoch;
     if (epochChanged) {
+      clearClassicBusy();
+      cancelIdleVariation();
+      classicHovered = false;
       seenEvents.clear();
       semanticContext = null;
       contextAnimations.clear();
@@ -349,6 +540,7 @@ function createPetBodyCoordinator(options) {
       cancelActive();
     }
     snapshot = next;
+    updateClassicBusy();
     const newAppearance = Boolean(next.motion)
       && next.motion.presentationId !== committed?.presentationId
       && next.motion.presentationId !== candidate?.appearance.presentationId
@@ -357,6 +549,7 @@ function createPetBodyCoordinator(options) {
     const busyContext = next.input.context !== 'idle'
       && (next.motion || semanticContext !== next.input.context);
     if (newAppearance || newEvent || busyContext || next.input.paused || next.input.suspended || epochChanged) {
+      cancelIdleVariation();
       pendingVariation = null;
       if (activity) finishActivity(activity, 'cancelled', false);
     }
@@ -371,6 +564,17 @@ function createPetBodyCoordinator(options) {
       cancelActive();
       player.clear();
       onVisibility?.({ drag: Boolean(drag), plugin, activity: activity?.request.format ?? null, motion: false, suspended: next.input.suspended });
+      if (newEvent) {
+        const event = next.input.event;
+        seenEvents.add(event.id);
+        if (seenEvents.size > 1024) seenEvents.delete(seenEvents.values().next().value);
+        const definition = defaultPetSprite.states[event.classicSpriteState];
+        if (Number.isFinite(definition?.iterations) && !reducedMotion && !next.input.paused
+          && !next.input.suspended && !drag && !movement && !plugin) {
+          options.onClassicEvent?.(event);
+        }
+      }
+      reconcileClassicBusy();
       return true;
     }
     if (newAppearance) {
@@ -385,7 +589,7 @@ function createPetBodyCoordinator(options) {
       const appearance = committed ?? candidate?.appearance;
       const variants = appearance && bindings(appearance).events?.[event.reaction];
       const candidateAllowsEvent = !candidate || !committed || candidate.appearance.reason === 'scheduled';
-      if (appearance && !reducedMotion && !next.input.paused && !next.input.suspended && !drag && !plugin && !(active?.kind === 'event' && active.key === event.reaction) && variants?.length && candidateAllowsEvent) {
+      if (appearance && event.classicSpriteState === undefined && !reducedMotion && !next.input.paused && !next.input.suspended && !drag && !plugin && !(active?.kind === 'event' && active.key === event.reaction) && variants?.length && candidateAllowsEvent) {
         start({ kind: 'event', key: event.reaction, intentId: event.id, animation: choose(variants), appearance, epoch: next.input.epoch });
       } else if (appearance) {
         send(appearance, ++playbackId, 'cancelled', event.id);
@@ -399,14 +603,14 @@ function createPetBodyCoordinator(options) {
     const next = value === 'run-left' ? 'left' : value === 'run-right' ? 'right' : null;
     if (next === drag) return;
     drag = next;
-    if (next) { pendingVariation = null; if (activity) finishActivity(activity, 'cancelled', false); }
+    if (next) { cancelIdleVariation(); pendingVariation = null; if (activity) finishActivity(activity, 'cancelled', false); }
     reconcile(true);
   }
   function setMotionState(value) {
     const next = value === 'run-left' ? 'left' : value === 'run-right' ? 'right' : null;
     if (next === movement) return;
     movement = next;
-    if (next) { pendingVariation = null; if (activity) finishActivity(activity, 'cancelled', false); }
+    if (next) { cancelIdleVariation(); pendingVariation = null; if (activity) finishActivity(activity, 'cancelled', false); }
     reconcile(true);
   }
   function setFlipped(value) {
@@ -418,6 +622,7 @@ function createPetBodyCoordinator(options) {
   function setPlugin(value) {
     plugin = Boolean(value);
     if (plugin) {
+      cancelIdleVariation();
       pendingVariation = null;
       if (activity) finishActivity(activity, 'cancelled', false);
     }
@@ -426,7 +631,7 @@ function createPetBodyCoordinator(options) {
   function canAdmitActivity() {
     const input = snapshot?.input;
     return Boolean(input && (!snapshot.motion || input.context === 'idle') && !input.paused && !input.suspended && !reducedMotion
-      && !drag && !movement && !plugin && active?.kind !== 'event' && !candidate);
+      && !drag && !movement && !plugin && !hasClassicBusyPresentation() && active?.kind !== 'event' && !candidate);
   }
 
   function isClassicActivityTarget(request) {
@@ -458,6 +663,7 @@ function createPetBodyCoordinator(options) {
     if (!request || request.kind !== 'play' || !Number.isSafeInteger(request.generation)
       || request.generation <= 0 || request.generation <= latestActivityGeneration) return false;
     latestActivityGeneration = request.generation;
+    cancelIdleVariation();
     if (activity) finishActivity(activity, 'cancelled', false);
     pendingVariation = null;
     const targetValid = request.format === 'classic'
@@ -479,6 +685,7 @@ function createPetBodyCoordinator(options) {
       id: ++playbackId,
     };
     activity = item;
+    reconcileClassicBusy();
     if (request.format === 'classic') {
       onVisibility?.({ drag: false, plugin, activity: 'classic', motion: false, suspended: false });
       playExternalActivity(request, (outcome) => {
@@ -512,6 +719,7 @@ function createPetBodyCoordinator(options) {
     return true;
   }
   function refresh() {
+    if (disposed) return;
     player.mount();
     reconcile();
   }
@@ -519,8 +727,10 @@ function createPetBodyCoordinator(options) {
     const next = Boolean(value);
     if (next === reducedMotion || disposed) return;
     reducedMotion = next;
+    reconcileClassicBusy();
     pendingVariation = null;
     if (next) {
+      cancelIdleVariation();
       if (activity) finishActivity(activity, 'cancelled', false);
       cancelActive();
       reconcile(true);
@@ -531,17 +741,20 @@ function createPetBodyCoordinator(options) {
   }
   function dispose() {
     if (disposed) return;
+    clearClassicBusy();
+    cancelIdleVariation();
     if (activity) finishActivity(activity, 'cancelled', false);
     clearCandidateTimer();
     cancelActive();
     candidate = null;
     disposed = true;
+    classicHovered = false;
     player.dispose();
   }
   function hitTest(x, y) {
     if ((plugin || activity?.request.format === 'classic') && !drag) return null;
     return player.hitTest(x, y);
   }
-  return { update, setDragDirection, setMotionState, setFlipped, setPlugin, setReducedMotion, startActivity, cancelActivity, offerVariation, refresh, dispose, hitTest };
+  return { update, setDragDirection, setMotionState, setFlipped, setPlugin, setReducedMotion, setClassicHover, startActivity, cancelActivity, offerVariation, offerClassicIdleVariation, cancelIdleVariation, refresh, dispose, hitTest };
 }
-module.exports = { createPetBodyCoordinator };
+module.exports = { createPetBodyCoordinator, createClassicBusyReadiness, restartClassicFiniteAnimation };

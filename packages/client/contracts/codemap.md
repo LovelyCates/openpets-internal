@@ -20,6 +20,20 @@ pnpm test        # Runs node .test-dist/contracts/client-protocol.contract.js
 
 ## Files
 
+### pet-list.contract.ts
+
+Pure complete-list pagination regression for 1336 pets, all metadata fields,
+small legacy responses, empty lists, duplicate entries, non-progressing offsets,
+changed revisions/counts/defaults, incomplete results and bounded response sizes.
+
+### local-pet-list-socket.contract.ts
+
+Real Unix socket / Windows named-pipe regression for `listPets()` automatically
+reading 1336 pets through multiple 16 KiB-bounded, fragmented response frames.
+The same local fixture checks unchanged ordinary folder/ZIP install requests,
+explicit Codex-origin folder/ZIP imports with optional source labels, and rejection
+of invalid origin/metadata associations before a request reaches the socket.
+
 ### client-protocol.contract.ts
 
 Runtime protocol validation (79 lines). Imports from `../src/` and asserts:
@@ -31,6 +45,7 @@ Runtime protocol validation (79 lines). Imports from `../src/` and asserts:
 - **Public IP rejection**: Ensures public IPs are rejected for security
 - **Response parsing**: ok/error discriminated union parsing
 - **Pet list/install result parsing**: Validates pet data structures
+- **Remote isolation**: Local Codex-origin installs remain unavailable in remote mode.
 
 **Security Coverage**:
 - IPv4 only (no hostnames)
@@ -41,7 +56,7 @@ Runtime protocol validation (79 lines). Imports from `../src/` and asserts:
 
 **Source Dependencies**: Imports from `../src/discovery.js`, `../src/index.js`, `../src/protocol.js`
 
-**Test Command**: `pnpm test` in `packages/client/`
+**Test Command**: `pnpm test` in `packages/client/` runs all three contracts.
 
 **Build Output**: `.test-dist/contracts/client-protocol.contract.js` (not published)
 

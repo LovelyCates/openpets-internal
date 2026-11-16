@@ -24,7 +24,7 @@ export function getDiscoveryFilePath(): string {
   }
 
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "OpenPets", "runtime", "ipc.json");
+    return join(homedir(), "Library", "Application Support", "OpenPets Internal", "runtime", "ipc.json");
   }
 
   if (process.platform === "win32") {
@@ -76,6 +76,9 @@ export function validateDiscovery(value: unknown): OpenPetsDiscoveryFile {
   const endpoint = parseIpcEndpoint(value.endpoint);
   if (process.platform === "win32" && endpoint.kind === "tcp") {
     throw new OpenPetsClientError("invalid_discovery", "Windows local discovery must use an OpenPets named pipe.");
+  }
+  if (process.platform === "darwin" && endpoint.kind === "tcp") {
+    throw new OpenPetsClientError("invalid_discovery", "macOS local discovery must use an OpenPets Unix socket.");
   }
   if (value.platform !== process.platform && !allowsCrossPlatformDiscovery(value.platform, endpoint)) {
     throw new OpenPetsClientError("invalid_discovery", "Discovery platform does not match this client.");

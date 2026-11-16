@@ -4,7 +4,7 @@ description: Connect Claude Code, OpenCode, Cursor, Zed, Devin, Pi, OpenClaw, an
 
 # Agent integrations
 
-> **Internal edition:** OpenCode 1.x and 2.x use separate local bundles installed with `internal/Install-OpenCodeIntegration.ps1`. The desktop one-click installer is disabled because its upstream configuration names public npm packages. Both plugin and MCP paths use local IPC; see `packages/opencode/V1_COMPAT.md`.
+> **Internal edition:** OpenCode 1.x and 2.x use separate local bundles installed with the local Node entry point `internal/install-opencode-integration.mjs` on macOS, or `internal/Install-OpenCodeIntegration.ps1` on Windows. The desktop one-click installer is disabled because its upstream configuration names public npm packages. Both plugin and MCP paths use local IPC; see `packages/opencode/V1_COMPAT.md`.
 
 OpenPets reacts to coding agents. Most supported agents have an integration
 package that does two jobs: **configure** the agent to talk to OpenPets, and at
@@ -204,17 +204,38 @@ Ships both a config manager and a runtime plugin.
   contract. Setup reads plugin options from `ctx.options`, subscribes to public
   V2 event envelopes (`type` + `data`) through an abortable async iterator, and
   registers `session.hook('prompt')` plus `tool.hook('execute.before'/'execute.after')`.
-  Prompt starts thinking; before-tool classifies edit/write and test commands;
+  Prompt and `session.execution.started` start thinking; before-tool classifies
+  edit/write and test commands. Matching successful after-tool hooks resume
+  thinking as soon as the last known parallel tool completes;
   failed foreign tools and `session.execution.failed` emit error; OpenPets' own
   MCP tool failures are ignored; permission requests wait; and
   `session.execution.succeeded` emits success (`session.idle` is also accepted).
   Prompt and tool dispatches are serialized so they share one
-  lease acquisition. Unload aborts the event stream, disposes hook registrations,
+  lease acquisition. Pending state changes are coalesced to the latest state before
+  IPC and after a slow acquisition, so old tool states do not replay behind a
+  newer completion. Failed sends do not suppress an immediate retry. Unload
+  aborts the event stream, disposes hook registrations,
   waits for an in-flight acquisition, and releases that lease. Work that was
   only queued does not acquire after unload. The lease is renewed with a 2s
-  buffer. The 20s speech and 3s permission cooldowns stay active; success and
-  error reactions bypass the 10s reaction cooldown, which still applies to
-  other reactions. The optional `excludeReactions` option is an array of
+  buffer for telemetry; ongoing activity renews early enough to cover its next
+  refresh. Every real state change, including A → B → A, is immediate. Repeated
+  continuous states are deduplicated locally and refreshed after ten seconds. A
+  five-second, unref keepalive tick maintains quiet long tools and their leases;
+  terminal events and unload clear it. New sessions send their first state
+  immediately. The 20s speech and 3s permission-speech cooldowns remain separate
+  and are recorded only after successful delivery. When the current session's
+  active permission wait receives a reply, a neutral thinking-pool phrase
+  replaces the obsolete approval request through the existing speech channel,
+  together with the resumed tool reaction (or thinking when no tool is tracked).
+  This one guarded replacement bypasses ambient speech cooldown; duplicate,
+  foreign and terminal replies remain ignored, and excluded reactions suppress
+  both its state and speech. A reply does not claim that permission was granted.
+  The replacement remains attached to the current activity if a newer stream or
+  tool state supersedes its first queued reaction or lease acquisition is slow.
+  Only successful speech consumes it; a newer wait, activity switch, terminal
+  state or unload cancels it, and an old acknowledgement cannot consume a newer
+  wait's replacement.
+  Keepalive never repeats speech. The optional `excludeReactions` option is an array of
   reactions to suppress before IPC or throttling. OpenCode 2.0 reads it from a
   native `plugins` entry, including without a `pet` target:
 
@@ -229,19 +250,53 @@ Ships both a config manager and a runtime plugin.
   `openpets configure` still writes the tuple; the options object the plugin
   reads is the same either way. Invalid `pet` values fail setup instead of being
   dropped; unrecognized exclusion names are ignored.
+  Session IDs from prompt/tool hooks select the current activity. Live deltas
+  can restore thinking after tools; late deltas or tool completions cannot revive
+  a terminal session, and another session cannot overwrite its state or telemetry.
+  An unscoped legacy delta does not infer activity. Known parallel call IDs keep
+  remaining tools active when one completes or fails.
   Tool-hook failures and terminal execution failures are separate error
   signals. If a failed tool also ends the execution, both can emit error
   feedback; recoverable tool failures do not necessarily end the execution.
+  A failed execution stays failed when OpenCode follows it with idle/success
+  notifications or a delayed completed-message update. Only an explicit new
+  prompt, execution start, or V1 busy notification opens the next turn, including
+  another turn in the same session. Terminal history is bounded, and foreign
+  sessions cannot evict the current failed owner or clear its telemetry.
+- **V1 permission requests**: the adapter consumes generic `permission.asked`
+  events, including OpenCode 1.2.27 where the permission service does not invoke
+  the legacy `permission.ask` hook. It preserves session identity and the
+  permission action, discards paths/metadata/tool-call IDs, and ignores OpenPets'
+  own MCP tools. The legacy hook remains available for actual `ask` decisions;
+  allow/deny decisions, replies, and old update envelopes do not create a wait.
+  A reply to an existing wait in the current active session resumes its latest
+  tracked edit/test state immediately, or thinking if no visible tool remains;
+  it does not leave a running tool waiting until completion. Foreign, duplicate,
+  and post-terminal replies cannot resume activity.
 - **Local token display**: the V1/V2 adapters count streaming text and
   reasoning deltas without sending their content to OpenPets. The companion
   displays an approximate output token/s rate, updated at most once per second;
+  it also sends an estimated segment AVG from the cumulative accepted characters
+  and the observed first-to-last-delta duration. AVG requires at least one second
+  and is never an arithmetic mean of rolling rates or a whole-session statistic.
+  A final report can retain the sampled AVG; a report without sampled output
+  timing cannot invent one. The dock uses `tk/s` for both metrics, with separate
+  speed colors and no agent brand label;
   a completed step/message can replace it with OpenCode's reported output-token
   count. Successful idle clears a live estimate, while a freshly reported final
-  count remains visible until the desktop's eight-second expiry. Failure clears
-  either display, and plugin unload clears live estimates while leaving a final
-  reported count to expire. Historical V1
+  count remains current until the desktop's eight-second expiry. The dock then
+  remains idle with the last available AVG labeled as historical; expired
+  rates never remain live. Failure clears
+  either current reading, including a previous report already queued or in flight, and
+  ignores late usage from the failed turn so a completed message with output
+  zero cannot recreate a current reading. Plugin unload clears live estimates while leaving a final
+  reported count to expire. Idle history never prolongs an explicit pet's lease
+  or closing grace period. Historical V1
   `message.part.updated` events and newer `message.part.delta` events are both
-  recognized; a modified internal 1.x fork must be checked against its exact
+  recognized. Full-text V1 snapshots without deltas require observed growth of
+  the same unfinished, identified part: first, unchanged and completed historical
+  snapshots do not count as live output. Pending estimates cannot overtake a
+  newer terminal clear or reported total; a modified internal 1.x fork must be checked against its exact
   event payloads before relying on this display.
 - **Windows detection**: the desktop app checks user and global Scoop shim
   directories before falling back to `opencode` / `opencode.cmd` on `PATH`, so

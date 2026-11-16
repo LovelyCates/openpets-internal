@@ -4,6 +4,23 @@ export interface OnboardingPreferenceLike {
   readonly onboardingCompleted?: unknown;
 }
 
+/** Favorites are library bookmarks, independent of desktop pins and session pools. */
+export const maxFavoritePetIds = 5_000;
+export function normalizeFavoritePetIds(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (ids.length >= maxFavoritePetIds) break;
+    if (typeof entry !== "string") continue;
+    const id = entry.trim();
+    if (seen.has(id) || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids.length ? ids : undefined;
+}
+
 export const petScaleOptions = [
   { label: "XS", value: 0.35 },
   { label: "Small", value: 0.5 },

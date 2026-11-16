@@ -132,13 +132,11 @@ try {
   const errorSpeechesBeforeTerminalFailures = calls.filter((call) => call.kind === "say" && call.value !== "Approval needed").length;
   hooks.event({ type: "session.execution.started", data: { sessionID: "terminal-failure-session" } });
   hooks.event({ type: "session.execution.failed", data: { sessionID: "terminal-failure-session" } });
-  assert.equal(scheduled.length, 1);
-  await scheduled.shift()?.();
+  while (scheduled.length) await scheduled.shift()?.();
   now += 1_000;
   hooks.event({ type: "session.execution.started", data: { sessionID: "terminal-failure-session" } });
   hooks.event({ type: "session.execution.failed", data: { sessionID: "terminal-failure-session" } });
-  assert.equal(scheduled.length, 1);
-  await scheduled.shift()?.();
+  while (scheduled.length) await scheduled.shift()?.();
   assert.equal(
     calls.filter((call) => call.kind === "react" && call.value === "error").length,
     terminalErrorCount + 2,
@@ -234,7 +232,8 @@ assert.equal(isReactionExcluded("success", new Set()), false);
     await scheduled2.shift()?.();
     assert.ok(excludeCalls.at(-1)?.startsWith("say:"), "non-excluded error reaction should reach client via say");
 
-    // tool.execute.before with edit → editing → NOT excluded, should schedule
+    // A new turn after failure can still send non-excluded editing feedback.
+    hooks2.prompt();
     hooks2.toolBefore("edit", {});
     assert.equal(scheduled2.length, 1, "non-excluded editing reaction should schedule");
     await scheduled2.shift()?.();
@@ -367,7 +366,7 @@ assert.deepEqual(classifyOpenCodeToolReaction("edit", {}), "editing");
     releaseAcquire?.("shared-lease");
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(acquireCalls, 1, "the waiting dispatch must reuse the lease instead of acquiring another");
-    assert.deepEqual(reactions, ["thinking", "editing"]);
+    assert.deepEqual(reactions, ["editing"], "the superseded prompt must not replay before the current tool state");
     await concurrent.cleanup();
     assert.deepEqual(released, ["shared-lease"], "cleanup releases the single shared lease");
     concurrent.prompt();
@@ -549,14 +548,12 @@ await assert.rejects(
       assert.deepEqual(hooks.names, ["session.prompt", "tool.execute.before", "tool.execute.after"]);
       assertRegisteredHooks(hooks);
       hooks.prompt(sessionPrompt("wire the prompt hook"));
+      await waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "thinking");
       hooks.before(toolBeforeEvent("edit", { filePath: "README.md" }));
+      await waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "editing");
       hooks.before(toolBeforeEvent("bash", { command: "pnpm test" }));
       hooks.before(toolBeforeEvent("openpets_openpets_say", {}));
-      await Promise.all([
-        waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "thinking"),
-        waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "editing"),
-        waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "testing"),
-      ]);
+      await waitForIpc((request) => request.method === "pet.react" && request.params?.reaction === "testing");
     } finally {
       await cleanup();
     }
@@ -719,7 +716,7 @@ async function withPluginIpc(run: (
   stateRoot: string,
   waitForIpc: (predicate: (request: IpcRequest) => boolean) => Promise<void>,
 ) => Promise<void>): Promise<void> {
-  const discoveryDir = mkdtempSync(join(tmpdir(), "openpets-opencode-wire-"));
+  const discoveryDir = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "openpets-opencode-wire-"));
   const discoveryPath = join(discoveryDir, "ipc.json");
   const requests: IpcRequest[] = [];
   const waiters = new Set<{
@@ -766,9 +763,9 @@ async function withPluginIpc(run: (
       server.once("error", reject);
       server.once("listening", () => {
         const address = server.address();
-        if (process.platform === "win32") {
+        if (process.platform === "win32" || process.platform === "darwin") {
           if (typeof address !== "string" || address !== endpoint) {
-            reject(new Error("OpenPets test IPC server did not bind a Windows named pipe."));
+            reject(new Error("OpenPets test IPC server did not bind a native local endpoint."));
             return;
           }
         } else {
@@ -782,6 +779,9 @@ async function withPluginIpc(run: (
       });
       if (process.platform === "win32") {
         endpoint = `\\\\.\\pipe\\openpets-test-${process.pid}-${randomUUID()}`;
+        server.listen(endpoint);
+      } else if (process.platform === "darwin") {
+        endpoint = join(discoveryDir, "openpets-wire.sock");
         server.listen(endpoint);
       } else {
         server.listen(0, "127.0.0.1");

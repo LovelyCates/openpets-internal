@@ -1,6 +1,10 @@
 import type { getAppStateSnapshot } from "./app-state.js";
 import { codexV2SpriteLayout } from "@open-pets/pet-format/sprite-layout";
 import type { InstalledPetPresentation } from "./installed-pet-layout.js";
+import type { LocalPetInstallOptions } from "./pet-installation.js";
+import { t } from "./i18n/index.js";
+
+const petPresentationConcurrency = 8;
 
 export type ControlCenterPetManagementIpcChannel =
   | "openpets:get-pets-state"
@@ -107,7 +111,7 @@ export type ControlCenterPetManagementIpcDependencies = {
   readonly refreshPetWindowsForPetId: (petId: string, reason: string) => void;
   readonly installPet: (petId: string) => unknown | Promise<unknown>;
   readonly installPetFromFolder: (path: string) => unknown | Promise<unknown>;
-  readonly installPetFromZipFile: (path: string) => unknown | Promise<unknown>;
+  readonly installPetFromZipFile: (path: string, options?: LocalPetInstallOptions) => unknown | Promise<unknown>;
   readonly importCodexPet: (petId: string) => unknown | Promise<unknown>;
   readonly removePet: (petId: string) => unknown | Promise<unknown>;
   readonly resetDefaultPetToInitialPosition: () => void;
@@ -280,14 +284,14 @@ export function installControlCenterPetManagementIpcHandlers({
     const importKind = await chooseLocalPetImportKind(owner, showMessageBox);
     if (!importKind) return getPetsStateSnapshot(getAppStateSnapshot, readInstalledPetPresentation);
 
-    const options: OpenDialogOptions = importKind === "zip" ? {
-      title: "Install pet from ZIP",
-      buttonLabel: "Install Pet",
+    const options: OpenDialogOptions = importKind !== "folder" ? {
+      title: t(importKind === "codex-zip" ? "pets.importDialog.codexZip" : "pets.importDialog.openPetsZip"),
+      buttonLabel: t("pets.importDialog.action"),
       properties: ["openFile"],
-      filters: [{ name: "OpenPets ZIP", extensions: ["zip"] }],
+      filters: [{ name: t(importKind === "codex-zip" ? "pets.importDialog.codexZip" : "pets.importDialog.openPetsZip"), extensions: ["zip"] }],
     } : {
-      title: "Install pet from folder",
-      buttonLabel: "Install Pet",
+      title: t("pets.importDialog.folder"),
+      buttonLabel: t("pets.importDialog.action"),
       properties: ["openDirectory"],
     };
     const result = await showOpenDialog(owner, options);
@@ -295,10 +299,13 @@ export function installControlCenterPetManagementIpcHandlers({
     const selectedPath = result.filePaths[0];
     try {
       const selectedStats = await stat(selectedPath);
-      const state = selectedStats.isDirectory()
-        ? await installPetFromFolder(selectedPath)
-        : await installPetFromZipFile(selectedPath);
-      logger.debug("local pet import succeeded", { kind: selectedStats.isDirectory() ? "folder" : "zip" });
+      const isDirectory = selectedStats.isDirectory();
+      if (isDirectory !== (importKind === "folder")) throw new Error(t("pets.importDialog.typeMismatch"));
+      let state: unknown;
+      if (isDirectory) state = await installPetFromFolder(selectedPath);
+      else if (importKind === "codex-zip") state = await installPetFromZipFile(selectedPath, { origin: "codex" });
+      else state = await installPetFromZipFile(selectedPath);
+      logger.debug("local pet import succeeded", { kind: importKind });
       refreshDefaultPetContent();
       // A freshly imported pet that is already pinned gets its window back.
       syncPinnedPets();
@@ -362,15 +369,31 @@ async function getPetsStateSnapshot(
   readonly pets: { readonly installed: ReadonlyArray<InstalledPet & Partial<InstalledPetPresentation>> };
 }> {
   const state = getAppStateSnapshot();
-  const installed = await Promise.all(state.pets.installed.map(async (pet) => {
-    if (pet.builtIn) return { ...pet, format: "classic" as const, previewFormat: "atlas" as const, spriteLayout: codexV2SpriteLayout, capabilities: { outfits: true, activities: false, gaze: true } };
-    try {
-      return {
-        ...pet,
-        ...await readInstalledPetPresentation(pet.id, pet.source?.kind === "team" ? "team" : "personal"),
-      };
-    } catch {
-      return pet;
+  const pets = state.pets.installed;
+  const installed: Array<InstalledPet & Partial<InstalledPetPresentation>> = new Array(pets.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(petPresentationConcurrency, pets.length) }, async () => {
+    while (nextIndex < pets.length) {
+      const index = nextIndex++;
+      const pet = pets[index]!;
+      if (pet.builtIn) {
+        installed[index] = {
+          ...pet,
+          format: "classic",
+          previewFormat: "atlas",
+          spriteLayout: codexV2SpriteLayout,
+          capabilities: { outfits: true, activities: false, gaze: true },
+        };
+        continue;
+      }
+      try {
+        installed[index] = {
+          ...pet,
+          ...await readInstalledPetPresentation(pet.id, pet.source?.kind === "team" ? "team" : "personal"),
+        };
+      } catch {
+        installed[index] = pet;
+      }
     }
   }));
   return { preferences: { defaultPetId: state.preferences.defaultPetId }, pets: { installed } };
@@ -379,19 +402,20 @@ async function getPetsStateSnapshot(
 async function chooseLocalPetImportKind(
   owner: unknown,
   showMessageBox: ControlCenterPetManagementIpcDependencies["showMessageBox"],
-): Promise<"zip" | "folder" | null> {
+): Promise<"zip" | "codex-zip" | "folder" | null> {
   const options: MessageBoxOptions = {
     type: "question",
-    title: "Install pet",
-    message: "Install pet from ZIP or folder?",
-    detail: "Choose the source type before selecting the pet package.",
-    buttons: ["ZIP", "Folder", "Cancel"],
+    title: t("pets.importDialog.title"),
+    message: t("pets.importDialog.message"),
+    detail: t("pets.importDialog.detail"),
+    buttons: [t("pets.importDialog.openPetsZip"), t("pets.importDialog.codexZip"), t("pets.importDialog.folder"), t("common.cancel")],
     defaultId: 0,
-    cancelId: 2,
+    cancelId: 3,
     noLink: true,
   };
   const result = await showMessageBox(owner, options);
   if (result.response === 0) return "zip";
-  if (result.response === 1) return "folder";
+  if (result.response === 1) return "codex-zip";
+  if (result.response === 2) return "folder";
   return null;
 }

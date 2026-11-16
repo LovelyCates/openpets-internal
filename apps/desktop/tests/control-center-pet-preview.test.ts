@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { defaultPetSprite } from "@open-pets/pet-format/animation";
+import { defaultPetSprite, getConfiguredSpriteStates } from "@open-pets/pet-format/animation";
 import { buildPetSpritePreviewModel, buildReactionPreviewModel, defaultPetSpriteLayout, getCatalogPetSpriteLayout, isAllowedPetActivityPreview } from "../src/renderer/src/pet-preview-state.js";
 
 // The renderer must accept only the exact installed activity protocol shape;
@@ -67,8 +67,33 @@ assert.deepEqual(buildReactionPreviewModel(reactionSettings, "waiting"), {
   format: "atlas", src: reactionSettings.previewSpriteUrl,
   frame: { width: 192, height: 208 }, x: -0, y: -1456,
   xValues: "0;-192;-384;-576", atlasWidth: 1536, atlasHeight: 2288,
+  keyTimes: "0;0.25;0.5;0.75",
   animated: true, durationMs: 2200,
 }, "configured non-idle reaction uses its selected row, timing and V2 atlas");
+
+const classicStates = getConfiguredSpriteStates(1010, 1);
+const classicSettings = {
+  previewSpriteUrl: "openpets-installed://spritesheet/classic",
+  sprite: { ...defaultPetSpriteLayout, states: classicStates },
+};
+const classicPreview = buildReactionPreviewModel(classicSettings, "review");
+assert.equal(classicPreview.format, "atlas");
+if (classicPreview.format === "atlas") {
+  assert.equal(classicPreview.durationMs, 1030);
+  const starts = classicPreview.keyTimes.split(";").map(Number);
+  assert.equal(starts.length, 6);
+  assert.equal(starts[0], 0);
+  assert.ok(Math.abs(starts[1]! * classicPreview.durationMs - 150) < 0.001);
+  assert.ok(Math.abs((1 - starts.at(-1)!) * classicPreview.durationMs - 280) < 0.001, "Settings holds the same final pose as the live V1 renderer");
+  assert.equal(classicPreview.xValues, "0;-192;-384;-576;-768;-960");
+}
+const neutralPreview = buildReactionPreviewModel(reactionSettings, "idle");
+assert.equal(neutralPreview.format, "atlas");
+if (neutralPreview.format === "atlas") {
+  assert.equal(neutralPreview.animated, false);
+  assert.equal(neutralPreview.xValues, "-1152");
+  assert.equal(neutralPreview.keyTimes, "0", "V2 neutral preview remains a single still frame");
+}
 assert.deepEqual(buildReactionPreviewModel({ ...reactionSettings, previewFormat: "image", previewWidth: 600, previewHeight: 641 }, "waiting"), {
   format: "image", src: reactionSettings.previewSpriteUrl, width: 600, height: 641,
 }, "Motion reaction previews remain static images");

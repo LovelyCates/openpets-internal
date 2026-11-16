@@ -13,11 +13,15 @@ const { installDefaultPetSession } = require("./pet-session/session-overlay-view
 const { createPetContentStageController } = require("./src/pet-content-stage.cjs");
 const { createPetAlphaHitTester, decodeSpriteSheetPixels } = require("./src/pet-alpha-hit-test.ts");
 const { createPetMotionPlayer } = require("./src/pet-motion-player.cjs");
-const { createPetBodyCoordinator } = require("./src/pet-body-coordinator.cjs");
+const { createPetBodyCoordinator, createClassicBusyReadiness, restartClassicFiniteAnimation } = require("./src/pet-body-coordinator.cjs");
 const { getMotionOutfitBindings } = require("@open-pets/pet-format/motion");
 const petContentStage = createPetContentStageController(document, {
   onCommit: (payload) => ipcRenderer.send("openpets:pet-content-committed", payload),
   onError: (error) => console.warn("[openpets:pet-content] update failed", String(error)),
+  onSpriteReplaced: () => {
+    bodyCoordinator.cancelIdleVariation();
+    bodyCoordinator.setClassicHover(false);
+  },
 });
 const motionPlayer = createPetMotionPlayer({
   document,
@@ -40,9 +44,45 @@ const nativeActivityPlayer = createNativePetActivityPlayer({
   clearTimeout,
   now: () => performance.now(),
 });
+const isClassicBusyReady = createClassicBusyReadiness(
+  () => document.querySelector(".pet-shell .installed-sprite, .pet-shell .sprite"),
+  () => bodyCoordinator.refresh(),
+);
 const bodyCoordinator = createPetBodyCoordinator({
   player: motionPlayer,
   getBindings: getMotionOutfitBindings,
+  isClassicBusyReady,
+  canPresentClassicBusy: (state) => {
+    const root = document.documentElement;
+    const sprite = document.querySelector(".pet-shell .installed-sprite, .pet-shell .sprite");
+    return Boolean(sprite && !sprite.hasAttribute("data-motion-body")
+      && root.dataset.reactionState === state && root.dataset.motionState === "idle");
+  },
+  onClassicRest: (rest) => {
+    if (rest) document.documentElement.dataset.classicRest = "true";
+    else delete document.documentElement.dataset.classicRest;
+  },
+  canPlayClassicIdle: () => {
+    const state = document.documentElement.dataset;
+    return state.codexSpriteVersion === "1" && state.paused === "false"
+      && state.reactionState === "idle" && state.motionState === "idle";
+  },
+  onClassicIdleVariation: (state) => {
+    if (state === null) delete document.documentElement.dataset.idleAnimation;
+    else document.documentElement.dataset.idleAnimation = state;
+  },
+  onClassicEvent: (event) => {
+    const root = document.documentElement;
+    const sprite = document.querySelector(".pet-shell .installed-sprite, .pet-shell .sprite");
+    if (!sprite || sprite.hasAttribute("data-motion-body")) return;
+    const state = event.classicSpriteState;
+    if (root.dataset.reactionState !== state) {
+      // A changed state starts its own CSS clock naturally.
+      root.dataset.reactionState = state;
+      return;
+    }
+    restartClassicFiniteAnimation(sprite, state);
+  },
   now: () => performance.now(),
   random: Math.random,
   onResult: (result) => ipcRenderer.send("openpets:pet-body-result", result),
@@ -74,6 +114,7 @@ function reportMotionPreference() {
 
 function onMotionPreferenceChange() {
   bodyCoordinator.setReducedMotion(reducedMotionQuery.matches);
+  if (reducedMotionQuery.matches) document.documentElement.dataset.codexGazeIndex = "neutral";
   reportMotionPreference();
 }
 
@@ -122,10 +163,18 @@ ipcRenderer.on("openpets:pet-activity", (_event, payload) => {
     bodyCoordinator.cancelActivity(payload.generation);
   } else if (payload?.kind === "variation") {
     bodyCoordinator.offerVariation();
+  } else if (payload?.kind === "classic-idle") {
+    if (payload.action === "play") bodyCoordinator.offerClassicIdleVariation();
+    else if (payload.action === "stop") bodyCoordinator.cancelIdleVariation("quiet");
   }
 });
 for (const eventName of ["mousedown", "contextmenu"]) {
-  document.addEventListener(eventName, () => {
+  document.addEventListener(eventName, (event) => {
+    const target = event.target instanceof Element ? event.target : document.elementFromPoint(event.clientX, event.clientY);
+    const bodyPress = eventName === "mousedown" && event.button === 0 && !event.ctrlKey && !event.metaKey
+      && isPetBodyTarget(target) && (isClassicBodyFramePoint(target, event.clientX, event.clientY)
+        || isOpaquePetSurfaceHit(target, event.clientX, event.clientY));
+    bodyCoordinator.cancelIdleVariation(bodyPress ? "quiet" : undefined);
     if (interactionActivityGeneration !== null) {
       bodyCoordinator.cancelActivity(interactionActivityGeneration);
     }
@@ -214,6 +263,17 @@ const isInteractivePanelOrBubble = (target) => {
   return Boolean(target.closest(".openpets-chat-panel, .openpets-compact-composer, .openpets-check-in-panel, .openpets-session-overlay, [data-openpets-companion-launcher], [data-openpets-check-in-button], .openpets-pet-buttons, .bubble, .openpets-context-menu"));
 };
 
+const isPetBodyTarget = (target) => target instanceof Element && !isInteractivePanelOrBubble(target)
+  && Boolean(target.closest(".pet-hitbox, .pet-shell"));
+
+const isClassicBodyFramePoint = (target, clientX, clientY) => {
+  if (!isPetBodyTarget(target) || document.documentElement.dataset.codexSpriteVersion !== "1") return false;
+  const sprite = document.querySelector(".pet-shell .installed-sprite");
+  const frame = sprite?.getBoundingClientRect();
+  return Boolean(frame && frame.width > 0 && frame.height > 0
+    && clientX >= frame.left && clientX < frame.right && clientY >= frame.top && clientY < frame.bottom);
+};
+
 const dismissBubble = (event) => {
   if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
 
@@ -260,7 +320,9 @@ ipcRenderer.on("openpets:pet-reaction-state", (_event, state) => {
   }
 
   const apply = () => {
+    if (state !== "idle") bodyCoordinator.cancelIdleVariation();
     document.documentElement.dataset.reactionState = state;
+    bodyCoordinator.refresh();
   };
 
   if (document.readyState === "loading") {
@@ -276,7 +338,9 @@ ipcRenderer.on("openpets:pet-gaze", (_event, payload) => {
   if (index !== null && (!Number.isInteger(index) || !allowedCodexGazeIndices.has(index))) return;
 
   const apply = () => {
-    document.documentElement.dataset.codexGazeIndex = index === null ? "neutral" : String(index);
+    document.documentElement.dataset.codexGazeIndex = index === null || reducedMotionQuery.matches
+      ? "neutral"
+      : String(index);
   };
 
   if (document.readyState === "loading") {
@@ -290,39 +354,59 @@ let latestTokenRateDisplay;
 
 function applyTokenRateDisplay() {
   if (latestTokenRateDisplay === undefined) return;
-  const hitbox = document.querySelector(".stage .pet-hitbox");
-  if (!hitbox) return;
-  let badge = hitbox.querySelector("[data-opencode-token-rate]");
-  if (latestTokenRateDisplay === null || (!latestTokenRateDisplay.rateText && !latestTokenRateDisplay.outputText)) {
+  const stage = document.querySelector(".stage");
+  if (!stage) return;
+  let badge = stage.querySelector("[data-opencode-token-rate]");
+  if (latestTokenRateDisplay === null) {
     badge?.remove();
+    stage.classList.remove("has-token-dock");
     return;
   }
   if (!badge) {
     badge = document.createElement("div");
     badge.className = "opencode-token-rate";
     badge.setAttribute("data-opencode-token-rate", "");
-    hitbox.prepend(badge);
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-live", "off");
+    for (const kind of ["live", "average"]) {
+      const metric = document.createElement("div");
+      metric.className = "opencode-token-rate-metric";
+      metric.dataset.tokenMetric = kind;
+      const label = document.createElement("span");
+      label.className = "opencode-token-rate-label";
+      const number = document.createElement("span");
+      number.className = "opencode-token-rate-number";
+      metric.append(label, number);
+      badge.appendChild(metric);
+    }
+    stage.appendChild(badge);
   }
-  badge.replaceChildren();
-  if (latestTokenRateDisplay.rateText) {
-    const rate = document.createElement("span");
-    rate.className = "opencode-token-rate-speed";
-    rate.textContent = latestTokenRateDisplay.rateText;
-    badge.appendChild(rate);
+  const display = latestTokenRateDisplay;
+  const metrics = [
+    ["live", display.rateLabel, display.rateText, display.rateTier],
+    ["average", display.averageLabel, display.averageText, display.averageTier],
+  ];
+  for (const [kind, labelText, numberText, tier] of metrics) {
+    const metric = badge.querySelector(`[data-token-metric="${kind}"]`);
+    if (!metric) continue;
+    const label = metric.querySelector(".opencode-token-rate-label");
+    const number = metric.querySelector(".opencode-token-rate-number");
+    if (label && label.textContent !== labelText) label.textContent = labelText;
+    if (number && number.textContent !== numberText) number.textContent = numberText;
+    metric.dataset.tier = tier;
   }
-  if (latestTokenRateDisplay.outputText) {
-    const total = document.createElement("span");
-    total.className = "opencode-token-rate-total";
-    total.textContent = latestTokenRateDisplay.outputText;
-    badge.appendChild(total);
-  }
+  badge.dataset.state = display.state;
+  badge.setAttribute("aria-label", [display.rateLabel, display.rateText, display.averageLabel, display.averageText, display.outputText].filter(Boolean).join(" · "));
+  stage.classList.add("has-token-dock");
 }
 
 ipcRenderer.on("openpets:pet-token-rate", (_event, display) => {
   if (display !== null && (
     !display || typeof display !== "object" || Array.isArray(display)
-    || typeof display.rateText !== "string" || display.rateText.length > 64
-    || typeof display.outputText !== "string" || display.outputText.length > 64
+    || !["live", "summary", "idle"].includes(display.state)
+    || ["rateLabel", "rateText", "averageLabel", "averageText", "outputText"].some((key) => typeof display[key] !== "string" || display[key].length > 64)
+    || !["fast", "medium", "slow", "unknown"].includes(display.rateTier)
+    || !["fast", "medium", "slow", "unknown"].includes(display.averageTier)
   )) return;
   latestTokenRateDisplay = display;
   if (document.readyState === "loading") {
@@ -442,7 +526,12 @@ const setInteractiveHit = (interactive, source = "mouse") => {
 
 const updateInteractiveHit = (event) => {
   const target = document.elementFromPoint(event.clientX, event.clientY);
-  setInteractiveHit(isOpaquePetSurfaceHit(target, event.clientX, event.clientY) || dragging);
+  const opaque = isOpaquePetSurfaceHit(target, event.clientX, event.clientY);
+  const insideFrame = isClassicBodyFramePoint(target, event.clientX, event.clientY);
+  // A stationary press keeps an existing hover latch. It does not admit a
+  // fresh gesture while held; actual drag/movement ownership cancels it.
+  bodyCoordinator.setClassicHover(insideFrame, opaque && !dragging);
+  setInteractiveHit(opaque || dragging);
 };
 
 ipcRenderer.on("openpets:pet-probe-hit-test", (_event, point) => {
@@ -501,8 +590,7 @@ const installPetSenses = () => {
     if (event.button !== 0) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (isInteractivePanelOrBubble(target)) return;
-    if (!target.closest(".pet-hitbox, .pet-shell")) return;
+    if (!isPetBodyTarget(target)) return;
     if (Date.now() < suppressClickUntil) return;
     sendPetEvent("pet:clicked", {});
   });
@@ -514,6 +602,7 @@ const installPetSenses = () => {
     sendPetEvent("pet:doubleClicked", {});
   });
   document.addEventListener("mouseover", (event) => {
+    updateInteractiveHit(event);
     const target = event.target;
     if (!(target instanceof Element)) return;
     if (isInteractivePanelOrBubble(target)) return;
@@ -2524,19 +2613,19 @@ const installMouseInterop = () => {
   installDefaultPetSession({ ipcRenderer, escapeHtml });
   if (usesNativePetDrag()) installLayerShellContextMenu();
 
-  let dragStartPoint = null;
-  let previousDragX = null;
-  window.addEventListener("blur", () => bodyCoordinator.setDragDirection(null));
+  const { createPetDragFeedback } = require("./src/pet-drag-feedback.cjs");
+  const dragFeedback = createPetDragFeedback();
+  window.addEventListener("blur", () => {
+    bodyCoordinator.setClassicHover(false);
+    bodyCoordinator.setDragDirection(null);
+    dragFeedback.stop();
+    if (dragging) ipcRenderer.send("openpets:pet-drag-end");
+    dragging = false;
+  });
 
   document.addEventListener("mousemove", (event) => {
     updateInteractiveHit(event);
-    if (dragging && previousDragX !== null) {
-      const delta = event.screenX - previousDragX;
-      if (delta !== 0) {
-        bodyCoordinator.setDragDirection(delta < 0 ? "run-left" : "run-right");
-      }
-      previousDragX = event.screenX;
-    }
+    if (dragging) bodyCoordinator.setDragDirection(dragFeedback.move(event.screenX, event.screenY));
     if (dragging && !usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-move", { screenX: event.screenX, screenY: event.screenY });
   }, { passive: true });
 
@@ -2547,17 +2636,14 @@ const installMouseInterop = () => {
     if (event.button !== 0 || !interactive || !(target instanceof Element)) return;
     if (isInteractivePanelOrBubble(target)) return;
     if (!target.closest(".pet-hitbox, .pet-shell")) return;
-    previousDragX = event.screenX;
-    bodyCoordinator.setDragDirection("run-right");
+    dragFeedback.start(event.screenX, event.screenY);
     if (usesNativePetDrag()) {
       dragging = true;
-      dragStartPoint = { screenX: event.screenX, screenY: event.screenY };
       ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY });
       return;
     }
     event.preventDefault();
     dragging = true;
-    dragStartPoint = { screenX: event.screenX, screenY: event.screenY };
     setInteractiveHit(true);
     ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY });
   });
@@ -2565,16 +2651,15 @@ const installMouseInterop = () => {
   document.addEventListener("mouseup", (event) => {
     if (!dragging) return;
     dragging = false;
-    previousDragX = null;
     bodyCoordinator.setDragDirection(null);
-    if (dragStartPoint && Math.hypot(event.screenX - dragStartPoint.screenX, event.screenY - dragStartPoint.screenY) > 4) {
+    if (dragFeedback.stop(event.screenX, event.screenY)) {
       suppressClickUntil = Date.now() + 300;
     }
-    dragStartPoint = null;
     ipcRenderer.send("openpets:pet-drag-end");
   });
 
   document.addEventListener("mouseleave", () => {
+    bodyCoordinator.setClassicHover(false);
     markAlphaTransparency(false);
     if (!dragging) setInteractiveHit(false);
   }, { passive: true });

@@ -4,10 +4,12 @@ import { posix, win32 } from "node:path";
 
 import { parseIpcEndpoint, readDiscoveryFile, type OpenPetsDiscoveryFile } from "./discovery.js";
 import { connectTimeoutMs, maxIpcMessageBytes, openPetsIpcVersion, parseIpcResponse, responseTimeoutMs, validateReaction, OpenPetsClientError, type OpenPetsIpcMethod, type OpenPetsIpcRequest, type OpenPetsReaction } from "./protocol.js";
+import { readPetList, type OpenPetsPetListResult } from "./pet-list.js";
 import { maxRemoteMessageBytes, openPetsRemoteProtocol, openPetsRemoteVersion, parseRemoteEndpoint, parseRemoteResponse, remoteConnectTimeoutMs, remoteResponseTimeoutMs, validateRemoteClientId, validateRemoteMessage, validateRemoteReaction, validateRemoteToken, type OpenPetsRemoteEndpoint, type OpenPetsRemoteMethod, type OpenPetsRemoteRequest } from "./remote-protocol.js";
 
 export { getDiscoveryFilePath, parseIpcEndpoint, readDiscoveryFile, validateDiscovery, validateEndpoint, type OpenPetsDiscoveryFile, type ParsedIpcEndpoint } from "./discovery.js";
 export { allowedReactions, OpenPetsClientError, type OpenPetsReaction } from "./protocol.js";
+export { parsePetListResult, type OpenPetsPetListResult, type OpenPetsPetListItem } from "./pet-list.js";
 export { maxRemoteMessageBytes, openPetsRemoteProtocol, openPetsRemoteVersion, parseRemoteEndpoint, validateRemoteClientId, validateRemoteMessage, validateRemoteReaction, validateRemoteToken, type OpenPetsRemoteEndpoint, type OpenPetsRemoteMethod, type OpenPetsRemoteRequest, type OpenPetsRemoteResponse } from "./remote-protocol.js";
 
 /**
@@ -54,12 +56,6 @@ export interface OpenPetsLeaseResult {
   readonly leaseActive: boolean;
 }
 
-export interface OpenPetsPetListResult {
-  readonly ok: true;
-  readonly pets: readonly OpenPetsPetListItem[];
-  readonly defaultPetId: string;
-}
-
 export interface OpenPetsPetInstallResult {
   readonly ok: true;
   readonly petId: string;
@@ -67,17 +63,29 @@ export interface OpenPetsPetInstallResult {
   readonly installed: true;
 }
 
-export interface OpenPetsPetListItem {
-  readonly id: string;
-  readonly displayName: string;
-  readonly builtIn: boolean;
-  readonly broken: boolean;
+/** Stable wire type; the desktop's shared library schema validates these labels. */
+export interface OpenPetsPetLibraryMetadata {
+  readonly sourceSite: "codex-pets.net";
+  readonly sourcePetId: string;
+  readonly kind: "animal" | "person" | "creature" | "object";
+  readonly tags: readonly string[];
+  readonly creatorName?: string;
+  readonly creatorHandle?: string;
+}
+
+export interface OpenPetsLocalPetInstallOptions {
+  readonly kind: "zip" | "folder";
+  /** Optional local provenance; does not grant access or authenticate an author. */
+  readonly origin?: "codex";
+  /** Optional bounded source labels; accepted only with Codex provenance. */
+  readonly libraryMetadata?: OpenPetsPetLibraryMetadata;
 }
 
 /** A bounded, local-only OpenCode usage update. No prompt or tool content is sent. */
 export interface OpenPetsTokenRateUpdate {
   readonly sessionId: string;
   readonly tokensPerSecond: number | null;
+  readonly averageTokensPerSecond?: number;
   readonly outputTokens?: number;
   readonly source: "estimated" | "reported";
   readonly leaseId?: string;
@@ -89,7 +97,7 @@ export interface OpenPetsClient {
   status(options?: { readonly leaseId?: string }): Promise<OpenPetsStatusResult>;
   listPets(): Promise<OpenPetsPetListResult>;
   installPet(petId: string): Promise<OpenPetsPetInstallResult>;
-  installLocalPet(path: string, options: { readonly kind: "zip" | "folder" }): Promise<OpenPetsPetInstallResult>;
+  installLocalPet(path: string, options: OpenPetsLocalPetInstallOptions): Promise<OpenPetsPetInstallResult>;
   acquireLease(options?: { readonly requestedPetId?: string }): Promise<OpenPetsLeaseResult>;
   heartbeatLease(leaseId: string): Promise<{ readonly leaseId: string; readonly expiresAt: number }>;
   releaseLease(leaseId: string): Promise<{ readonly released: boolean }>;
@@ -118,7 +126,7 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
         };
       }
     },
-    listPets: async () => remote ? unsupportedRemote() : parsePetListResult(await sendDiscoveredRequest("pets.list", {}, options)),
+    listPets: async () => remote ? unsupportedRemote() : readPetList((params) => sendDiscoveredRequest("pets.list", params, options)),
     installPet: async (petId) => remote ? unsupportedRemote() : parsePetInstallResult(await sendDiscoveredRequest("pets.install", { petId: validatePetId(petId) }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 })),
     installLocalPet: async (path, installOptions) => {
       if (remote) return unsupportedRemote();
@@ -132,7 +140,20 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       if (!installOptions || (installOptions.kind !== "zip" && installOptions.kind !== "folder")) {
         throw new OpenPetsClientError("invalid_params", "Local install kind must be zip or folder.");
       }
-      return parsePetInstallResult(await sendDiscoveredRequest("pets.install-local", { path: trimmedPath, kind: installOptions.kind }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 }));
+      const origin = installOptions.origin;
+      if (origin !== undefined && origin !== "codex") {
+        throw new OpenPetsClientError("invalid_params", "Local install origin must be codex when specified.");
+      }
+      const libraryMetadata = installOptions.libraryMetadata;
+      if (libraryMetadata !== undefined && origin !== "codex") {
+        throw new OpenPetsClientError("invalid_params", "Pet library metadata requires a Codex-origin local import.");
+      }
+      return parsePetInstallResult(await sendDiscoveredRequest("pets.install-local", {
+        path: trimmedPath,
+        kind: installOptions.kind,
+        ...(origin === undefined ? {} : { origin }),
+        ...(libraryMetadata === undefined ? {} : { libraryMetadata }),
+      }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 }));
     },
     acquireLease: (leaseOptions) => remote ? unsupportedRemote() : sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE }, options),
     heartbeatLease: (leaseId) => remote ? unsupportedRemote() : sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
@@ -183,6 +204,17 @@ export function validateTokenRateUpdate(value: OpenPetsTokenRateUpdate): OpenPet
   )) {
     throw new OpenPetsClientError("invalid_params", "Output token count is outside supported bounds.");
   }
+  if (value.averageTokensPerSecond !== undefined && (
+    typeof value.averageTokensPerSecond !== "number"
+    || !Number.isFinite(value.averageTokensPerSecond)
+    || value.averageTokensPerSecond < 0
+    || value.averageTokensPerSecond > 10_000
+  )) {
+    throw new OpenPetsClientError("invalid_params", "Average token rate is outside supported bounds.");
+  }
+  if (value.tokensPerSecond === null && value.outputTokens === undefined && value.averageTokensPerSecond !== undefined) {
+    throw new OpenPetsClientError("invalid_params", "A cleared token rate cannot include an average.");
+  }
   if (value.source !== "estimated" && value.source !== "reported") {
     throw new OpenPetsClientError("invalid_params", "Token rate source is invalid.");
   }
@@ -200,6 +232,7 @@ export function validateTokenRateUpdate(value: OpenPetsTokenRateUpdate): OpenPet
   return {
     sessionId: value.sessionId,
     tokensPerSecond: value.tokensPerSecond,
+    ...(value.averageTokensPerSecond === undefined ? {} : { averageTokensPerSecond: value.averageTokensPerSecond }),
     source: value.source,
     ...(value.outputTokens === undefined ? {} : { outputTokens: value.outputTokens }),
     ...(value.leaseId === undefined ? {} : { leaseId: value.leaseId }),
@@ -222,24 +255,6 @@ function validatePetId(value: string): string {
 
 function isLocalInstallAbsolutePath(value: string): boolean {
   return posix.isAbsolute(value) || win32.isAbsolute(value);
-}
-
-export function parsePetListResult(value: unknown): OpenPetsPetListResult {
-  if (!isRecord(value) || value.ok !== true || !Array.isArray(value.pets) || typeof value.defaultPetId !== "string") {
-    throw new OpenPetsClientError("invalid_response", "OpenPets pet list response is invalid.");
-  }
-  return {
-    ok: true,
-    defaultPetId: value.defaultPetId,
-    pets: value.pets.map(parsePetListItem),
-  };
-}
-
-function parsePetListItem(value: unknown): OpenPetsPetListItem {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.displayName !== "string" || typeof value.builtIn !== "boolean" || typeof value.broken !== "boolean") {
-    throw new OpenPetsClientError("invalid_response", "OpenPets pet list item is invalid.");
-  }
-  return { id: value.id, displayName: value.displayName, builtIn: value.builtIn, broken: value.broken };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

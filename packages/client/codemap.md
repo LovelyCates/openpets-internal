@@ -19,7 +19,7 @@ Provides the foundational client library for all OpenPets integrations. Handles 
 - File validation (size, permissions, symlink checks)
 - Endpoint validation: Unix sockets, Windows named pipes, TCP (IPv4)
 - TCP/WSL cross-platform support: Windows desktop → WSL client via private IPs
-- Native Windows local discovery accepts only named pipes; TCP discovery is rejected
+- Native macOS local discovery accepts only Unix sockets and native Windows accepts only named pipes; TCP discovery is rejected on both
 - Security: XDG_RUNTIME_DIR permission checks (0o700, ownership)
 
 **TCP Endpoint Security:**
@@ -36,6 +36,8 @@ Provides the foundational client library for all OpenPets integrations. Handles 
 - Methods: `hello()`, `status()`, `listPets()`, `installPet()`, `acquireLease()`, `heartbeatLease()`, `releaseLease()`, `react()`, `say()`
 - Lease-aware operations for multi-pet targeting
 - Result parsers with validation
+- Token telemetry accepts optional bounded `averageTokensPerSecond` for the observed output-segment estimate; omitted AVG remains compatible, and a null-rate/no-output clear rejects stale AVG.
+- `pet-list.ts` owns installed-list parsing and bounded sequential pagination; `listPets()` still returns the complete metadata list, with no caller-side pagination.
 
 **Socket Management**:
 - Node.js `net.createConnection()` for TCP/Unix sockets/Windows named pipes
@@ -93,3 +95,5 @@ net.createConnection({ host, port }) → Windows desktop app
 
 **Contracts**:
 - `contracts/client-protocol.contract.ts` - Runtime protocol validation tests
+- `contracts/pet-list.contract.ts` - Complete 1336-entry aggregation and malformed/stalled/changed-page rejection without sockets
+- `contracts/local-pet-list-socket.contract.ts` - Complete 1336-entry list over bounded, fragmented local socket responses

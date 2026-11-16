@@ -5,7 +5,7 @@ import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { getAppStateSnapshot, isPetFlippedHorizontally, markPetBroken, resolveCompanionDisplayName, type HudScaleValue, type PetScaleValue } from "./app-state.js";
+import { getInstalledPetState, getPetRenderPreferences, isPetFlippedHorizontally, markPetBroken, resolveCompanionDisplayName, type HudScaleValue, type PetRenderPreferences, type PetScaleValue } from "./app-state.js";
 import { builtInPet, builtInPetOutfitFileName, builtInPetWardrobe } from "./built-in-pet.js";
 import { getCodexPetSpriteLayout } from "@open-pets/pet-format/sprite-layout";
 import { maxCodexSpritesheetBytes, type CodexPetMetadata } from "@open-pets/pet-format/metadata";
@@ -27,67 +27,89 @@ import { pickReactionMessage } from "./reaction-messages.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
 import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, getConfiguredSpriteCacheKey, getConfiguredSpriteStates, resolveEffectiveSpriteState, resolveReactionSpriteState, type UniversalSpriteState } from "@open-pets/pet-format/animation";
-import { createPetWindowCss, createCodexV2GazeCss, createInstalledSpriteStateCss, createSpriteStateCss, escapeCssUrl } from "./pet-window-styles.js";
-import { getPetWindowPinnedLift, getPetWindowSpriteBottomInset, petBottom, petWindowHitPadding } from "./pet-window-shape.js";
+import { createBuiltInIdleSpriteCss, createPetWindowCss, createCodexV2GazeCss, createInstalledSpriteStateCss, createSpriteStateCss, escapeCssUrl } from "./pet-window-styles.js";
+import { getPetWindowOverlayLift, getPetWindowSpriteBottomInset, petBottom, petWindowHitPadding } from "./pet-window-shape.js";
 import { defaultPetWindowSize } from "./display.js";
 import type { PetContentRender, PetPluginBubbles, PetStatusBadgeReaction, PetTransientDisplay } from "./pet-window-types.js";
 import { formatOpenCodeTokenRate, openCodeTokenRateStore, type OpenCodeTokenRateDisplay } from "./opencode-token-rate.js";
 
 export { escapeCssUrl } from "./pet-window-styles.js";
 
-export async function createDefaultPetRenderContent(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, petDragRegion: "drag" | "no-drag" = "no-drag"): Promise<PetContentRender> {
-  const installedPetRender = await tryCreateInstalledPetRender(paused, display, badge, dismissToken, pluginBubbles, petDragRegion);
+export async function createDefaultPetRenderContent(
+  paused: boolean,
+  display: PetTransientDisplay | null,
+  badge: PetStatusBadgeReaction | null,
+  dismissToken?: string,
+  pluginBubbles: PetPluginBubbles | null = null,
+  petDragRegion: "drag" | "no-drag" = "no-drag",
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
+): Promise<PetContentRender> {
+  const installedPetRender = await tryCreateInstalledPetRender(paused, display, badge, dismissToken, pluginBubbles, petDragRegion, preferences);
   if (installedPetRender) {
     return installedPetRender;
   }
 
-  const state = getAppStateSnapshot();
-  const scale = state.preferences.petScale as PetScaleValue;
-  return createBuiltInPetRender(paused, display, badge, scale, "default:builtin", state.preferences.defaultPetId, dismissToken, pluginBubbles, "default", petDragRegion);
+  const scale = preferences.petScale as PetScaleValue;
+  return createBuiltInPetRender(paused, display, badge, scale, "default:builtin", preferences.defaultPetId, dismissToken, pluginBubbles, "default", petDragRegion, preferences);
 }
 
 function petFlipCacheToken(petId: string): string {
   return isPetFlippedHorizontally(petId) ? "flipx" : "noflip";
 }
 
-export function createBuiltInPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, scale: PetScaleValue, cachePrefix: string, petId: string, dismissToken: string | undefined, pluginBubbles: PetPluginBubbles | null, petRole: "default" | "agent", petDragRegion: "drag" | "no-drag"): PetContentRender {
+export function createBuiltInPetRender(
+  paused: boolean,
+  display: PetTransientDisplay | null,
+  badge: PetStatusBadgeReaction | null,
+  scale: PetScaleValue,
+  cachePrefix: string,
+  petId: string,
+  dismissToken: string | undefined,
+  pluginBubbles: PetPluginBubbles | null,
+  petRole: "default" | "agent",
+  petDragRegion: "drag" | "no-drag",
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
+): PetContentRender {
   // The wardrobe follows the built-in pet itself, also when it stands in for a broken default pet.
   const outfitId = resolveRenderedPetOutfit(builtInPet.id, builtInPetWardrobe);
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", builtInPetOutfitFileName(outfitId) ?? defaultPetSprite.fileName)).toString();
   const assetDisplayName = builtInPet.displayName;
-  const state = getAppStateSnapshot();
   const displayName = petRole === "default"
-    ? resolveCompanionDisplayName(state.preferences.personality?.petName, assetDisplayName)
+    ? resolveCompanionDisplayName(preferences.petName, assetDisplayName)
     : assetDisplayName;
   const hasPinned = Boolean(pluginBubbles?.pinned);
+  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+  const hasTokenDock = Boolean(tokenRate);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
-  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, getOpenCodeTokenRateForPet(petRole, petId));
-  const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge);
-  const waitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
-  const hudScale = getAppStateSnapshot().preferences.hudScale as HudScaleValue;
+  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, tokenRate, preferences);
+  const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge, preferences);
+  const waitingAnimationDurationMs = preferences.waitingAnimationDurationMs;
+  const hudScale = preferences.hudScale as HudScaleValue;
   const stateRows = getConfiguredSpriteStates(waitingAnimationDurationMs);
+  const cacheKey = `${cachePrefix}:${paused}:${scale}:hud${hudScale}:bubble${preferences.bubbleScale}-${preferences.bubbleTheme}:${petButtonsCacheToken(preferences)}:outfit-${outfitId}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}:${petFlipCacheToken(petId)}`;
 
   return {
     renderedPetId: builtInPet.id,
     renderedOutfitId: outfitId,
     activities: [],
-    cacheKey: `${cachePrefix}:${paused}:${scale}:hud${hudScale}:bubble${getAppStateSnapshot().preferences.bubbleScale}-${getAppStateSnapshot().preferences.bubbleTheme}:${petButtonsCacheToken()}:outfit-${outfitId}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}:${petFlipCacheToken(petId)}`,
+    cacheKey,
     bodyHtml,
     displayName,
     assetName: assetDisplayName,
     reactionState,
     codexSpriteVersion: defaultPetSprite.version,
     petScale: scale,
-    gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale),
+    gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale, hasTokenDock),
+    hasTokenDock,
     paused,
     flipped: isPetFlippedHorizontally(petId),
     html: createPetWindowDocument({
       language: getActiveLocaleLang(), role: petRole, displayName, assetName: assetDisplayName,
       reactionState, dragRegion: petDragRegion, flipped: isPetFlippedHorizontally(petId),
-      spriteVersion: defaultPetSprite.version, paused, title: "OpenPets Default Pet", bodyHtml,
+      spriteVersion: defaultPetSprite.version, paused, title: "OpenPets Default Pet", bodyHtml, classicRenderIdentity: cacheKey,
       styles: `
-          ${createPetWindowCss(paused, scale, hudScale, petDragRegion)}
+          ${createPetWindowCss(paused, scale, hudScale, petDragRegion, preferences)}
           .sprite {
             width: ${defaultPetSprite.frameWidth}px;
             height: ${defaultPetSprite.frameHeight}px;
@@ -107,6 +129,7 @@ export function createBuiltInPetRender(paused: boolean, display: PetTransientDis
             transform-origin: top left;
           }
           ${createSpriteStateCss(".sprite", stateRows, defaultPetSprite)}
+          ${createBuiltInIdleSpriteCss()}
           ${createCodexV2GazeCss(".sprite", defaultPetSprite)}
           @keyframes pet-frames {
             from { background-position: var(--sprite-offset-x) var(--sprite-row-y); }
@@ -117,9 +140,16 @@ export function createBuiltInPetRender(paused: boolean, display: PetTransientDis
   };
 }
 
-async function tryCreateInstalledPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken: string | undefined, pluginBubbles: PetPluginBubbles | null, petDragRegion: "drag" | "no-drag"): Promise<PetContentRender | null> {
-  const state = getAppStateSnapshot();
-  const selected = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId);
+async function tryCreateInstalledPetRender(
+  paused: boolean,
+  display: PetTransientDisplay | null,
+  badge: PetStatusBadgeReaction | null,
+  dismissToken: string | undefined,
+  pluginBubbles: PetPluginBubbles | null,
+  petDragRegion: "drag" | "no-drag",
+  preferences: PetRenderPreferences,
+): Promise<PetContentRender | null> {
+  const selected = getInstalledPetState(preferences.defaultPetId);
 
   if (!selected || selected.id === builtInPet.id || selected.broken) {
     return null;
@@ -131,15 +161,16 @@ async function tryCreateInstalledPetRender(paused: boolean, display: PetTransien
       selected.displayName,
       paused,
       display,
-      state.preferences.petScale as PetScaleValue,
+      preferences.petScale as PetScaleValue,
       badge,
       `default:${selected.id}`,
       dismissToken,
       pluginBubbles,
       selected.source?.kind === "team" ? "team" : "personal",
       "default",
-      state.preferences.personality?.petName,
-       petDragRegion,
+      preferences.petName,
+      petDragRegion,
+      preferences,
     );
   } catch (error) {
     const petPackage = await readInstalledPetPackage(selected.id, selected.source?.kind === "team" ? "team" : "personal").catch(() => null);
@@ -198,9 +229,10 @@ export async function createInstalledPetRender(
   petRole: "default" | "agent" = "default",
   personalityPetName?: string,
   petDragRegion: "drag" | "no-drag" = "no-drag",
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
 ): Promise<PetContentRender> {
   const displayName = petRole === "default"
-    ? resolveCompanionDisplayName(personalityPetName ?? getAppStateSnapshot().preferences.personality?.petName, assetDisplayName)
+    ? resolveCompanionDisplayName(personalityPetName ?? preferences.petName, assetDisplayName)
     : assetDisplayName;
   const petPackage = await readInstalledPetPackage(petId, source);
   if (petPackage.format === "motion") {
@@ -208,7 +240,8 @@ export async function createInstalledPetRender(
     const outfitId = resolveRenderedPetOutfit(petId, motion.metadata.wardrobe);
     const { geometry } = motion.metadata;
     const hasPinned = Boolean(pluginBubbles?.pinned);
-    const preferences = getAppStateSnapshot().preferences;
+    const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+    const hasTokenDock = Boolean(tokenRate);
     const hudScale = preferences.hudScale as HudScaleValue;
     const voiceActive = petRole === "default" && display?.suppressReactionMessage === true;
     const flipped = isPetFlippedHorizontally(petId);
@@ -217,17 +250,18 @@ export async function createInstalledPetRender(
       requestedScale: scale,
       windowWidth: defaultPetWindowSize.width,
       windowHeight: defaultPetWindowSize.height,
-      hitboxBottomInset: Math.max(0, petBottom - petWindowHitPadding) + getPetWindowPinnedLift(hasPinned, hudScale),
+      hitboxBottomInset: Math.max(0, petBottom - petWindowHitPadding)
+        + getPetWindowOverlayLift(hasPinned, hudScale, hasTokenDock),
       hitPadding: motionPetHitPadding,
       flipped,
     };
-    const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" data-motion-body data-motion-layout="${escapeHtml(JSON.stringify(layoutInput))}" role="img" aria-label="${escapeHtml(displayName)}"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, voiceActive, voiceActive && display?.canSubmitRecording === true, getOpenCodeTokenRateForPet(petRole, petId));
+    const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" data-motion-body data-motion-layout="${escapeHtml(JSON.stringify(layoutInput))}" role="img" aria-label="${escapeHtml(displayName)}"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, voiceActive, voiceActive && display?.canSubmitRecording === true, tokenRate, preferences);
     return createInstalledMotionRender({
       motion, outfitId, displayName, assetName: assetDisplayName, bodyHtml, layoutInput,
-      reactionState: getEffectiveReactionSpriteState(display?.reaction, badge),
-      paused, scale, hudScale, gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale), flipped,
-      cacheKey: `${cachePrefix}:motion:${paused}:${scale}:${hudScale}:${preferences.bubbleScale}:${preferences.bubbleTheme}:${petButtonsCacheToken()}:${getActiveLocale()}:${flipped}:${geometry.width}:${geometry.height}:${geometry.pixelsPerUnit}:${geometry.footAnchor.x}:${geometry.footAnchor.y}`,
-      language: getActiveLocaleLang(), role: petRole, dragRegion: petDragRegion,
+      reactionState: getEffectiveReactionSpriteState(display?.reaction, badge, preferences),
+      paused, scale, hudScale, gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale, hasTokenDock), hasTokenDock, flipped,
+      cacheKey: `${cachePrefix}:motion:${paused}:${scale}:${hudScale}:${preferences.bubbleScale}:${preferences.bubbleTheme}:${petButtonsCacheToken(preferences)}:${getActiveLocale()}:${flipped}:${geometry.width}:${geometry.height}:${geometry.pixelsPerUnit}:${geometry.footAnchor.x}:${geometry.footAnchor.y}`,
+      language: getActiveLocaleLang(), role: petRole, dragRegion: petDragRegion, preferences,
     });
   }
   const metadata = petPackage.metadata;
@@ -238,19 +272,22 @@ export async function createInstalledPetRender(
 
   const imageUrl = pathToFileURL(spritesheetPath).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
+  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+  const hasTokenDock = Boolean(tokenRate);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
-  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, getOpenCodeTokenRateForPet(petRole, petId));
-  const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge);
-  const waitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
-  const hudScale = getAppStateSnapshot().preferences.hudScale as HudScaleValue;
-  const stateRows = getConfiguredSpriteStates(waitingAnimationDurationMs);
+  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, petRole, isVoiceActive, canSubmitRecording, tokenRate, preferences);
+  const reactionState = getEffectiveReactionSpriteState(display?.reaction, badge, preferences);
+  const waitingAnimationDurationMs = preferences.waitingAnimationDurationMs;
+  const hudScale = preferences.hudScale as HudScaleValue;
+  const stateRows = getConfiguredSpriteStates(waitingAnimationDurationMs, spriteLayout.version);
+  const cacheKey = `${cachePrefix}:${paused}:${scale}:hud${hudScale}:bubble${preferences.bubbleScale}-${preferences.bubbleTheme}:${petButtonsCacheToken(preferences)}:${atlasRelativePath}:v${spriteLayout.version}:gaze${metadata.gazeAnchor?.x ?? "default"},${metadata.gazeAnchor?.y ?? "default"}:${spritesheet.mtimeMs}:${spritesheet.size}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs, spriteLayout.version)}:${getActiveLocale()}:${petFlipCacheToken(petId)}`;
 
   return {
     renderedPetId: petId,
     renderedOutfitId: outfitId,
     activities: metadata.activities ?? [],
-    cacheKey: `${cachePrefix}:${paused}:${scale}:hud${hudScale}:bubble${getAppStateSnapshot().preferences.bubbleScale}-${getAppStateSnapshot().preferences.bubbleTheme}:${petButtonsCacheToken()}:${atlasRelativePath}:v${spriteLayout.version}:gaze${metadata.gazeAnchor?.x ?? "default"},${metadata.gazeAnchor?.y ?? "default"}:${spritesheet.mtimeMs}:${spritesheet.size}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}:${petFlipCacheToken(petId)}`,
+    cacheKey,
     bodyHtml,
     displayName,
     assetName: assetDisplayName,
@@ -258,15 +295,16 @@ export async function createInstalledPetRender(
     codexSpriteVersion: spriteLayout.version,
     ...(metadata.gazeAnchor ? { gazeAnchor: metadata.gazeAnchor } : {}),
     petScale: scale,
-    gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale),
+    gazeSpriteBottomInset: getPetWindowSpriteBottomInset(hasPinned, hudScale, hasTokenDock),
+    hasTokenDock,
     paused,
     flipped: isPetFlippedHorizontally(petId),
     html: createPetWindowDocument({
       language: getActiveLocaleLang(), role: petRole, displayName, assetName: assetDisplayName,
       reactionState, dragRegion: petDragRegion, flipped: isPetFlippedHorizontally(petId),
-      spriteVersion: spriteLayout.version, paused, title: "OpenPets Default Pet", bodyHtml,
+      spriteVersion: spriteLayout.version, paused, title: "OpenPets Default Pet", bodyHtml, classicRenderIdentity: cacheKey,
       styles: `
-            ${createPetWindowCss(paused, scale, hudScale, petDragRegion)}
+            ${createPetWindowCss(paused, scale, hudScale, petDragRegion, preferences)}
             .installed-card { width: ${Math.ceil(spriteLayout.frameWidth * scale)}px; height: ${Math.ceil(spriteLayout.frameHeight * scale)}px; overflow: visible; position: relative; }
             .installed-sprite {
               position: absolute;
@@ -300,8 +338,7 @@ export async function createInstalledPetRender(
 }
 
 /** Cache token for the assistant-button preferences baked into pet HTML. */
-function petButtonsCacheToken(): string {
-  const preferences = getAppStateSnapshot().preferences;
+function petButtonsCacheToken(preferences: PetRenderPreferences): string {
   return `btn${preferences.showChatButton ? 1 : 0}${preferences.showTalkButton ? 1 : 0}:${preferences.petButtonsPosition}:${preferences.petButtonsSize}`;
 }
 
@@ -315,6 +352,7 @@ export function createPetBodyMarkup(
   isVoiceActive = false,
   canSubmitRecording = false,
   tokenRate: OpenCodeTokenRateDisplay | null = null,
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
 ): string {
   const launcherSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   const talkSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
@@ -322,7 +360,6 @@ export function createPetBodyMarkup(
   // A pinned plugin HUD is persistent — suppressing on it would remove the
   // buttons for as long as the HUD plugin is enabled.
   const hasMessageOrBubble = Boolean(bubble.trim());
-  const preferences = getAppStateSnapshot().preferences;
   const chatButton = preferences.showChatButton
     ? `<button type="button" class="openpets-companion-launcher" data-openpets-companion-launcher aria-label="Open companion chat" title="Open companion chat">${launcherSvg}</button>`
     : "";
@@ -350,11 +387,11 @@ export function createPetBodyMarkup(
     ? `<div class="openpets-pet-buttons">${chatButton}${talkButton}</div>`
     : "";
   const tokenRateBadge = createOpenCodeTokenRateMarkup(tokenRate);
-  return `<div class="stage${hasPinned ? " has-pinned" : ""}${hasMessageOrBubble ? " has-bubble" : ""}" aria-label="${stageLabel}" data-pet-role="${petRole}">
+  return `<div class="stage${hasPinned ? " has-pinned" : ""}${tokenRateBadge ? " has-token-dock" : ""}${hasMessageOrBubble ? " has-bubble" : ""}" aria-label="${stageLabel}" data-pet-role="${petRole}">
     ${pinnedBubble}
+    ${tokenRateBadge}
     ${bubble}
     <div class="pet-hitbox" aria-hidden="true">
-      ${tokenRateBadge}
       ${assistantButtons}
       <div class="pet-shell">
         ${spriteMarkup}
@@ -364,25 +401,34 @@ export function createPetBodyMarkup(
 }
 
 function getOpenCodeTokenRateForPet(petRole: "default" | "agent", petId: string): OpenCodeTokenRateDisplay | null {
-  return openCodeTokenRateStore.read(petRole === "default"
+  return openCodeTokenRateStore.readDisplay(petRole === "default"
     ? { kind: "default" }
     : { kind: "explicit", petId });
 }
 
 function createOpenCodeTokenRateMarkup(reading: OpenCodeTokenRateDisplay | null): string {
-  const display = formatOpenCodeTokenRate(reading, t("pet.tokenRate.output"));
+  const display = formatOpenCodeTokenRate(
+    reading,
+    t("pet.tokenRate.output"),
+    t("pet.tokenRate.idle"),
+    t("pet.tokenRate.lastOutput"),
+    t("pet.tokenRate.live"),
+  );
   if (!display) return "";
-  const rate = display.rateText ? `<span class="opencode-token-rate-speed">${escapeHtml(display.rateText)}</span>` : "";
-  const total = display.outputText ? `<span class="opencode-token-rate-total">${escapeHtml(display.outputText)}</span>` : "";
-  return `<div class="opencode-token-rate" data-opencode-token-rate>${rate}${total}</div>`;
+  const label = escapeHtml([
+    `${display.rateLabel} ${display.rateText}`,
+    `${display.averageLabel} ${display.averageText}`,
+    display.outputText,
+  ].filter(Boolean).join(" · "));
+  return `<div class="opencode-token-rate" data-opencode-token-rate data-state="${display.state}" role="status" aria-live="off" aria-label="${label}"><div class="opencode-token-rate-metric" data-token-metric="live" data-tier="${display.rateTier}"><span class="opencode-token-rate-label">${escapeHtml(display.rateLabel)}</span><span class="opencode-token-rate-number">${escapeHtml(display.rateText)}</span></div><div class="opencode-token-rate-metric" data-token-metric="average" data-tier="${display.averageTier}"><span class="opencode-token-rate-label">${escapeHtml(display.averageLabel)}</span><span class="opencode-token-rate-number">${escapeHtml(display.averageText)}</span></div></div>`;
 }
 
-export function getReactionSpriteState(reaction: OpenPetsReaction | undefined): UniversalSpriteState {
-  return resolveReactionSpriteState(reaction, getAppStateSnapshot().preferences.reactionAnimationOverrides);
+export function getReactionSpriteState(reaction: OpenPetsReaction | undefined, preferences: PetRenderPreferences = getPetRenderPreferences()): UniversalSpriteState {
+  return resolveReactionSpriteState(reaction, preferences.reactionAnimationOverrides);
 }
 
-function getEffectiveReactionSpriteState(displayReaction: OpenPetsReaction | undefined, badge: PetStatusBadgeReaction | null): UniversalSpriteState {
-  return resolveEffectiveSpriteState(displayReaction, badge ?? undefined, getAppStateSnapshot().preferences.reactionAnimationOverrides);
+function getEffectiveReactionSpriteState(displayReaction: OpenPetsReaction | undefined, badge: PetStatusBadgeReaction | null, preferences: PetRenderPreferences): UniversalSpriteState {
+  return resolveEffectiveSpriteState(displayReaction, badge ?? undefined, preferences.reactionAnimationOverrides);
 }
 
 const namedHostIconGlyphs: Record<string, string> = {

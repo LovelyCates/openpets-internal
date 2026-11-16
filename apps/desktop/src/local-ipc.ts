@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import net from "node:net";
 
-import { app, Notification, shell, systemPreferences } from "electron";
+import { app, Notification, shell, systemPreferences, type BrowserWindow } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, getAgentPetWindow, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, getAgentPetWindow, refreshAgentPetContent, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, getDefaultPetWindowForPlugins, isDefaultPetVisible } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, getDefaultPetWindowForPlugins, isDefaultPetVisible, refreshDefaultPetContent } from "./default-pet-controller.js";
 import { LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -29,6 +29,7 @@ let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
 let tokenRateCleanupTimer: NodeJS.Timeout | null = null;
 const tokenRateFinalHoldTimers = new Map<string, NodeJS.Timeout>();
+const tokenDockVisibility = new WeakMap<BrowserWindow, boolean>();
 /** leaseId → window-tracking unsubscribe function (for confined agent pets). */
 let confinementCoordinator: LocalIpcConfinementCoordinator;
 const leaseManager = new LeaseManager({
@@ -50,7 +51,23 @@ openCodeTokenRateStore.subscribe((target) => {
     ? getDefaultPetWindowForPlugins()
     : getAgentPetWindow(target.petId);
   if (!window || window.webContents.isDestroyed()) return;
-  const display = formatOpenCodeTokenRate(openCodeTokenRateStore.read(target), t("pet.tokenRate.output"));
+  const display = formatOpenCodeTokenRate(
+    openCodeTokenRateStore.readDisplay(target),
+    t("pet.tokenRate.output"),
+    t("pet.tokenRate.idle"),
+    t("pet.tokenRate.lastOutput"),
+    t("pet.tokenRate.live"),
+  );
+  const hasTokenDock = display !== null;
+  const hadTokenDock = tokenDockVisibility.get(window) ?? false;
+  tokenDockVisibility.set(window, hasTokenDock);
+  if (hadTokenDock !== hasTokenDock) {
+    // Presence changes the pet, gaze and Linux-mask geometry. Numeric updates
+    // stay on the lightweight DOM path and do not restart the sprite clock.
+    debug("ipc", "OpenCode usage dock visibility changed", { windowId: window.id, visible: hasTokenDock, targetKind: target.kind });
+    if (target.kind === "default") refreshDefaultPetContent();
+    else refreshAgentPetContent(target.petId);
+  }
   window.webContents.send("openpets:pet-token-rate", display);
 });
 

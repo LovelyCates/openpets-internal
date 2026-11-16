@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { MotionContextReaction, MotionEventReaction } from "@open-pets/pet-format/motion";
+import {
+  defaultPetSprite,
+  getConfiguredSpriteStates,
+  isLoopingSpriteState,
+  resolveReactionSpriteState,
+  type ReactionAnimationOverrides,
+  type UserSelectableAnimationState,
+  type WaitingAnimationDurationMs,
+} from "@open-pets/pet-format/animation";
 import type { MotionActivityBodyState, MotionAppearance, MotionBodyDescriptor, PetBodyInput, PetBodyResult, PetBodySnapshot } from "./pet-body-contract.js";
 
 export function createMotionAppearance(current: MotionAppearance | null, assets: MotionBodyDescriptor, outfitId: string, reason: MotionAppearance["reason"], retry: boolean, allocateId: () => string): MotionAppearance {
@@ -138,22 +147,34 @@ export function createPetBodyState(
       motion = candidate;
       appearancePending = candidate !== presented;
       playbackId = 0;
-      update({});
+      update({ classic: undefined, ...(input.event?.classicSpriteState ? { event: undefined } : {}) });
       return true;
     },
     clearMotion() {
+      const wasClassic = artwork === "classic";
       artwork = "classic";
       prepared = null;
       presented = null;
       appearancePending = false;
       eventAttempt = null;
-      if (!motion && !input.event) return;
+      // A HUD/content commit must not erase an already admitted Classic event.
+      if (!motion && (wasClassic || !input.event)) return;
       motion = null;
       playbackId = 0;
       update({ event: undefined });
     },
     setPaused(paused: boolean) {
       if (input.paused !== paused) update({ paused });
+    },
+    configureClassicAnimation(overrides: ReactionAnimationOverrides | undefined, waitingDurationMs: WaitingAnimationDurationMs) {
+      if (artwork !== "classic" || !input.classic) return;
+      const spriteState = resolveReactionSpriteState(input.classic.reaction, overrides);
+      const cycleDurationMs = getConfiguredSpriteStates(waitingDurationMs)[spriteState].durationMs;
+      if (input.classic.spriteState === spriteState && input.classic.cycleDurationMs === cycleDurationMs) return;
+      update({
+        classic: { ...input.classic, spriteState, cycleDurationMs },
+        ...(input.event?.classicSpriteState && input.event.classicSpriteState !== spriteState ? { event: undefined } : {}),
+      });
     },
     setSuspended(suspended: boolean) {
       if (input.suspended === suspended) return;
@@ -167,12 +188,34 @@ export function createPetBodyState(
         update({ suspended: false });
       }
     },
-    react(reaction: MotionContextReaction | MotionEventReaction | "idle") {
+    react(
+      reaction: MotionContextReaction | MotionEventReaction | "idle",
+      classicSpriteState?: UserSelectableAnimationState,
+      classicCycleDurationMs?: number,
+    ) {
+      const spriteState = classicSpriteState ?? resolveReactionSpriteState(reaction, undefined);
+      const classic = artwork === "motion" ? undefined : {
+        reaction,
+        spriteState,
+        cycleDurationMs: classicCycleDurationMs ?? defaultPetSprite.states[spriteState].durationMs,
+      };
+      if (artwork === "classic") {
+        const context = petBodyContext(reaction);
+        const event = !input.suspended && !isLoopingSpriteState(spriteState)
+          ? { id: randomUUID(), reaction, classicSpriteState: spriteState }
+          : undefined;
+        update({
+          ...(context === null ? {} : { context }),
+          classic,
+          event,
+        });
+        return;
+      }
       if (reaction === "idle" || reaction === "thinking" || reaction === "working" || reaction === "editing" || reaction === "running" || reaction === "testing" || reaction === "waiting") {
-        update({ context: reaction });
-      } else if (!input.suspended && artwork !== "classic") {
+        update({ context: reaction, classic });
+      } else if (!input.suspended) {
         eventAttempt = null;
-        update({ event: { id: randomUUID(), reaction } });
+        update({ event: { id: randomUUID(), reaction }, classic });
       }
     },
     result(value: unknown) {

@@ -1,5 +1,5 @@
 import type { MotionBodyDescriptor } from "./pet-body-contract.js";
-import type { HudScaleValue, PetScaleValue } from "./app-state.js";
+import type { HudScaleValue, PetRenderPreferences, PetScaleValue } from "./app-state.js";
 import type { UniversalSpriteState } from "@open-pets/pet-format/animation";
 import type { PetContentRender } from "./pet-window-types.js";
 import { createPetWindowCss } from "./pet-window-styles.js";
@@ -17,11 +17,13 @@ export function createInstalledMotionRender(options: {
   readonly scale: PetScaleValue;
   readonly hudScale: HudScaleValue;
   readonly gazeSpriteBottomInset: number;
+  readonly hasTokenDock?: boolean;
   readonly flipped: boolean;
   readonly cacheKey: string;
   readonly language: string;
   readonly role: "default" | "agent";
   readonly dragRegion: "drag" | "no-drag";
+  readonly preferences?: PetRenderPreferences;
   readonly layoutInput: MotionLayoutInput;
 }): PetContentRender {
   const { scale } = options;
@@ -29,7 +31,7 @@ export function createInstalledMotionRender(options: {
   const variables = Object.entries(motionLayoutCssVariables(motionLayout)).map(([name, value]) => `${name}: ${value};`).join(" ");
 
   const styles = `
-    ${createPetWindowCss(options.paused, scale, options.hudScale, options.dragRegion)}
+    ${createPetWindowCss(options.paused, scale, options.hudScale, options.dragRegion, options.preferences)}
     .stage { ${variables} }
     .pet-shell { width: var(--motion-shell-width); height: var(--motion-shell-height); left: var(--motion-shell-left); top: var(--motion-shell-top); transform-origin: var(--motion-foot-origin-x) var(--motion-foot-origin-y); }
     .pet-hitbox { width: var(--motion-hitbox-width); height: var(--motion-hitbox-height); }
@@ -49,6 +51,7 @@ export function createInstalledMotionRender(options: {
     codexSpriteVersion: 1,
     petScale: scale,
     gazeSpriteBottomInset: options.gazeSpriteBottomInset,
+    hasTokenDock: options.hasTokenDock,
     paused: options.paused,
     flipped: options.flipped,
     html: createPetWindowDocument({

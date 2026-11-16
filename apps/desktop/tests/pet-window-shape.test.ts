@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { calculatePetInteractiveShape, compactComposerGeometry, getEffectiveBubbleScale, getPetWindowPinnedLift, getPetWindowSpriteBottomInset, isRectangleContained } from "../src/pet-window-shape.js";
+import { calculatePetInteractiveShape, compactComposerGeometry, getEffectiveBubbleScale, getPetWindowOverlayLift, getPetWindowPinnedLift, getPetWindowSpriteBottomInset, getPetWindowTokenDockLift, isRectangleContained, petTokenDockHeight, petWindowHitPadding } from "../src/pet-window-shape.js";
 import { defaultPetWindowSize } from "../src/display.js";
 import { calculateChatPanelBottom, defaultPetChatPanelLayout, expandedPetWindowSize } from "../src/default-pet-chat-geometry.js";
 
@@ -186,6 +186,103 @@ assert.equal(getPetWindowSpriteBottomInset(true, 1.25), 63);
   assert.ok(hudRect.width > 0 && hudRect.width <= defaultPetWindowSize.width);
   assert.ok(hudRect.height > 0);
   assert.equal(hudRect.y + hudRect.height, defaultPetWindowSize.height);
+}
+
+// A persistent token dock must remain visible below the CPU HUD, while the
+// pet, gaze anchor, composer and speech-bubble mask all move by the same lift.
+for (const hudScale of [0.85, 2]) {
+  const options = {
+    windowWidth: defaultPetWindowSize.width,
+    windowHeight: defaultPetWindowSize.height,
+    spriteWidth: 32,
+    spriteHeight: 32,
+    scale: 1,
+    hudScale,
+    hasPinned: true,
+    hasBubble: true,
+    isCompactOpen: true,
+  };
+  const withoutDock = calculatePetInteractiveShape(options);
+  const withDock = calculatePetInteractiveShape({ ...options, hasTokenDock: true });
+  const lift = getPetWindowTokenDockLift(true, hudScale);
+  assert.equal(withDock.petHitbox.y, withoutDock.petHitbox.y - lift);
+  assert.equal(withDock.compactComposer!.y, withoutDock.compactComposer!.y - lift);
+  assert.equal(
+    getPetWindowSpriteBottomInset(true, hudScale, true),
+    getPetWindowSpriteBottomInset(true, hudScale) + lift,
+    "gaze anchor uses the same vertical movement as the pet",
+  );
+
+  const dockWidth = Math.min(defaultPetWindowSize.width - 16, Math.ceil(188 * hudScale));
+  const dockHeight = Math.ceil(petTokenDockHeight * hudScale);
+  const visibleDock = {
+    x: Math.round((defaultPetWindowSize.width - dockWidth) / 2),
+    y: defaultPetWindowSize.height - 6 - dockHeight,
+    width: dockWidth,
+    height: dockHeight,
+  };
+  assert.ok(withDock.shape.some((rectangle) => isRectangleContained(visibleDock, rectangle)), "Linux mask includes the visible token dock");
+  const oldHud = withoutDock.shape[1];
+  const movedHud = withDock.shape[1];
+  assert.equal(movedHud.y, oldHud.y - lift, "CPU HUD moves above the token dock");
+  assert.ok(movedHud.y + movedHud.height <= visibleDock.y, "CPU and token regions do not overlap");
+
+  const bubbleWithoutDock = calculatePetInteractiveShape({ ...options, isCompactOpen: false }).shape.at(-1)!;
+  const bubbleWithDock = calculatePetInteractiveShape({ ...options, isCompactOpen: false, hasTokenDock: true }).shape.at(-1)!;
+  assert.equal(
+    bubbleWithDock.y + bubbleWithDock.height,
+    bubbleWithoutDock.y + bubbleWithoutDock.height - lift,
+    "speech bubble mask follows the same raised anchor",
+  );
+}
+
+// Opening full chat keeps the dock visible and shifts the attached panel with
+// the pet rather than letting its lower edge collide with the new status row.
+{
+  const options = {
+    windowWidth: expandedPetWindowSize.width,
+    windowHeight: expandedPetWindowSize.height,
+    spriteWidth: 32,
+    spriteHeight: 32,
+    scale: 1,
+    hudScale: 1.4,
+    hasBubble: false,
+    isExpanded: true,
+  };
+  const plain = calculatePetInteractiveShape(options);
+  const docked = calculatePetInteractiveShape({ ...options, hasTokenDock: true });
+  const lift = getPetWindowOverlayLift(false, options.hudScale, true);
+  assert.equal(docked.chatPanel!.y, plain.chatPanel!.y - lift);
+  assert.equal(docked.petHitbox.y, plain.petHitbox.y - lift);
+  assert.equal(docked.shape.length, plain.shape.length + 1, "expanded input mask still includes the visible dock");
+}
+
+// A lone status strip uses the hitbox's existing foot padding: the visible
+// sprite frame stays about six pixels above it instead of floating far away.
+for (const hudScale of [0.85, 1.1, 2]) {
+  const options = {
+    windowWidth: defaultPetWindowSize.width,
+    windowHeight: defaultPetWindowSize.height,
+    spriteWidth: 32,
+    spriteHeight: 32,
+    scale: 1,
+    hudScale,
+    hasBubble: false,
+  };
+  const plain = calculatePetInteractiveShape(options);
+  const docked = calculatePetInteractiveShape({ ...options, hasTokenDock: true });
+  const lift = getPetWindowOverlayLift(false, hudScale, true);
+  assert.equal(docked.petHitbox.y, plain.petHitbox.y - lift);
+  const spriteBottom = docked.petHitbox.y + docked.petHitbox.height - petWindowHitPadding;
+  const dockTop = defaultPetWindowSize.height - 6 - petTokenDockHeight * hudScale;
+  assert.ok(dockTop - spriteBottom >= 6 && dockTop - spriteBottom < 7, "single strip keeps a compact six-pixel foot gap");
+  assert.equal(getPetWindowSpriteBottomInset(false, hudScale, true), petWindowHitPadding + lift);
+  assert.equal(getPetWindowOverlayLift(false, hudScale, false), 0, "pets without either HUD keep their original position");
+  assert.equal(
+    getPetWindowOverlayLift(true, hudScale, true),
+    getPetWindowPinnedLift(true, hudScale) + getPetWindowTokenDockLift(true, hudScale),
+    "CPU and token combination keeps its established spacing",
+  );
 }
 
 // --- Speech bubble scale ---

@@ -6,6 +6,8 @@
 export interface OpenCodeTokenRateUpdate {
   readonly sessionId: string;
   readonly tokensPerSecond: number | null;
+  /** Cumulative observed output-segment mean; always an estimate, including on reports. */
+  readonly averageTokensPerSecond?: number;
   readonly outputTokens?: number;
   readonly source: "estimated" | "reported";
 }
@@ -13,6 +15,8 @@ export interface OpenCodeTokenRateUpdate {
 export interface OpenCodeTokenRateTracker {
   readonly ingest: (event: unknown) => OpenCodeTokenRateUpdate | undefined;
   readonly clear: () => OpenCodeTokenRateUpdate | undefined;
+  /** Whether the last ingested event contained a live text/reasoning change. */
+  readonly hadStreamActivity: () => boolean;
 }
 
 const sessionIdPattern = /^[A-Za-z0-9._:-]{1,80}$/;
@@ -30,7 +34,11 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
   let lastDeltaAt = 0;
   let lastEstimatedAt = 0;
   let reportedAt: number | undefined;
+  let segmentTokens = 0;
+  let reportedAverage: number | undefined;
   let samples: Array<{ readonly at: number; readonly tokens: number }> = [];
+  let streamActivity = false;
+  const partLengths = new Map<string, number>();
   const fallbackSessionIds = new Map<string, string>();
   const fallbackPrefix = Math.floor(Math.random() * 0x1_0000_0000).toString(36).padStart(7, "0");
   let fallbackSequence = 0;
@@ -57,8 +65,18 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
     lastDeltaAt = 0;
     lastEstimatedAt = 0;
     reportedAt = undefined;
+    segmentTokens = 0;
+    reportedAverage = undefined;
     samples = [];
+    partLengths.clear();
     return sessionId ? { sessionId, tokensPerSecond: null, source: "estimated" } : undefined;
+  };
+
+  const average = (): number | undefined => {
+    if (startedAt === undefined) return undefined;
+    const durationMs = lastDeltaAt - startedAt;
+    if (durationMs < minEstimateDurationMs) return undefined;
+    return Math.round(Math.min(10_000, segmentTokens * 1_000 / durationMs) * 10) / 10;
   };
 
   const estimate = (sessionId: string, delta: string): OpenCodeTokenRateUpdate | undefined => {
@@ -71,9 +89,13 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
       lastDeltaAt = 0;
       lastEstimatedAt = 0;
       reportedAt = undefined;
+      segmentTokens = 0;
+      reportedAverage = undefined;
       samples = [];
     }
+    if (at < lastDeltaAt) return undefined;
     lastDeltaAt = at;
+    segmentTokens += delta.length / 4;
     samples.push({ at, tokens: delta.length / 4 });
     const cutoff = Math.max(startedAt, at - estimateWindowMs);
     samples = samples.filter((sample) => sample.at >= cutoff);
@@ -84,22 +106,40 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
     return {
       sessionId,
       tokensPerSecond: Math.round(Math.min(10_000, tokenCount * 1_000 / durationMs) * 10) / 10,
+      averageTokensPerSecond: average(),
       source: "estimated",
     };
   };
 
   const reported = (sessionId: string, outputTokens: number): OpenCodeTokenRateUpdate => {
+    const at = now();
+    let averageTokensPerSecond: number | undefined;
+    if (sessionId === activeSessionId) {
+      averageTokensPerSecond = average();
+      if (startedAt === undefined && reportedAt !== undefined && at >= reportedAt && at - reportedAt <= reportedDisplayMs) {
+        averageTokensPerSecond = reportedAverage;
+      }
+    }
     activeSessionId = sessionId;
     startedAt = undefined;
     lastDeltaAt = 0;
     lastEstimatedAt = 0;
-    reportedAt = now();
+    reportedAt = at;
+    segmentTokens = 0;
+    reportedAverage = averageTokensPerSecond;
     samples = [];
-    return { sessionId, tokensPerSecond: null, outputTokens, source: "reported" };
+    return {
+      sessionId,
+      tokensPerSecond: null,
+      ...(averageTokensPerSecond === undefined ? {} : { averageTokensPerSecond }),
+      outputTokens,
+      source: "reported",
+    };
   };
 
   return {
     ingest(event) {
+      streamActivity = false;
       const item = isRecord(event) ? event : undefined;
       const type = typeof item?.type === "string" ? item.type : undefined;
       const data = isRecord(item?.data) ? item.data : undefined;
@@ -107,6 +147,7 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
 
       if (type === "session.text.delta" || type === "session.reasoning.delta") {
         const sessionId = readSessionId(data?.sessionID);
+        streamActivity = Boolean(sessionId && typeof data?.delta === "string" && data.delta.length > 0);
         return sessionId && typeof data?.delta === "string" ? estimate(sessionId, data.delta) : undefined;
       }
 
@@ -119,8 +160,9 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
         return sessionId && outputTokens !== undefined ? reported(sessionId, outputTokens) : undefined;
       }
 
-      if (type === "message.part.delta" && properties?.field === "text") {
+      if (type === "message.part.delta" && (properties?.field === "text" || properties?.field === "reasoning")) {
         const sessionId = readSessionId(properties.sessionID);
+        streamActivity = Boolean(sessionId && typeof properties.delta === "string" && properties.delta.length > 0);
         return sessionId && typeof properties.delta === "string" ? estimate(sessionId, properties.delta) : undefined;
       }
 
@@ -128,7 +170,27 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
         const part = isRecord(properties?.part) ? properties.part : undefined;
         const sessionId = readSessionId(part?.sessionID);
         if ((part?.type !== "text" && part?.type !== "reasoning") || !sessionId) return undefined;
-        return typeof properties?.delta === "string" ? estimate(sessionId, properties.delta) : undefined;
+        if (typeof properties?.delta === "string") {
+          streamActivity = properties.delta.length > 0;
+          return estimate(sessionId, properties.delta);
+        }
+        const time = isRecord(part.time) ? part.time : undefined;
+        if (typeof part.id !== "string" || part.id.length > 256
+          || typeof part.text !== "string" || part.text.length > 1_048_576
+          || typeof time?.start !== "number" || time.end !== undefined) return undefined;
+        const key = sessionId + "\u0000" + part.id;
+        const previousLength = partLengths.get(key);
+        partLengths.set(key, part.text.length);
+        if (partLengths.size > 64) {
+          const oldest = partLengths.keys().next().value;
+          if (oldest !== undefined) partLengths.delete(oldest);
+        }
+        // The first full snapshot may be loaded history. Only observed growth
+        // of the same unfinished part is evidence of a live stream.
+        if (previousLength === undefined || part.text.length <= previousLength) return undefined;
+        const delta = part.text.slice(previousLength);
+        streamActivity = delta.length > 0;
+        return estimate(sessionId, delta);
       }
 
       if (type === "message.updated") {
@@ -161,6 +223,7 @@ export function createOpenCodeTokenRateTracker(now: () => number = Date.now): Op
       return undefined;
     },
     clear,
+    hadStreamActivity: () => streamActivity,
   };
 }
 

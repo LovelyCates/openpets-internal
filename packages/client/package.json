@@ -23,7 +23,7 @@
     }
   },
   "scripts": {
-    "test": "pnpm test:build && node .test-dist/contracts/client-protocol.contract.js",
+    "test": "pnpm test:build && node .test-dist/contracts/pet-list.contract.js && node .test-dist/contracts/client-protocol.contract.js && node .test-dist/contracts/local-pet-list-socket.contract.js",
     "test:build": "tsc -p tsconfig.tests.json",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "typecheck": "tsc --noEmit",

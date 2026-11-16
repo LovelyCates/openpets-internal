@@ -59,6 +59,7 @@ register(`data:text/javascript,${encodeURIComponent(`
 const {
   initializeAppState,
   releaseStartupInstallLock,
+  setPetWardrobePreference,
   updatePreferences,
 } = await import("../src/app-state.js");
 
@@ -67,6 +68,7 @@ const { createCodexV2GazeCss, createInstalledSpriteStateCss, createPetWindowCss,
 const { codexV1SpriteLayout, codexV2SpriteLayout } = await import("@open-pets/pet-format/sprite-layout");
 const { getCodexV2GazeSpritePosition } = await import("../src/codex-pets-core.js");
 const { getConfiguredSpriteStates } = await import("@open-pets/pet-format/animation");
+const { builtInPetWardrobe } = await import("@open-pets/pet-format/builtin-hoodie-cat");
 
 function assertV2IdleSpriteRules(): void {
   const states = getConfiguredSpriteStates();
@@ -89,22 +91,69 @@ function assertV2IdleSpriteRules(): void {
     frameHeight,
   );
   const gazeRule = ruleBlock(v2Css, gazeSelector);
-  assert.equal(declaration(gazeRule, "animation"), "none", "an active glance disables the idle loop");
-  assertStaticCell(gazeRule, gaze.row, gaze.column, frameWidth, frameHeight);
+  assert.equal(declaration(gazeRule, "background-position"), `${-gaze.column * frameWidth}px ${-gaze.row * frameHeight}px !important`, "a glance selects its static authored cell over the running idle loop");
+  for (const property of ["animation", "--sprite-animation", "--sprite-row-y", "--sprite-offset-x", "--sprite-end-offset-x"]) {
+    assert.equal(gazeRule.includes(`${property}:`), false, "a glance preserves the idle animation clock and frame variables");
+  }
   assert.equal(v2Css.includes(`[data-reaction-state="idle"][data-paused="false"]`), false, "animated idle must not gain a paused attribute");
   assert.ok(attributeCount(motionSelector) > attributeCount(idleSelector), "movement rules stay more specific than animated idle");
   assert.ok(attributeCount(gazeSelector) > attributeCount(idleSelector), "an active glance stays more specific than animated idle");
   assert.ok(v2Css.includes(`${motionSelector} {`), "movement rules are still emitted");
 
   const installedV2 = createInstalledSpriteStateCss(states, codexV2SpriteLayout);
+  assert.equal(installedV2.includes("pet-builtin-idle"), false, "third-party V2 pets retain their original frame timing");
   assertAnimatedLoop(ruleBlock(installedV2, `html[data-reaction-state="idle"] .installed-sprite`), 0, states.idle.frames, frameWidth, frameHeight);
-  const v1Css = createInstalledSpriteStateCss(states, codexV1SpriteLayout);
+  const v1States = getConfiguredSpriteStates(1010, 1);
+  const v1Css = createInstalledSpriteStateCss(v1States, codexV1SpriteLayout);
+  const restClause = '[data-classic-rest="true"][data-motion-state="idle"][data-paused="false"]:is([data-reaction-state="review"], [data-reaction-state="running"], [data-reaction-state="waiting"])';
+  const v1Rest = ruleBlock(v1Css, `html${restClause} .installed-sprite`);
+  assert.equal(declaration(v1Rest, "--sprite-row-y"), "-0px");
+  assert.equal(declaration(v1Rest, "--sprite-duration"), "6600ms", "V1 busy rest keeps its existing authored idle period");
+  assert.equal(declaration(v1Rest, "--sprite-iterations"), "infinite");
+  assert.equal(declaration(v1Rest, "--sprite-animation").split(/\s+/)[0], "pet-frames-idle");
+  const v2Rest = ruleBlock(installedV2, `html${restClause} .installed-sprite`);
+  assert.equal(declaration(v2Rest, "--sprite-duration"), "5500ms", "imported V2 retains its own idle timing");
+  assert.equal(v1Css.includes("pet-builtin-idle"), false, "V1 artwork uses its own cadence rather than the built-in cat's profile");
   assert.equal(v1Css.includes('data-paused="true"'), false, "V1 idle does not gain the paused neutral cell");
   assert.equal(v1Css.includes("data-codex-gaze-index"), false, "V1 idle does not gain V2 glance rules");
   assertAnimatedLoop(ruleBlock(v1Css, `html[data-reaction-state="idle"] .installed-sprite`), 0, states.idle.frames, codexV1SpriteLayout.frameWidth, codexV1SpriteLayout.frameHeight);
+  for (const state of ["waving", "jumping"] as const) {
+    const selector = `html[data-codex-sprite-version="1"][data-paused="false"][data-reaction-state="idle"][data-motion-state="idle"][data-idle-animation="${state}"] .installed-sprite`;
+    const gesture = ruleBlock(v1Css, selector);
+    assert.equal(declaration(gesture, "--sprite-row-y"), `${-states[state].row * codexV1SpriteLayout.frameHeight}px`);
+    assert.equal(declaration(gesture, "--sprite-iterations"), String(states[state].iterations), "cosmetic gestures stay finite");
+    const semantic = ruleBlock(v1Css, `html[data-reaction-state="${state}"] .installed-sprite`);
+    const idle = ruleBlock(v1Css, `html[data-reaction-state="idle"] .installed-sprite`);
+    const animationName = (rule: string): string => declaration(rule, "--sprite-animation").split(/\s+/)[0]!;
+    assert.notEqual(animationName(semantic), animationName(idle), "a finite reaction must not inherit the idle animation clock");
+    assert.notEqual(animationName(gesture), animationName(semantic), "a real reaction must not inherit a cosmetic gesture's animation clock");
+    for (const rule of [idle, semantic, gesture]) {
+      assert.ok(v1Css.includes(`@keyframes ${animationName(rule)} {`), "every animation name has playable frames");
+    }
+    assert.equal(installedV2.includes("data-idle-animation"), false, "V1 cosmetic rules never override V2 artwork");
+  }
+
+  for (const state of ["idle", "review", "waving"] as const) {
+    const definition = v1States[state];
+    const rule = ruleBlock(v1Css, `html[data-reaction-state="${state}"] .installed-sprite`);
+    const animation = declaration(rule, "--sprite-animation");
+    assert.ok(animation.includes(" step-end "), "V1 holds authored cells instead of dividing its loop into equal steps");
+    assert.equal(animation.endsWith(" forwards"), state === "waving", "finite playback holds its last valid cell until idle resumes");
+    const keyframes = ruleBlock(v1Css, `@keyframes ${animation.split(/\s+/)[0]}`);
+    const frames = [...keyframes.matchAll(/([\d.]+)%\s*\{\s*background-position:\s*(-?\d+)px var\(--sprite-row-y\);/g)]
+      .map((match) => ({ percent: Number(match[1]), column: pixelOffset(-Number(match[2]) / codexV1SpriteLayout.frameWidth) }));
+    assert.equal(frames[0]?.column, 0);
+    assert.equal(frames.at(-1)?.percent, 100);
+    assert.equal(frames.at(-1)?.column, definition.frames - 1, "the finite endpoint never selects the unused cell after the row");
+    assert.ok(frames.every((frame) => frame.column >= 0 && frame.column < definition.frames));
+    for (let index = 0; index < definition.frames; index += 1) {
+      const hold = (frames[index + 1]!.percent - frames[index]!.percent) * definition.durationMs / 100;
+      assert.ok(Math.abs(hold - definition.frameDurationsMs![index]!) < 0.001, "generated CSS preserves each authored frame hold");
+    }
+  }
 }
 
-function assertBuiltInRenderOutput(paused: boolean): void {
+function assertBuiltInRenderOutput(paused: boolean, expectedOutfit?: string): void {
   const render = createBuiltInPetRender(
     paused,
     null,
@@ -117,6 +166,7 @@ function assertBuiltInRenderOutput(paused: boolean): void {
     "default",
     "no-drag",
   );
+  if (expectedOutfit) assert.equal(render.renderedOutfitId, expectedOutfit);
   const style = render.html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
   assert.ok(style, "built-in render includes its generated stylesheet");
 
@@ -153,6 +203,25 @@ function assertBuiltInRenderOutput(paused: boolean): void {
     codexV2SpriteLayout.frameWidth,
     codexV2SpriteLayout.frameHeight,
   );
+  const idleSelector = 'html[data-reaction-state="idle"] .sprite';
+  const timedIdle = ruleBlock(style.slice(style.lastIndexOf(`${idleSelector} {`)), idleSelector);
+  const animation = declaration(timedIdle, "--sprite-animation").match(/^(\S+) (\d+)ms step-end infinite$/);
+  assert.ok(animation, "bundled idle uses authored discrete frame timing");
+  const durationMs = Number(animation[2]);
+  assert.equal(durationMs, 5500, "bundled idle keeps its quiet 5.5-second cycle");
+  const frames = [...ruleBlock(style, `@keyframes ${animation[1]}`).matchAll(/([\d.]+)%\s*\{\s*background-position:\s*(-?\d+)px 0px;/g)]
+    .map((match) => ({ percent: Number(match[1]), column: pixelOffset(-Number(match[2]) / codexV2SpriteLayout.frameWidth) }));
+  const frameDuration = (column: number): number => {
+    const index = frames.findIndex((frame) => frame.column === column);
+    assert.ok(index >= 0 && index + 1 < frames.length, "authored frame is present and bounded");
+    return (frames[index + 1]!.percent - frames[index]!.percent) / 100 * durationMs;
+  };
+  const blinkMs = frameDuration(2);
+  assert.ok(blinkMs >= 100 && blinkMs <= 120, "closed eyes are a short blink, not a 917ms freeze");
+  assert.ok(frameDuration(4) < 500, "the ear flick does not hold for nearly a second");
+  assert.equal(frames[0]?.column, 0);
+  assert.deepEqual(frames.at(-1), { percent: 100, column: 0 }, "the loop returns to the neutral breathing frame");
+  assert.ok(frames.every((frame) => frame.column >= 0 && frame.column < getConfiguredSpriteStates().idle.frames));
 }
 
 function attributeCount(selector: string): number {
@@ -199,15 +268,22 @@ function pixelOffset(value: number): number {
 function ruleBlock(css: string, selector: string): string {
   const start = css.indexOf(`${selector} {`);
   assert.ok(start >= 0, `missing CSS rule ${selector}`);
-  const end = css.indexOf("}", start);
-  assert.ok(end > start, `unclosed CSS rule ${selector}`);
-  return css.slice(start, end + 1);
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    if (css[index] === "}") depth -= 1;
+    if (depth === 0) return css.slice(start, index + 1);
+  }
+  throw new Error(`unclosed CSS rule ${selector}`);
 }
 
 try {
   initializeAppState();
   updatePreferences({ showChatButton: true, showTalkButton: true, petButtonsSize: "medium" });
-  assertBuiltInRenderOutput(false);
+  for (const outfit of ["default", ...builtInPetWardrobe.outfits.map((outfit) => outfit.id)]) {
+    setPetWardrobePreference("builtin", { outfit });
+    assertBuiltInRenderOutput(false, outfit);
+  }
   assertBuiltInRenderOutput(true);
 
   const defaultBody = createPetBodyMarkup("OpenPets default pet", "", `<div class="sprite"></div>`, "", false, "default");

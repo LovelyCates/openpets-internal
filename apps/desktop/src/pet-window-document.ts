@@ -12,10 +12,11 @@ export function createPetWindowDocument(options: {
   readonly title: string;
   readonly styles: string;
   readonly bodyHtml: string;
+  readonly classicRenderIdentity?: string;
 }): string {
   const escape = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   return `<!doctype html>
-<html lang="${escape(options.language)}" data-pet-role="${options.role}" data-pet-display-name="${escape(options.displayName)}" data-pet-asset-name="${escape(options.assetName)}" data-reaction-state="${escape(options.reactionState)}" data-motion-state="idle" data-native-pet-drag="${options.dragRegion === "drag" ? "wayland" : "manual"}" data-flip-x="${options.flipped}" data-codex-sprite-version="${options.spriteVersion}" data-paused="${options.paused}" data-codex-gaze-index="neutral">
+<html lang="${escape(options.language)}" data-pet-role="${options.role}" data-pet-display-name="${escape(options.displayName)}" data-pet-asset-name="${escape(options.assetName)}" data-reaction-state="${escape(options.reactionState)}" data-motion-state="idle" data-native-pet-drag="${options.dragRegion === "drag" ? "wayland" : "manual"}" data-flip-x="${options.flipped}" data-codex-sprite-version="${options.spriteVersion}" data-paused="${options.paused}" data-codex-gaze-index="neutral"${options.classicRenderIdentity ? ` data-classic-render-identity="${escape(options.classicRenderIdentity)}"` : ""}>
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data: blob:; media-src data: openpets-session-media:; connect-src openpets-session-media:; font-src file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />

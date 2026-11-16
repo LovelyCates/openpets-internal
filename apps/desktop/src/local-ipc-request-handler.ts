@@ -1,5 +1,7 @@
 import { createStaleLeaseStatus, type LeaseSnapshot } from "./lease-manager.js";
-import { errorResponse, IpcProtocolError, isRecord, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, validateTokenRateParams, type OpenPetsIpcRequest, type OpenPetsReaction, type OpenPetsIpcResponse } from "./local-ipc-protocol.js";
+import { createPetListResult } from "./local-ipc-pet-list.js";
+import type { PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
+import { errorResponse, IpcProtocolError, isRecord, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalLibraryMetadata, validateInstallLocalOrigin, validateInstallLocalPath, validateInstallPetId, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, validateTokenRateParams, type OpenPetsIpcRequest, type OpenPetsReaction, type OpenPetsIpcResponse } from "./local-ipc-protocol.js";
 import type { OpenCodeTokenRateReading, OpenCodeTokenRateTarget } from "./opencode-token-rate.js";
 
 export interface LocalIpcPet {
@@ -23,6 +25,11 @@ export interface LocalIpcStateSnapshot {
 export interface LocalIpcInstallResult {
   readonly state: LocalIpcStateSnapshot;
   readonly petId: string;
+}
+
+export interface LocalIpcInstallOptions {
+  readonly origin?: "codex";
+  readonly libraryMetadata?: PetLibraryMetadata;
 }
 
 export interface LocalIpcMediaOptions {
@@ -49,8 +56,8 @@ export interface LocalIpcRequestHandlerDeps {
   readonly getDefaultPetPaused: () => boolean;
   readonly isDefaultPetVisible: () => boolean;
   readonly installPet: (petId: string) => Promise<LocalIpcStateSnapshot>;
-  readonly installPetFromFolderWithResult: (path: string) => Promise<LocalIpcInstallResult>;
-  readonly installPetFromZipFileWithResult: (path: string) => Promise<LocalIpcInstallResult>;
+  readonly installPetFromFolderWithResult: (path: string, options?: LocalIpcInstallOptions) => Promise<LocalIpcInstallResult>;
+  readonly installPetFromZipFileWithResult: (path: string, options?: LocalIpcInstallOptions) => Promise<LocalIpcInstallResult>;
   readonly stat: (path: string) => Promise<LocalIpcFileStat>;
   readonly acquireLease: (requestedPetId: string | undefined, clientPid: number | undefined, sessionNonce: string | undefined) => LeaseSnapshot;
   readonly getLease: (leaseId: string) => LeaseSnapshot | null;
@@ -134,16 +141,7 @@ async function handleRequest(request: OpenPetsIpcRequest, deps: LocalIpcRequestH
 
   if (request.method === "pets.list") {
     const state = deps.getAppStateSnapshot();
-    return {
-      ok: true,
-      pets: state.pets.installed.map((pet) => ({
-        id: pet.id,
-        displayName: pet.displayName,
-        builtIn: pet.builtIn,
-        broken: pet.broken === true,
-      })),
-      defaultPetId: state.preferences.defaultPetId,
-    };
+    return createPetListResult(request.id, request.params, state.pets.installed, state.preferences.defaultPetId);
   }
 
   if (request.method === "pets.install") {
@@ -159,14 +157,26 @@ async function handleRequest(request: OpenPetsIpcRequest, deps: LocalIpcRequestH
     const params = isRecord(request.params) ? request.params : {};
     const localPath = validateInstallLocalPath(params.path);
     const kind = validateInstallLocalKind(params.kind);
+    const origin = validateInstallLocalOrigin(params.origin);
+    const libraryMetadata = validateInstallLocalLibraryMetadata(params.libraryMetadata, origin);
     const stats = await deps.stat(localPath);
     let installResult: LocalIpcInstallResult;
     if (kind === "folder") {
       if (!stats.isDirectory()) throw new IpcProtocolError("invalid_params", "Local pet path must be a folder.");
-      installResult = await deps.installPetFromFolderWithResult(localPath);
+      installResult = origin === undefined
+        ? await deps.installPetFromFolderWithResult(localPath)
+        : await deps.installPetFromFolderWithResult(localPath, {
+          origin,
+          ...(libraryMetadata === undefined ? {} : { libraryMetadata }),
+        });
     } else {
       if (!stats.isFile()) throw new IpcProtocolError("invalid_params", "Local pet path must be a zip file.");
-      installResult = await deps.installPetFromZipFileWithResult(localPath);
+      installResult = origin === undefined
+        ? await deps.installPetFromZipFileWithResult(localPath)
+        : await deps.installPetFromZipFileWithResult(localPath, {
+          origin,
+          ...(libraryMetadata === undefined ? {} : { libraryMetadata }),
+        });
     }
     const installedPet = installResult.state.pets.installed.find((pet) => pet.id === installResult.petId);
     if (!installedPet) throw new IpcProtocolError("install_failed", "Local pet install did not complete.");
@@ -210,6 +220,7 @@ async function handleRequest(request: OpenPetsIpcRequest, deps: LocalIpcRequestH
       : { kind: "default" };
     deps.updateTokenRate(params.sessionId, params.leaseId, target, {
       tokensPerSecond: params.tokensPerSecond,
+      ...(params.averageTokensPerSecond === undefined ? {} : { averageTokensPerSecond: params.averageTokensPerSecond }),
       outputTokens: params.outputTokens,
       source: params.source,
     });

@@ -24,6 +24,13 @@ their own doc, [Testing and validation](/testing-and-validation).
 The authoritative structural map is the root `codemap.md` plus per-folder
 `codemap.md` files; read those before editing a subsystem.
 
+The internal edition's macOS build and local OpenCode installer are documented
+in `internal/BUILD-MACOS.md`. `pnpm package:desktop:mac` builds for the host Mac
+architecture, validates the app payload and ad-hoc signature, and creates local
+DMG/ZIP files with checksums. Use `--dir` to stop after the `.app`. The upstream
+`release:desktop` command targets the public release infrastructure and is not
+the internal edition's distribution entry point.
+
 ## Root command surface
 
 All from the repo root unless noted (full list in root `package.json`):
@@ -40,6 +47,7 @@ All from the repo root unless noted (full list in root `package.json`):
 | `pnpm dev:desktop:third-parties` | Dev with direct plugin folders under `third-parties` hot-loaded |
 | `pnpm capture <cmd>` | Long-running dev capture session for transparent pet/plugin screenshots (see [Screenshots](/screenshots)) |
 | `pnpm package:desktop` / `:dir` | Build + package the desktop app (full / unpacked dir) |
+| `pnpm package:desktop:mac` | Build and validate the internal macOS app, DMG, ZIP and checksums locally |
 | `pnpm vscode:check` | Build extension workspace dependencies, then type-check and test the VS Code extension |
 | `pnpm vscode:build` | Build extension workspace dependencies and bundles |
 | `pnpm vscode:package` | Build dependencies and package a local VSIX without dependency collection |

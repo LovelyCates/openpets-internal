@@ -15,6 +15,12 @@ import assert from "node:assert/strict";
 
 import { validatePreferencePatch } from "../src/preference-patch.js";
 
+assert.deepEqual(validatePreferencePatch({ favoritePetIds: ["builtin", "denia", "denia"] }).favoritePetIds, ["builtin", "denia"]);
+assert.deepEqual(validatePreferencePatch({ favoritePetIds: [] }).favoritePetIds, []);
+for (const favoritePetIds of ["denia", ["../denia"], [42], Array(5001).fill("denia")]) {
+  assert.throws(() => validatePreferencePatch({ favoritePetIds }));
+}
+
 // ---------------------------------------------------------------------------
 // Non-object input → throws
 // ---------------------------------------------------------------------------

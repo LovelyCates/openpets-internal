@@ -1,6 +1,6 @@
 import { BrowserWindow, type Display } from "electron";
 
-import { getAppStateSnapshot, getDefaultPetPositionState, recordDefaultPetPosition, resetDefaultPetPosition, updatePreferences } from "./app-state.js";
+import { getPetRenderPreferences, getDefaultPetPositionState, recordDefaultPetPosition, resetDefaultPetPosition, updatePreferences } from "./app-state.js";
 import { shouldShowDefaultPetForExternalEvent } from "./app-state-core.js";
 import { defaultPetWindowSize, getAllDisplayKeys, getDefaultPetInitialPosition, getDisplayKey, getDisplayKeyForPosition, type Point } from "./display.js";
 import { motionMoveTo } from "./pet-motion-engine.js";
@@ -107,7 +107,7 @@ export function showDefaultPetForLan(): void {
 
 function showDefaultPetWindow(source: "user" | "external-event"): void {
   const window = getOrCreateDefaultPetWindow();
-  info("pet.default", "show requested", { source, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getAppStateSnapshot().preferences.defaultPetId });
+  info("pet.default", "show requested", { source, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getPetRenderPreferences().defaultPetId });
 
   if (window.isMinimized()) {
     window.restore();
@@ -145,7 +145,7 @@ function hideDefaultPetWindow(): boolean {
   collapseDefaultPetChat();
   if (!hidePosition || window.isDestroyed()) return wasVisible;
 
-  info("pet.default", "hide requested", { windowId: window.id, position: hidePosition, petId: getAppStateSnapshot().preferences.defaultPetId });
+  info("pet.default", "hide requested", { windowId: window.id, position: hidePosition, petId: getPetRenderPreferences().defaultPetId });
   handlePositionChanged(hidePosition);
   return wasVisible;
 }
@@ -203,7 +203,7 @@ export function refreshDefaultPetContent(): void {
     return;
   }
 
-  debug("pet.default", "refresh content", { windowId: defaultPetWindow.id, paused, hasDisplay: Boolean(getRenderedDisplay()), badge: getRenderedBadge(), petId: getAppStateSnapshot().preferences.defaultPetId });
+  debug("pet.default", "refresh content", { windowId: defaultPetWindow.id, paused, hasDisplay: Boolean(getRenderedDisplay()), badge: getRenderedBadge(), petId: getPetRenderPreferences().defaultPetId });
   void loadDefaultPetContent(defaultPetWindow, paused, getRenderedDisplay(), getRenderedBadge(), getCurrentDismissToken(), getDefaultPetPluginBubbles());
 }
 
@@ -213,7 +213,7 @@ export function recoverDefaultPetMouseInterop(reason: string): void {
     return;
   }
 
-  debug("pet.default", "mouse interop recovery requested", { windowId: defaultPetWindow.id, reason, petId: getAppStateSnapshot().preferences.defaultPetId });
+  debug("pet.default", "mouse interop recovery requested", { windowId: defaultPetWindow.id, reason, petId: getPetRenderPreferences().defaultPetId });
   recoverPetMouseInterop(defaultPetWindow, reason);
 }
 
@@ -400,7 +400,7 @@ export function destroyDefaultPet(): void {
   }
 
   const destroyPosition = readWindowPosition(defaultPetWindow);
-  info("pet.default", "destroy requested", { windowId: defaultPetWindow.id, position: destroyPosition, petId: getAppStateSnapshot().preferences.defaultPetId });
+  info("pet.default", "destroy requested", { windowId: defaultPetWindow.id, position: destroyPosition, petId: getPetRenderPreferences().defaultPetId });
   handlePositionChanged(destroyPosition);
   const window = defaultPetWindow;
   unregisterRoamingPet("default");
@@ -479,7 +479,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
   watchDefaultPetVisibility(createdWindow);
   bindDefaultPetChatWindow(createdWindow);
   const windowId = createdWindow.id;
-  info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
+  info("pet.default", "created", { windowId, position, paused, petId: getPetRenderPreferences().defaultPetId });
 
   createdWindow.on("closed", () => {
     if (defaultPetWindow !== createdWindow) return;
@@ -503,14 +503,14 @@ function getDefaultTransientReactionAnimationMs(transientDisplay: PetTransientDi
 }
 
 function getDefaultTransientDisplayDurationMs(transientDisplay: PetTransientDisplay): number {
-  return getTransientDisplayDurationMs(transientDisplay, getAppStateSnapshot().preferences.bubbleDurationScale);
+  return getTransientDisplayDurationMs(transientDisplay, getPetRenderPreferences().bubbleDurationScale);
 }
 
 function showDefaultPetForExternalEvent(): void {
-  const state = getAppStateSnapshot();
+  const preferences = getPetRenderPreferences();
   const visible = isDefaultPetVisible();
-  if (!shouldShowDefaultPetForExternalEvent(visible, state.preferences.openDefaultPetOnLaunch, paused)) {
-    debug("pet.default", "external show skipped", { reason: "paused", visible, openDefaultPetOnLaunch: state.preferences.openDefaultPetOnLaunch });
+  if (!shouldShowDefaultPetForExternalEvent(visible, preferences.openDefaultPetOnLaunch, paused)) {
+    debug("pet.default", "external show skipped", { reason: "paused", visible, openDefaultPetOnLaunch: preferences.openDefaultPetOnLaunch });
     return;
   }
 
@@ -646,7 +646,7 @@ export function reclampDefaultPetWindow(reason: DisplayChangeReason, changedDisp
 }
 
 export function shouldOpenDefaultPetOnLaunch(): boolean {
-  return getAppStateSnapshot().preferences.openDefaultPetOnLaunch;
+  return getPetRenderPreferences().openDefaultPetOnLaunch;
 }
 
 export function resetDefaultPetToInitialPosition(): void {

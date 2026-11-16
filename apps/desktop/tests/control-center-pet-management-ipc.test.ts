@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getActiveLocale, setLocaleFromPreference, t } from "../src/i18n/index.js";
 
 import {
   installControlCenterPetManagementIpcHandlers,
@@ -34,7 +35,7 @@ const event: ControlCenterPetManagementIpcEvent = { sender: { id: 7 } };
 
 type Call = { readonly method: string; readonly args: readonly unknown[] };
 
-function createHarness() {
+function createHarness(overrides: Partial<ControlCenterPetManagementIpcDependencies> = {}) {
   const handlers = new Map<string, ControlCenterPetManagementIpcHandler>();
   const calls: Call[] = [];
   const logs: Array<{ readonly level: string; readonly message: string; readonly fields?: Record<string, unknown> }> = [];
@@ -51,7 +52,7 @@ function createHarness() {
   };
   const settings = { settings: true };
   let currentControlCenter = true;
-  let messageResponse = 2;
+  let messageResponse = 3;
   let openDialogResult = { canceled: true, filePaths: [] as string[] };
   let selectedIsDirectory = false;
   let mutationError: Error | null = null;
@@ -64,8 +65,8 @@ function createHarness() {
   const owner = { kind: "owner" };
 
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args });
-  const mutate = async (method: string, value: unknown) => {
-    record(method, value);
+  const mutate = async (method: string, ...values: unknown[]) => {
+    record(method, ...values);
     if (mutationError) throw mutationError;
     return { from: method };
   };
@@ -127,7 +128,9 @@ function createHarness() {
     refreshPetWindowsForPetId: (petId, reason) => record("refreshPetWindowsForPetId", petId, reason),
     installPet: (petId) => mutate("installPet", petId),
     installPetFromFolder: (path) => mutate("installPetFromFolder", path),
-    installPetFromZipFile: (path) => mutate("installPetFromZipFile", path),
+    installPetFromZipFile: (path, options) => options
+      ? mutate("installPetFromZipFile", path, options)
+      : mutate("installPetFromZipFile", path),
     importCodexPet: (petId) => mutate("importCodexPet", petId),
     removePet: (petId) => mutate("removePet", petId),
     resetDefaultPetToInitialPosition: () => record("resetDefaultPetToInitialPosition"),
@@ -135,6 +138,7 @@ function createHarness() {
       debug: (message, fields) => logs.push({ level: "debug", message, fields }),
       error: (message, fields) => logs.push({ level: "error", message, fields }),
     },
+    ...overrides,
   };
 
   installControlCenterPetManagementIpcHandlers(dependencies);
@@ -165,6 +169,24 @@ function getHandler(harness: ReturnType<typeof createHarness>, channel: (typeof 
 }
 
 assert.deepEqual([...createHarness().handlers.keys()], channels);
+
+{
+  const previousLocale = getActiveLocale();
+  setLocaleFromPreference("zh-Hans");
+  try {
+    const harness = createHarness();
+    harness.setMessageResponse(3);
+    await getHandler(harness, "openpets:install-local-pet")(event);
+    const chooser = harness.dialogOptions[0] as Parameters<ControlCenterPetManagementIpcDependencies["showMessageBox"]>[1];
+    assert.equal(chooser.title, t("pets.importDialog.title"), "the native chooser uses the active UI locale");
+    assert.equal(chooser.buttons[1], t("pets.importDialog.codexZip"));
+    assert.equal(chooser.cancelId, chooser.buttons.length - 1, "closing the source chooser selects cancellation, not the new folder option");
+    assert.equal(harness.calls.some(({ method }) => method === "showOpenDialog"), false);
+    assert.equal(harness.calls.some(({ method }) => method === "installPetFromFolder" || method === "installPetFromZipFile"), false);
+  } finally {
+    setLocaleFromPreference(previousLocale);
+  }
+}
 
 {
   const harness = createHarness();
@@ -238,7 +260,7 @@ assert.deepEqual([...createHarness().handlers.keys()], channels);
 
 {
   const harness = createHarness();
-  harness.setMessageResponse(2);
+  harness.setMessageResponse(3);
   assert.deepEqual(await getHandler(harness, "openpets:install-local-pet")(event), await getHandler(harness, "openpets:get-pets-state")(event));
   assert.deepEqual(harness.owners, [harness.owner]);
   assert.equal(harness.calls.some(({ method }) => method === "showOpenDialog"), false);
@@ -253,7 +275,7 @@ assert.deepEqual([...createHarness().handlers.keys()], channels);
   assert.equal(harness.calls.findIndex(({ method }) => method === "showMessageBox") < harness.calls.findIndex(({ method }) => method === "showOpenDialog"), true);
   assert.equal(harness.calls.filter(({ method }) => method === "getAppStateSnapshot").length, snapshotsBeforeDialogCancel + 1);
 
-  harness.setMessageResponse(1);
+  harness.setMessageResponse(2);
   harness.setOpenDialogResult({ canceled: false, filePaths: ["/tmp/pet-folder"] });
   harness.setSelectedIsDirectory(true);
   const syncsBeforeFolderInstall = harness.calls.filter(({ method }) => method === "syncPinnedPets").length;
@@ -271,6 +293,18 @@ assert.deepEqual([...createHarness().handlers.keys()], channels);
   harness.setSelectedIsDirectory(false);
   await getHandler(harness, "openpets:install-local-pet")(event);
   assert.equal(harness.calls.some(({ method, args }) => method === "installPetFromZipFile" && args[0] === "/tmp/pet.zip"), true);
+  assert.deepEqual(harness.calls.filter(({ method }) => method === "installPetFromZipFile").at(-1)?.args, ["/tmp/pet.zip"], "the ordinary ZIP choice does not guess provenance from a file or pet ID");
+
+  harness.setMessageResponse(1);
+  await getHandler(harness, "openpets:install-local-pet")(event);
+  assert.deepEqual(harness.calls.filter(({ method }) => method === "installPetFromZipFile").at(-1)?.args, ["/tmp/pet.zip", { origin: "codex" }], "the explicit Codex ZIP choice preserves the source in the existing ZIP installer");
+  assert.equal(harness.calls.some(({ method }) => method === "setDefaultInstalledPet"), false, "importing either ZIP leaves the chosen default pet unchanged");
+
+  harness.setSelectedIsDirectory(true);
+  const importsBeforeMismatch = harness.calls.filter(({ method }) => method === "installPetFromZipFile" || method === "installPetFromFolder").length;
+  await assert.rejects(async () => getHandler(harness, "openpets:install-local-pet")(event));
+  assert.equal(harness.calls.filter(({ method }) => method === "installPetFromZipFile" || method === "installPetFromFolder").length, importsBeforeMismatch, "a ZIP choice cannot silently become a folder import");
+  harness.setSelectedIsDirectory(false);
 
   harness.setMutationError(new Error("bad package"));
   const refreshesBeforeFailure = harness.calls.filter(({ method }) => method === "refreshDefaultPetContent").length;
@@ -335,6 +369,61 @@ assert.deepEqual([...createHarness().handlers.keys()], channels);
     2,
     "invalid payloads never reach the state writer",
   );
+}
+
+{
+  const installed = Array.from({ length: 1_336 }, (_, index) => ({
+    id: index === 0 ? "builtin" : `pet-${index}`,
+    builtIn: index === 0,
+    displayName: `猫咪 ${index}`,
+    ...(index % 3 === 0 ? { source: { kind: "team" } } : {}),
+  }));
+  let activeReads = 0;
+  let maxActiveReads = 0;
+  const sources = new Map<string, string>();
+  const completionOrder: number[] = [];
+  const harness = createHarness({
+    readInstalledPetPresentation: async (petId, source) => {
+      const index = Number(petId.slice(4));
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      sources.set(petId, source);
+      try {
+        // Different completion times catch result arrays built in completion order.
+        for (let step = 0; step <= index % 5; step += 1) {
+          await Promise.resolve();
+        }
+        completionOrder.push(index);
+        if (index % 101 === 0) throw new Error("unreadable manifest");
+        return { format: "motion", previewFormat: "image", previewWidth: index + 1, previewHeight: 16, capabilities: { outfits: false, activities: false, gaze: false } };
+      } finally {
+        activeReads -= 1;
+      }
+    },
+  });
+  harness.state.pets.installed.splice(0, harness.state.pets.installed.length, ...installed);
+  const snapshot = await getHandler(harness, "openpets:get-pets-state")(event) as {
+    preferences: { defaultPetId: string };
+    pets: { installed: Array<{ id: string; displayName: string; builtIn: boolean; source?: { kind: string }; format?: string; previewWidth?: number }> };
+  };
+  assert.ok(maxActiveReads > 1 && maxActiveReads <= 8, "1336 manifests are enriched with bounded parallel I/O");
+  assert.equal(activeReads, 0);
+  assert.equal(sources.size, installed.length - 1, "every non-built-in pet is read once");
+  assert.equal(sources.has("builtin"), false, "built-in presentation needs no manifest I/O");
+  assert.ok(completionOrder.some((index, position) => index !== position + 1), "the fixture actually completes reads out of order");
+  assert.equal(snapshot.preferences.defaultPetId, harness.state.preferences.defaultPetId);
+  assert.deepEqual(
+    snapshot.pets.installed.map(({ id, displayName, builtIn, source }) => ({ id, displayName, builtIn, source })),
+    installed.map(({ id, displayName, builtIn, source }) => ({ id, displayName, builtIn, source })),
+    "all 1336 entries retain their saved order and metadata",
+  );
+  assert.equal(snapshot.pets.installed[0]?.format, "classic");
+  for (let index = 1; index < installed.length; index += 1) {
+    assert.equal(sources.get(`pet-${index}`), index % 3 === 0 ? "team" : "personal");
+    const pet = snapshot.pets.installed[index]!;
+    assert.equal(pet.format, index % 101 === 0 ? undefined : "motion", "unreadable entries keep their metadata without interrupting later reads");
+    assert.equal(pet.previewWidth, index % 101 === 0 ? undefined : index + 1);
+  }
 }
 
 console.log("control-center pet management IPC handlers passed.");

@@ -1,18 +1,27 @@
 import type {
   MotionContextReaction,
-  MotionEventReaction,
   MotionPetMetadata,
   VerifiedMotionClip,
 } from "@open-pets/pet-format/motion";
+import type { OpenPetsReaction } from "@open-pets/pet-format/reactions";
+import type { UserSelectableAnimationState } from "@open-pets/pet-format/animation";
 
 /** Semantic intent is independent of bubble lifetime and artwork timing. */
 export interface PetBodyInput {
   readonly epoch: string;
   readonly revision: number;
   readonly context: MotionContextReaction | "idle";
+  /** Latest Classic semantic react; presentation/HUD refreshes retain it. */
+  readonly classic?: {
+    readonly reaction: OpenPetsReaction;
+    readonly spriteState: UserSelectableAnimationState;
+    readonly cycleDurationMs: number;
+  };
   readonly event?: {
     readonly id: string;
-    readonly reaction: MotionEventReaction;
+    readonly reaction: OpenPetsReaction;
+    /** Present only for a genuine Classic react mapped to a finite sprite row. */
+    readonly classicSpriteState?: UserSelectableAnimationState;
   };
   readonly paused: boolean;
   readonly suspended: boolean;

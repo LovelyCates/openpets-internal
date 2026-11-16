@@ -48,6 +48,10 @@ export type PetActivityCommand =
   }
   | {
     readonly kind: "variation";
+  }
+  | {
+    readonly kind: "classic-idle";
+    readonly action: "play" | "stop";
   };
 
 /** Renderer-to-main payload on openpets:pet-activity-complete. */

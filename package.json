@@ -25,6 +25,7 @@
     "dev:desktop:third-parties": "OPENPETS_DISABLE_PLUGIN_CATALOG=1 OPENPETS_DEV_PLUGIN_ROOTS=\"$(pwd)/third-parties\" pnpm dev:desktop",
     "package:desktop:dir": "pnpm build && pnpm --filter @open-pets/desktop package:dir",
     "package:desktop": "pnpm build && pnpm --filter @open-pets/desktop package",
+    "package:desktop:mac": "node internal/build-macos.mjs",
     "release:desktop": "node apps/desktop/scripts/release-local.mjs",
     "release:npm": "node scripts/release-npm.mjs",
     "vscode:check": "pnpm --filter 'openpets-vscode^...' build && pnpm --filter openpets-vscode build && pnpm --filter openpets-vscode check && pnpm --filter openpets-vscode test",

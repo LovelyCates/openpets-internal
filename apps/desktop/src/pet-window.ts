@@ -3,12 +3,12 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { getAppStateSnapshot, getPetThrowPhysics, type HudScaleValue, type PetScaleValue } from "./app-state.js";
+import { getInstalledPetState, getPetRenderPreferences, getPetThrowPhysics, type HudScaleValue, type PetRenderPreferences, type PetScaleValue } from "./app-state.js";
 import { clampToNearestDisplayIfOffscreen, clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, isCrossDisplayRoamingEnabled, type Point } from "./display.js";
 import { builtInPet } from "./built-in-pet.js";
 import { t } from "./i18n/index.js";
 import { debug, error as logError, info, warn } from "./logger.js";
-import { defaultPetSprite, type PetMotionState, type UniversalSpriteState } from "@open-pets/pet-format/animation";
+import { defaultPetSprite, getConfiguredSpriteStates, resolveReactionSpriteState, type UniversalSpriteState } from "@open-pets/pet-format/animation";
 import { computeEffectiveWaylandBackend, isLayerShellBackendRequested, shouldPetWindowBeFocusable } from "./wayland-backend.js";
 import { adoptPetWindowForLayerShell, isLayerShellHelperAvailable } from "./wayland-layer-backend.js";
 import { isLatestPetRenderSequence } from "./pet-render-lifecycle.js";
@@ -19,9 +19,10 @@ import { getVoiceAssistantSnapshot } from "./voice-assistant-host.js";
 
 import type { AgentPetWindowOptions, DefaultPetWindowOptions, PetContentRender, PetPluginBubbles, PetShowMediaOptions, PetStatusBadgeReaction, PetTransientDisplay, PetWindowAudioPayload, PetWindowInteractionHooks, PetWindowSpeechCompletion } from "./pet-window-types.js";
 import { bubbleHasMediaPreview, createBubbleMarkup, createBuiltInPetRender, createDefaultPetRenderContent, createInstalledPetRender } from "./pet-window-render.js";
-import { registerPetGazeWindow, resetPetGazeWindow, setPetGazeDragging, setPetGazeMotionState, setPetGazePluginOverride, setPetGazeReactionState, setPetGazeRendererReady, setPetGazeScale, suspendPetGazeForMovement, updatePetGazeConfiguration } from "./pet-window-gaze.js";
+import { registerPetGazeWindow, resetPetGazeWindow, setPetGazeDragging, setPetGazeMotionState, setPetGazePluginOverride, setPetGazeReactionState, setPetGazeReducedMotion, setPetGazeRendererReady, setPetGazeScale, suspendPetGazeForMovement, updatePetGazeConfiguration } from "./pet-window-gaze.js";
 import { installPetContextMenu } from "./pet-window-context-menu.js";
 import { installPetWindowInteraction } from "./pet-window-interaction.js";
+import { installPetWindowMotionPublisher } from "./pet-window-motion.js";
 import { beginPetWindowX11MapLifecycle, type PetWindowX11MapLifecycle } from "./x11-pet-window-state.js";
 import { createPetWindowShowCoordinator, type PetWindowShowCoordinator } from "./pet-window-show-coordinator.js";
 import { finishPetActivitySpeech, movePetActivityWindow, preparePetActivityRender, registerPetActivityWindow, setPetActivityPluginOverride, setPetActivityReactionOverride, setPetActivityReducedMotion, setPetActivityScale, startPetActivitySpeech, updatePetActivityBody, updatePetActivityRender } from "./pet-activities.js";
@@ -53,7 +54,7 @@ const petWindowLayerShellBackends = new WeakMap<BrowserWindow, boolean>();
 const petWindowX11MapLifecycles = new WeakMap<BrowserWindow, PetWindowX11MapLifecycle>();
 const petWindowSpriteGeometry = new WeakMap<BrowserWindow, { width: number; height: number }>();
 const petWindowMotionLayout = new WeakMap<BrowserWindow, MotionLayout>();
-const petWindowShapeState = new WeakMap<BrowserWindow, { scale: PetScaleValue; hasBubble: boolean; hasPinned: boolean; hasMediaBubble: boolean }>();
+const petWindowShapeState = new WeakMap<BrowserWindow, { scale: PetScaleValue; hasBubble: boolean; hasPinned: boolean; hasMediaBubble: boolean; hasTokenDock: boolean }>();
 const bodyStates = new WeakMap<BrowserWindow, ReturnType<typeof createPetBodyState>>();
 const bodyVisibility = new WeakMap<BrowserWindow, ReturnType<typeof createPetBodyVisibility>>();
 const defaultBodyWindows = new WeakSet<BrowserWindow>();
@@ -108,7 +109,10 @@ function installPetBodyState(window: BrowserWindow): void {
   };
   const onPreference = (event: IpcMainEvent, payload: unknown) => {
     const reducedMotion = readPetMotionPreference(payload, ready && event.sender === contents, state.isCurrentEpoch);
-    if (reducedMotion !== null) setPetActivityReducedMotion(window, reducedMotion);
+    if (reducedMotion !== null) {
+      setPetActivityReducedMotion(window, reducedMotion);
+      setPetGazeReducedMotion(window, reducedMotion);
+    }
   };
   const onContentCommitted = (event: IpcMainEvent, payload: unknown) => {
     if (event.sender !== contents || !payload || typeof payload !== "object") return;
@@ -124,6 +128,7 @@ function installPetBodyState(window: BrowserWindow): void {
   };
   const onNavigation = () => {
     setPetActivityReducedMotion(window, null);
+    setPetGazeReducedMotion(window, null);
     if (!ready) return;
     ready = false;
     bodyReady.delete(window);
@@ -164,7 +169,12 @@ export function suspendPetBodies(suspended: boolean): void {
 
 /** Called once at semantic ingress, never by transient presentation expiry. */
 export function applyPetBodyReaction(window: BrowserWindow, reaction: OpenPetsReaction): void {
-  bodyStates.get(window)?.react(reaction);
+  const state = bodyStates.get(window);
+  if (!state) return;
+  const preferences = getPetRenderPreferences();
+  const spriteState = resolveReactionSpriteState(reaction, preferences.reactionAnimationOverrides);
+  const states = getConfiguredSpriteStates(preferences.waitingAnimationDurationMs);
+  state.react(reaction, spriteState, states[spriteState].durationMs);
 }
 
 function applyPetBodyRender(window: BrowserWindow, render: PetContentRender, appearance?: MotionAppearance): void {
@@ -172,7 +182,11 @@ function applyPetBodyRender(window: BrowserWindow, render: PetContentRender, app
   if (!state) return;
   state.setPaused(render.paused);
   if (appearance) state.publishMotionAppearance(appearance);
-  else if (!render.motion) state.clearMotion();
+  else if (!render.motion) {
+    state.clearMotion();
+    const preferences = getPetRenderPreferences();
+    state.configureClassicAnimation(preferences.reactionAnimationOverrides, preferences.waitingAnimationDurationMs);
+  }
 }
 
 /** Mark one explicit wardrobe refresh for each matching live pet window. */
@@ -404,6 +418,7 @@ export async function createDefaultPetRender(
   badge: PetStatusBadgeReaction | null,
   dismissToken?: string,
   pluginBubbles: PetPluginBubbles | null = null,
+  preferences: PetRenderPreferences = getPetRenderPreferences(),
 ): Promise<PetContentRender> {
   return createDefaultPetRenderContent(
     paused,
@@ -412,6 +427,7 @@ export async function createDefaultPetRender(
     dismissToken,
     pluginBubbles,
     shouldUseWaylandNativePetDrag() ? "drag" : "no-drag",
+    preferences,
   );
 }
 
@@ -660,13 +676,14 @@ function applyPetAlwaysOnTop(window: BrowserWindow): void {
 }
 
 export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): Promise<void> {
+  const preferences = getPetRenderPreferences();
   preparePetActivityRender(window, paused || Boolean(display || badge || pluginBubbles?.transient || pluginBubbles?.pinned?.bubble.input));
   const sequence = allocateWindowLoadSequence(window);
-  debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, hasPluginBubble: Boolean(pluginBubbles?.transient), hasPinned: Boolean(pluginBubbles?.pinned), defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
+  debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, hasPluginBubble: Boolean(pluginBubbles?.transient), hasPinned: Boolean(pluginBubbles?.pinned), defaultPetId: preferences.defaultPetId });
   applyPetWindowFocusPolicy(window, petPluginBubblesHaveInteractiveInput(pluginBubbles) || isDefaultPetCarrierExpanded() || isDefaultPetChatCompactOpen());
   let render: PetContentRender;
   try {
-    render = await createDefaultPetRender(paused, display, badge, dismissToken, pluginBubbles);
+    render = await createDefaultPetRender(paused, display, badge, dismissToken, pluginBubbles, preferences);
   } catch (error) {
     logError("pet.window", "default motion preparation failed; retaining current body", error instanceof Error ? error : { error });
     return;
@@ -679,7 +696,7 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
     rememberPetRenderGeometry(window, render);
     updatePetGazeConfiguration(window, render, render.flipped);
     if (!render.motion) updatePetActivityRender(window, render);
-    applyLinuxPetWindowShape(window, render.petScale, hasBubble, hasPinned, hasMediaBubble);
+    applyLinuxPetWindowShape(window, render.petScale, hasBubble, hasPinned, hasMediaBubble, Boolean(render.hasTokenDock), preferences);
   };
   if (windowLoadSequences.get(window) !== sequence || window.isDestroyed()) return;
   const appearance = preparePetAppearance(window, render);
@@ -707,15 +724,15 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
   const sequence = allocateWindowLoadSequence(window);
   try {
     applyPetWindowFocusPolicy(window, petPluginBubblesHaveInteractiveInput(pluginBubbles));
-    const state = getAppStateSnapshot();
-    const pet = state.pets.installed.find((candidate) => candidate.id === petId);
+    const preferences = getPetRenderPreferences();
+    const pet = getInstalledPetState(petId);
     if (!pet || pet.broken) {
       throw new Error(`Cannot render explicit pet: ${petId}`);
     }
     debug("pet.window", "explicit content render begin", { windowId: window.id, sequence, petId, displayName: pet.displayName, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge });
-    const scale = scaleOverride ?? state.preferences.petScale as PetScaleValue;
+    const scale = scaleOverride ?? preferences.petScale as PetScaleValue;
     const render = pet.id === builtInPet.id
-      ? createBuiltInPetRender(false, display, badge, scale, `explicit:${pet.id}`, pet.id, dismissToken, pluginBubbles, "agent", shouldUseWaylandNativePetDrag() ? "drag" : "no-drag")
+      ? createBuiltInPetRender(false, display, badge, scale, `explicit:${pet.id}`, pet.id, dismissToken, pluginBubbles, "agent", shouldUseWaylandNativePetDrag() ? "drag" : "no-drag", preferences)
       : await createInstalledPetRender(
         pet.id,
         pet.displayName,
@@ -730,6 +747,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
         "agent",
         undefined,
         shouldUseWaylandNativePetDrag() ? "drag" : "no-drag",
+        preferences,
       );
     const hasPinned = Boolean(pluginBubbles?.pinned);
     const bubbleHtml = createBubbleMarkup(display, false, badge, dismissToken, pluginBubbles);
@@ -739,7 +757,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
       rememberPetRenderGeometry(window, render);
       updatePetGazeConfiguration(window, render, render.flipped);
       if (!render.motion) updatePetActivityRender(window, render);
-      applyLinuxPetWindowShape(window, scale, hasBubble, hasPinned, hasMediaBubble);
+      applyLinuxPetWindowShape(window, scale, hasBubble, hasPinned, hasMediaBubble, Boolean(render.hasTokenDock), preferences);
     };
     if (windowLoadSequences.get(window) !== sequence || window.isDestroyed()) return;
     const appearance = preparePetAppearance(window, render);
@@ -809,7 +827,7 @@ function applyPetWindowScaleOverride(window: BrowserWindow): void {
     setPetGazeScale(window, scale);
     window.webContents.send("openpets:pet-scale-override", scale);
     const shapeState = petWindowShapeState.get(window);
-    if (shapeState) applyLinuxPetWindowShape(window, shapeState.scale, shapeState.hasBubble, shapeState.hasPinned, shapeState.hasMediaBubble);
+    if (shapeState) applyLinuxPetWindowShape(window, shapeState.scale, shapeState.hasBubble, shapeState.hasPinned, shapeState.hasMediaBubble, shapeState.hasTokenDock);
   });
 }
 
@@ -856,6 +874,7 @@ function tryUpdateLoadedPetContent(window: BrowserWindow, render: PetContentRend
       motionSnapshotId: appearance?.assets.snapshotId ?? null,
       motionPresentationId: appearance?.presentationId ?? null,
       motionOutfitId: appearance?.outfitId ?? null,
+      classicRenderIdentity: render.motion ? null : render.cacheKey,
       displayName: render.displayName,
       assetName: render.assetName,
       reactionState: render.reactionState,
@@ -881,13 +900,13 @@ export function readWindowPosition(window: BrowserWindow): Point {
   return clampToVisibleWorkArea(rawPos, defaultPetWindowSize);
 }
 
-function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, hasBubble: boolean, hasPinned = false, hasMediaBubble = false): void {
-  petWindowShapeState.set(window, { scale, hasBubble, hasPinned, hasMediaBubble });
+function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, hasBubble: boolean, hasPinned = false, hasMediaBubble = false, hasTokenDock = false, preferences: PetRenderPreferences = getPetRenderPreferences()): void {
+  petWindowShapeState.set(window, { scale, hasBubble, hasPinned, hasMediaBubble, hasTokenDock });
   if (process.platform !== "linux" || window.isDestroyed()) return;
 
   const isExpanded = isDefaultPetCarrierExpanded();
   const bounds = window.getBounds();
-  const hudScale = getAppStateSnapshot().preferences.hudScale as HudScaleValue;
+  const hudScale = preferences.hudScale as HudScaleValue;
   const { shape } = calculatePetInteractiveShape({
     windowWidth: bounds.width,
     windowHeight: bounds.height,
@@ -898,8 +917,9 @@ function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, h
     motionDocumentScale: petWindowMotionLayout.get(window)?.input.requestedScale,
     hasBubble,
     hasPinned,
+    hasTokenDock,
     hudScale,
-    bubbleScale: getAppStateSnapshot().preferences.bubbleScale,
+    bubbleScale: preferences.bubbleScale,
     bubbleHasMedia: hasMediaBubble,
     isExpanded,
     isCompactOpen: !isExpanded && isDefaultPetChatCompactOpen(),
@@ -937,9 +957,9 @@ export function applyLinuxPetWindowShapeWithExpansion(
 ): void {
   if (process.platform !== "linux" || window.isDestroyed()) return;
 
-  const state = getAppStateSnapshot();
-  const scale = state.preferences.petScale as PetScaleValue;
-  const hudScale = state.preferences.hudScale as HudScaleValue;
+  const preferences = getPetRenderPreferences();
+  const scale = preferences.petScale as PetScaleValue;
+  const hudScale = preferences.hudScale as HudScaleValue;
   const bounds = window.getBounds();
   const { shape } = calculatePetInteractiveShape({
     windowWidth: bounds.width,
@@ -950,6 +970,7 @@ export function applyLinuxPetWindowShapeWithExpansion(
     motionLayout: currentMotionLayout(window),
     motionDocumentScale: petWindowMotionLayout.get(window)?.input.requestedScale,
     hasPinned: petWindowShapeState.get(window)?.hasPinned ?? false,
+    hasTokenDock: petWindowShapeState.get(window)?.hasTokenDock ?? false,
     hasBubble: false,
     hudScale,
     isExpanded,
@@ -982,48 +1003,15 @@ export function refreshDefaultPetFocusPolicy(window: BrowserWindow): void {
 
 function installMotionStatePublisher(window: BrowserWindow): void {
   registerPetGazeWindow(window);
-  let lastX = window.getPosition()[0];
-  let lastSent: PetMotionState = "idle";
-  let idleTimer: NodeJS.Timeout | null = null;
-
-  const sendMotionState = (state: PetMotionState): void => {
-    if (window.isDestroyed() || lastSent === state) return;
-    lastSent = state;
-    setPetGazeMotionState(window, state);
-    window.webContents.send("openpets:pet-motion", state);
-  };
-
-  const scheduleIdle = (): void => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      sendMotionState("idle");
-    }, 180);
-  };
-
-  const handleMove = (): void => {
-    if (window.isDestroyed()) return;
-    movePetActivityWindow(window);
-    suspendPetGazeForMovement(window);
-    const [x] = window.getPosition();
-    const deltaX = x - lastX;
-    lastX = x;
-
-    if (Math.abs(deltaX) >= 3) {
-      sendMotionState(deltaX > 0 ? "run-right" : "run-left");
-    }
-    scheduleIdle();
-  };
-
-  window.on("move", handleMove);
-  window.on("moved", handleMove);
-  window.webContents.on("did-finish-load", () => {
-    lastSent = "idle";
-    setPetGazeMotionState(window, "idle");
-    window.webContents.send("openpets:pet-motion", "idle");
-  });
-  window.on("closed", () => {
-    if (idleTimer) clearTimeout(idleTimer);
+  installPetWindowMotionPublisher(window, {
+    onMove: () => {
+      movePetActivityWindow(window);
+      suspendPetGazeForMovement(window);
+    },
+    onMotion: (state) => {
+      setPetGazeMotionState(window, state);
+      window.webContents.send("openpets:pet-motion", state);
+    },
   });
 }
 

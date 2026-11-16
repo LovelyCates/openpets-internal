@@ -15,6 +15,7 @@ allowBuilds:
   '@google/genai': true
   '@vscode/vsce-sign': true
   electron-winstaller: false
+  electron: true
   esbuild: true
   get-windows: true
   keytar: true

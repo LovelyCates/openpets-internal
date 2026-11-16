@@ -1,4 +1,4 @@
-import { getAppStateSnapshot } from "./app-state.js";
+import { getPetRenderPreferences } from "./app-state.js";
 import { getActiveLocale } from "./i18n/index.js";
 import { getConfiguredSpriteStates } from "@open-pets/pet-format/animation";
 import { pickReactionMessage } from "./reaction-messages.js";
@@ -18,8 +18,9 @@ export function mergePetTransientDisplay(current: PetTransientDisplay | null, ne
 
 export function getTransientReactionAnimationMs(display: PetTransientDisplay): number | null {
   if (!display.reaction) return null;
-  const state = getReactionSpriteState(display.reaction);
-  const row = getConfiguredSpriteStates(getAppStateSnapshot().preferences.waitingAnimationDurationMs)[state];
+  const preferences = getPetRenderPreferences();
+  const state = getReactionSpriteState(display.reaction, preferences);
+  const row = getConfiguredSpriteStates(preferences.waitingAnimationDurationMs)[state];
   const iterations = "iterations" in row ? row.iterations : "infinite";
   return typeof iterations === "number" ? row.durationMs * iterations : null;
 }
