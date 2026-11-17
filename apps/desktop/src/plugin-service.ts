@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, promises as fs } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { getPluginCatalog, type PluginCatalogOptions } from "./plugin-catalog.js";
 import { getMarketplacePlugin, getMarketplacePlugins, type MarketplaceQuery } from "./plugin-marketplace.js";
@@ -559,7 +559,7 @@ export class PluginService {
       if (record.source !== "local" || activeIds.has(record.id)) continue;
       let isDevRecord = false;
       try { isDevRecord = isUnderPath(await fs.realpath(record.installPath), realDevRoot); }
-      catch { isDevRecord = record.installPath.startsWith(`${devRoot}/`); }
+      catch { isDevRecord = isUnderPath(record.installPath, devRoot); }
       if (!isDevRecord) continue;
       this.stateStore.removeRecord(record.id);
       await this.runtime.reloadPlugin(record.id);
@@ -1077,7 +1077,11 @@ function isStringSubset(next: readonly string[], approved: readonly string[]): b
 }
 
 function isUnderPath(child: string, parent: string): boolean {
-  return child === parent || child.startsWith(`${parent}/`);
+  const relativePath = relative(resolve(parent), resolve(child));
+  return relativePath !== ""
+    && relativePath !== ".."
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath);
 }
 
 function isMissingPluginInstall(error: unknown): boolean {

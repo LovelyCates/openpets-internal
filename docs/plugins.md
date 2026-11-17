@@ -434,6 +434,12 @@ session partition, navigation/window-open hardening, an SDK IPC **token**, a
 registration handshake at startup, config-listener cleanup, and teardown. The
 plugin's `index.js` runs here, isolated from the renderer and the main process.
 
+Development-source refresh prunes stale local snapshots only below the
+`plugins-dev` directory, using native path-component boundaries on Windows and
+macOS. The root itself, sibling prefixes and canonical symlink/junction escapes
+are excluded. Missing snapshots retain the same strict lexical boundary for
+removing their obsolete state records.
+
 Bubble action, submit and dismiss callbacks share the bridge's asynchronous
 error and generation guard. Rejected handlers become plugin diagnostics; a
 reload or disable does not send a late dismiss callback into a disposed renderer.

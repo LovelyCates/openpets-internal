@@ -561,6 +561,42 @@ await localScenario("loadLocalRoots prunes stale plugins-dev records", async ({ 
   assert.equal(existsSync(staleInstall), false);
 });
 
+await localScenario("stale dev pruning keeps its root, sibling directories and resolved escapes", async ({ service, root, userData, store }) => {
+  const pluginsRoot = join(root, "official");
+  mkdirSync(pluginsRoot, { recursive: true });
+  const devRoot = join(userData, "plugins-dev");
+  const sibling = join(userData, "plugins-dev-backup", "keep");
+  const outside = join(root, "outside-plugin");
+  const escape = join(devRoot, "escaped-plugin");
+  mkdirSync(sibling, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  symlinkSync(outside, escape, process.platform === "win32" ? "junction" : "dir");
+  for (const [id, installPath] of [["dev-root", devRoot], ["sibling", sibling], ["escaped-plugin", escape]] as const) {
+    store.upsertRecord({ id, version: "1.0.0", installPath, manifestPath: join(installPath, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "local", enabled: true, approvedPermissions: [], config: {} });
+  }
+  await service.loadLocalRoots([pluginsRoot], { pruneStale: true });
+  assert.ok(store.getRecord("dev-root"), "the shared dev root must not be removed as a stale plugin");
+  assert.ok(store.getRecord("sibling"), "a matching directory-name prefix is not containment");
+  assert.ok(store.getRecord("escaped-plugin"), "canonical symlink/junction escapes must remain outside pruning");
+  assert.equal(existsSync(devRoot), true);
+  assert.equal(existsSync(sibling), true);
+  assert.equal(existsSync(outside), true);
+  assert.equal(existsSync(escape), true);
+});
+
+await localScenario("stale dev pruning removes missing descendants without matching missing siblings", async ({ service, root, userData, store }) => {
+  const pluginsRoot = join(root, "official");
+  mkdirSync(pluginsRoot, { recursive: true });
+  const missingInside = join(userData, "plugins-dev", "missing-plugin");
+  const missingSibling = join(userData, "plugins-dev-backup", "missing-plugin");
+  for (const [id, installPath] of [["missing-inside", missingInside], ["missing-sibling", missingSibling]] as const) {
+    store.upsertRecord({ id, version: "1.0.0", installPath, manifestPath: join(installPath, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "local", enabled: true, approvedPermissions: [], config: {} });
+  }
+  await service.loadLocalRoots([pluginsRoot], { pruneStale: true });
+  assert.equal(store.getRecord("missing-inside"), undefined);
+  assert.ok(store.getRecord("missing-sibling"));
+});
+
 await localScenario("loadLocal rejects javascript nested entry symlink", async ({ service, source, root }) => {
   writeManifest(source, { manifestVersion: 2, id: "js-entry-link", name: "JS Entry Link", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "nested/index.mjs", permissions: ["pet:speak"] });
   mkdirSync(join(source, "nested"), { recursive: true });
