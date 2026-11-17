@@ -52,3 +52,13 @@ macOS 在目标架构主机按 [BUILD-MACOS.md](BUILD-MACOS.md) 构建、验证�
 Release 说明须列出适用架构、安装方式、功能变化、签名状态及实际验证范围。
 没有发行证书的 Windows 包注明未签名；Mac ad-hoc 签名注明未公证。预发布
 版本继续以 prerelease 发布，不声称已经完成企业离线或跨平台 GUI 全量验收。
+
+## 发布后恶意软件检测
+
+`internal-release-malware-scan.yml` 对指定的已公开 Release 做只读检查，先核对
+标签提交、服务器摘要和发布校验和，再用 Windows Defender 与 ClamAV 扫描。
+Defender 在下载应用前关闭该临时 runner 的样本提交和云报告，保留实时防护；
+ClamAV 使用官方签名库，检查安装包、解包应用及展开的 ASAR。只保存小型
+扫描日志与结果，不上传样本、用户目录或项目数据，不修改 Release。
+引擎不可用、签名更新失败、超限或检查未完成均记为未完成，不能当作未检出。
+恶意软件检测与依赖漏洞、数据访问边界审查分别评估。
