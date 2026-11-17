@@ -23,6 +23,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app, a 
 - `plugins/official/`: first-party SDK v3 plugin product source consumed by desktop dev mode and plugin packaging/catalog release workflows.
 - `internal/build-macos.mjs`: internal macOS-only build, packaged-runtime validation, ad-hoc signature verification, DMG/ZIP and checksum entry point.
 - `.github/workflows/internal-windows-release.yml`: manually dispatched native Windows Internal NSIS build, validation and artifact collection; paired GitHub distribution is documented in `internal/GITHUB-RELEASE.md`.
+- `.github/workflows/internal-release-malware-scan.yml` and `internal-release-malware-triage.yml`: read-only public Release scans and same-engine official Electron PE comparison; record detections and incomplete coverage separately from code security findings.
 - `internal/record-release-payload.mjs`: common packaged runtime digests for comparing Windows/macOS release payloads at one source commit.
 - `internal/install-opencode-integration.mjs`: local Node installer for version-selected OpenCode bundles and MCP configuration, with managed-file verification and rollback.
 - `internal/import-pet-catalog.mjs`: SHA-verified, checkpointed offline collection import through the running app's local IPC, preserving existing IDs and checking final library completeness without direct profile writes.
