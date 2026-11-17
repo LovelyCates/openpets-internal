@@ -1,0 +1,204 @@
+name: Promote verified Internal Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Successful Internal Windows build run ID"
+        required: true
+        type: string
+      source_sha:
+        description: "Full app source commit shared with macOS"
+        required: true
+        type: string
+      common_payload_sha256:
+        description: "Expected common payload digest already verified on macOS"
+        required: true
+        type: string
+      release_tag:
+        description: "Existing draft prerelease tag, e.g. v4.1.0-internal.12"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    if: github.repository == 'LovelyCates/openpets-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      COMMON_PAYLOAD_SHA256: ${{ inputs.common_payload_sha256 }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      PROMOTION_WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify existing artifact and upload only to the draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { createReadStream } from 'node:fs';
+          import { appendFile, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          import { spawnSync } from 'node:child_process';
+
+          const repository = 'LovelyCates/openpets-internal';
+          const runId = process.env.SOURCE_RUN_ID;
+          const source = process.env.SOURCE_SHA;
+          const expectedCommon = process.env.COMMON_PAYLOAD_SHA256;
+          const tag = process.env.RELEASE_TAG;
+          assert.match(runId, /^[1-9][0-9]{0,19}$/);
+          assert.match(source, /^[a-f0-9]{40}$/);
+          assert.match(expectedCommon, /^[a-f0-9]{64}$/);
+          assert.match(tag, /^v[0-9]+\.[0-9]+\.[0-9]+-internal\.[0-9]+$/);
+          const version = tag.slice(1);
+          const gh = (args) => {
+            const result = spawnSync('gh', args, { encoding: 'utf8', timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
+            if (result.error) throw result.error;
+            assert.equal(result.status, 0, result.stderr || `gh failed: ${args[0]}`);
+            return result.stdout;
+          };
+          const api = (path) => JSON.parse(gh(['api', `repos/${repository}/${path}`]));
+          const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+          const hashFile = async (path) => {
+            const hash = createHash('sha256');
+            for await (const chunk of createReadStream(path)) hash.update(chunk);
+            return hash.digest('hex');
+          };
+          const run = api(`actions/runs/${runId}`);
+          assert.equal(String(run.id), runId);
+          assert.equal(run.repository.full_name, repository);
+          assert.equal(run.path, '.github/workflows/internal-windows-release.yml');
+          assert.equal(run.event, 'workflow_dispatch');
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'success');
+          assert.match(run.head_sha, /^[a-f0-9]{40}$/);
+          const artifactName = `openpets-internal-windows-x64-${version}-${source}`;
+          const artifacts = api(`actions/runs/${runId}/artifacts?per_page=100`).artifacts.filter(item => item.name === artifactName);
+          assert.equal(artifacts.length, 1, 'Expected one verified Windows build artifact.');
+          assert.equal(artifacts[0].expired, false);
+          const directory = await mkdtemp(join(process.env.RUNNER_TEMP, 'openpets-promotion-'));
+          gh(['run', 'download', runId, '--repo', repository, '--name', artifactName, '--dir', directory]);
+          const installerName = `OpenPets-Internal-${version}-win-x64-setup.exe`;
+          const metadataName = 'BUILD-METADATA.windows-x64.json';
+          const checksumName = 'SHA256SUMS.windows-x64.txt';
+          const names = [installerName, metadataName, checksumName];
+          assert.deepEqual((await readdir(directory)).sort(), [...names].sort(), 'Unexpected artifact entries.');
+          for (const name of names) {
+            const facts = await lstat(join(directory, name));
+            assert.ok(facts.isFile() && !facts.isSymbolicLink() && facts.size > 0, `Invalid artifact file: ${name}`);
+          }
+          assert.ok((await lstat(join(directory, metadataName))).size < 16 * 1024 * 1024);
+          assert.ok((await lstat(join(directory, checksumName))).size < 4096);
+          const metadata = JSON.parse(await readFile(join(directory, metadataName), 'utf8'));
+          assert.equal(metadata.schemaVersion, 1);
+          assert.equal(metadata.gitCommit, source);
+          assert.equal(metadata.gitDirty, false);
+          assert.equal(metadata.inspectorGitCommit, run.head_sha);
+          assert.equal(metadata.version, version);
+          assert.equal(metadata.platform, 'win32');
+          assert.equal(metadata.arch, 'x64');
+          assert.ok(Array.isArray(metadata.commonFiles) && metadata.commonFiles.length > 0 && metadata.commonFiles.length <= 20_000);
+          const canonical = metadata.commonFiles.map(item => {
+            assert.equal(typeof item.path, 'string');
+            assert.ok(item.path.length > 0 && !item.path.startsWith('/') && !item.path.includes('\\') && !item.path.split('/').includes('..'));
+            assert.ok(Number.isSafeInteger(item.bytes) && item.bytes >= 0);
+            assert.match(item.sha256, /^[a-f0-9]{64}$/);
+            return { path: item.path, bytes: item.bytes, sha256: item.sha256 };
+          }).sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+          assert.equal(new Set(canonical.map(item => item.path)).size, canonical.length);
+          assert.equal(JSON.stringify(metadata.commonFiles), JSON.stringify(canonical), 'Payload list is not canonical.');
+          const common = digest(Buffer.from(JSON.stringify(canonical)));
+          assert.equal(common, expectedCommon, 'Windows common payload differs from macOS.');
+          assert.equal(common, metadata.commonPayloadSha256);
+          const checksums = (await readFile(join(directory, checksumName), 'utf8')).trim();
+          const manifest = /^([a-f0-9]{64})  ([^\r\n]+)$/u.exec(checksums);
+          assert.ok(manifest, 'Expected one SHA256 manifest line.');
+          assert.equal(manifest[2], installerName);
+          const installerSha = await hashFile(join(directory, installerName));
+          assert.equal(installerSha, manifest[1], 'Windows installer hash differs from its manifest.');
+          const installerBytes = (await lstat(join(directory, installerName))).size;
+          assert.ok(installerBytes > 1024 * 1024 && installerBytes < 2 * 1024 * 1024 * 1024, 'Invalid installer size.');
+          const verified = [];
+          for (const name of names) verified.push({ name, sha256: await hashFile(join(directory, name)), bytes: (await lstat(join(directory, name))).size });
+          const draft = () => {
+            // REST's tag endpoint does not resolve this unpublished draft.
+            // gh release view uses the authenticated draft lookup instead.
+            const value = JSON.parse(gh(['release', 'view', tag, '--repo', repository, '--json', 'isDraft,isPrerelease,tagName,targetCommitish,url,assets']));
+            const release = {
+              draft: value.isDraft,
+              prerelease: value.isPrerelease,
+              tag_name: value.tagName,
+              target_commitish: value.targetCommitish,
+              html_url: value.url,
+              assets: value.assets.map(asset => ({ ...asset, browser_download_url: asset.url })),
+            };
+            assert.equal(release.draft, true, 'Promotion is restricted to an existing draft.');
+            assert.equal(release.prerelease, true);
+            assert.equal(release.tag_name, tag);
+            assert.equal(release.target_commitish, source, 'Draft targets a different source commit.');
+            return release;
+          };
+          let release = draft();
+          const assertAsset = (asset, file) => {
+            assert.equal(asset.state, 'uploaded');
+            assert.equal(asset.size, file.bytes);
+            assert.equal(asset.digest, `sha256:${file.sha256}`);
+          };
+          for (const file of verified) {
+            const existing = release.assets.filter(asset => asset.name === file.name);
+            assert.ok(existing.length <= 1, 'Duplicate release asset name.');
+            if (existing.length) {
+              assertAsset(existing[0], file);
+            } else {
+              gh(['release', 'upload', tag, join(directory, file.name), '--repo', repository]);
+            }
+            release = draft();
+            const uploaded = release.assets.filter(asset => asset.name === file.name);
+            assert.equal(uploaded.length, 1);
+            assertAsset(uploaded[0], file);
+          }
+          const receiptDirectory = join(process.env.GITHUB_WORKSPACE, 'promotion-receipt');
+          await mkdir(receiptDirectory);
+          for (const name of [metadataName, checksumName]) await copyFile(join(directory, name), join(receiptDirectory, name));
+          const receipt = {
+            schemaVersion: 1,
+            sourceRunId: Number(runId),
+            sourceRunUrl: run.html_url,
+            sourceBuildWorkflowSha: run.head_sha,
+            promotionWorkflowSha: process.env.PROMOTION_WORKFLOW_SHA,
+            sourceSha: source,
+            version,
+            commonPayloadSha256: common,
+            windowsInstaller: { name: installerName, sha256: installerSha, bytes: installerBytes },
+            release: { tag: release.tag_name, targetCommitish: release.target_commitish, draft: release.draft, prerelease: release.prerelease, url: release.html_url },
+            assets: verified.map(file => {
+              const asset = release.assets.find(asset => asset.name === file.name);
+              return { id: asset.id, name: asset.name, bytes: asset.size, digest: asset.digest, url: asset.browser_download_url };
+            }),
+            published: false,
+          };
+          await writeFile(join(receiptDirectory, 'PROMOTION-RECEIPT.windows-x64.json'), JSON.stringify(receipt, null, 2) + '\n');
+          await appendFile(process.env.GITHUB_STEP_SUMMARY, `Verified Windows installer ${installerName} (${installerBytes} bytes, SHA256 ${installerSha}) uploaded to existing draft ${tag}. App source ${source}; common payload ${common}. Release remains unpublished.\n`);
+          console.log(JSON.stringify(receipt, null, 2));
+          JS
+
+      - name: Upload small promotion receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-windows-promotion-receipt-${{ github.run_id }}
+          path: promotion-receipt/
+          if-no-files-found: error
+          retention-days: 14

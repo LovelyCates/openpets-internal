@@ -20,6 +20,12 @@ V1/V2 单文件插件重建、目标平台打包合同、打包 Electron 的原�
 忽略的 `.local/release-tools`，以 `--source-root` 指向应用源码，避免发布工具
 修复改变应用构建基线。报告分别记录应用与工具提交；两端应用提交必须一致。
 
+本机中转大制品速度不足时，可用 `internal-promote-windows.yml` 将成功构建
+中的已验证附件直接转入现有草稿。该手动工作流仅在转存 job 中使用 Release
+写权限，校验原构建、源码、公共载荷摘要及实际安装包 SHA-256，并要求目标
+Release 仍为对应提交的草稿；它不创建标签或发布 Release。本机随后读取小型
+元数据逐项比对，并核对 GitHub 端安装包摘要，仍须完成相同的最终发布检查。
+
 macOS 在目标架构主机按 [BUILD-MACOS.md](BUILD-MACOS.md) 构建、验证。
 需要保留运行中的旧应用时，可将 electron-builder 的
 `directories.output` 指向独立产物目录，随后对该目录执行相同的打包合同、
