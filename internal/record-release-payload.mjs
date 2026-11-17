@@ -8,28 +8,26 @@ import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const requireDesktop = createRequire(join(repository, "apps", "desktop", "package.json"));
-const asar = requireDesktop("@electron/asar");
+const defaultRepository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-function git(...args) {
+function git(repository, ...args) {
   const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, result.stderr || "Git inspection failed.");
   return result.stdout.trim();
 }
 
-function lockedSource() {
+function lockedSource(repository) {
   const lock = spawnSync("git", ["show", "HEAD:pnpm-lock.yaml"], { cwd: repository });
   if (lock.error) throw lock.error;
   assert.equal(lock.status, 0, "Committed pnpm-lock.yaml is missing.");
   const submodules = {};
-  for (const line of git("ls-tree", "-r", "--full-tree", "HEAD").split("\n")) {
+  for (const line of git(repository, "ls-tree", "-r", "--full-tree", "HEAD").split("\n")) {
     const match = /^160000 commit ([a-f0-9]{40,64})\t(.+)$/u.exec(line);
     if (!match) continue;
     const [, commit, path] = match;
-    assert.equal(git("-C", path, "rev-parse", "HEAD"), commit, `Submodule is not at its committed revision: ${path}`);
+    assert.equal(git(repository, "-C", path, "rev-parse", "HEAD"), commit, `Submodule is not at its committed revision: ${path}`);
     submodules[path] = commit;
   }
   return { lockfileSha256: sha256(lock.stdout), submodules };
@@ -38,13 +36,13 @@ function lockedSource() {
 function options() {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === "--help") {
-    console.log("Usage: node internal/record-release-payload.mjs --resources-dir PATH --platform darwin|win32 --arch arm64|x64 --output REPORT.json\n\nReads a packaged app without launching or changing it. Records exact-byte hashes\nof common app/runtime/plugin payloads for cross-platform comparison; native\nbinaries, declarations and source maps are excluded. The explicit output parent\nmust already exist. gitCommit identifies the inspected checkout; invoke directly\nafter its build so this is also the build commit. No signing or GUI claim is made.");
+    console.log("Usage: node internal/record-release-payload.mjs --resources-dir PATH --platform darwin|win32 --arch arm64|x64 --output REPORT.json [--source-root PATH]\n\nReads a packaged app without launching or changing it. Records exact-byte hashes\nof common app/runtime/plugin payloads for cross-platform comparison; native\nbinaries, declarations and source maps are excluded. The explicit output parent\nmust already exist. --source-root selects the built source checkout for package\nresolution, version, Git commit, lockfile and submodules; it defaults to the\nrepository containing this tool. Invoke directly after that checkout's build.\nNo signing or GUI claim is made.");
     return null;
   }
   const parsed = {};
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
-    assert.ok(["--resources-dir", "--platform", "--arch", "--output"].includes(key), `Unknown argument: ${key}`);
+    assert.ok(["--resources-dir", "--platform", "--arch", "--output", "--source-root"].includes(key), `Unknown argument: ${key}`);
     assert.ok(args[index + 1] && !args[index + 1].startsWith("--"), `Missing value for ${key}`);
     assert.equal(parsed[key], undefined, `Repeated argument: ${key}`);
     parsed[key] = args[index + 1];
@@ -57,6 +55,7 @@ function options() {
     output: resolve(parsed["--output"]),
     platform: parsed["--platform"],
     arch: parsed["--arch"],
+    sourceRoot: resolve(parsed["--source-root"] ?? defaultRepository),
   };
 }
 
@@ -89,6 +88,9 @@ function isRuntimeFile(name) {
 async function main() {
   const settings = options();
   if (!settings) return;
+  const repository = await realpath(settings.sourceRoot);
+  const requireDesktop = createRequire(join(repository, "apps", "desktop", "package.json"));
+  const asar = requireDesktop("@electron/asar");
   const resources = await realpath(settings.resources);
   const outputParent = await realpath(dirname(settings.output));
   const outputRelative = relative(resources, join(outputParent, basename(settings.output)));
@@ -102,18 +104,23 @@ async function main() {
   }
   const archive = join(resources, "app.asar");
   assert.ok((await lstat(archive)).isFile(), "app.asar is missing.");
-  const entries = asar.listPackage(archive, { isPack: false }).map((name) => name.replaceAll("\\", "/").replace(/^\//u, ""));
+  const entries = asar.listPackage(archive, { isPack: false }).map((listedPath) => {
+    // ASAR 3 resolves lookup paths with the host's path separator. Preserve its
+    // native listing for reads, and canonicalize only keys in the shared report.
+    const lookupPath = listedPath.replace(/^[/\\]+/u, "");
+    return { lookupPath, path: lookupPath.replaceAll("\\", "/") };
+  });
   const commonFiles = [];
   const add = (path, bytes) => commonFiles.push({ path, bytes: bytes.length, sha256: sha256(bytes) });
-  for (const entry of entries) {
+  for (const { lookupPath, path: entry } of entries) {
     const included = entry.startsWith("assets/")
       || (entry.startsWith("dist/") && !/\.(?:map|ts)$/u.test(entry))
       || /^[^/]+\.cjs$/u.test(entry);
     if (!included) continue;
-    const facts = asar.statFile(archive, entry);
+    const facts = asar.statFile(archive, lookupPath);
     assert.ok(!facts.link, `Common ASAR payload contains a symbolic link: ${entry}`);
     if (facts.files) continue;
-    add(`app/${entry}`, asar.extractFile(archive, entry));
+    add(`app/${entry}`, asar.extractFile(archive, lookupPath));
   }
   const appPackage = JSON.parse(asar.extractFile(archive, "package.json").toString("utf8"));
   assert.equal(appPackage.name, "@open-pets/desktop", "Unexpected packaged application.");
@@ -163,13 +170,14 @@ async function main() {
   const report = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    gitCommit: git("rev-parse", "--verify", "HEAD"),
-    gitDirty: git("status", "--porcelain").length > 0,
+    inspectorGitCommit: git(defaultRepository, "rev-parse", "--verify", "HEAD"),
+    gitCommit: git(repository, "rev-parse", "--verify", "HEAD"),
+    gitDirty: git(repository, "status", "--porcelain").length > 0,
     version: appPackage.version,
     platform: settings.platform,
     arch: settings.arch,
     appAsarSha256: await fileHash(archive),
-    ...lockedSource(),
+    ...lockedSource(repository),
     workspacePackages,
     commonPayloadSha256: sha256(Buffer.from(JSON.stringify(commonFiles))),
     commonFiles,

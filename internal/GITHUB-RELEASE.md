@@ -16,6 +16,10 @@ Windows 使用 `.github/workflows/internal-windows-release.yml` 手动构建。
 V1/V2 单文件插件重建、目标平台打包合同、打包 Electron 的原生模块冒烟，
 以及从最终 NSIS 提取后的应用载荷复核。
 
+工作流分别检出待发布的应用提交和该次工作流提交中的摘要工具。后者位于
+忽略的 `.local/release-tools`，以 `--source-root` 指向应用源码，避免发布工具
+修复改变应用构建基线。报告分别记录应用与工具提交；两端应用提交必须一致。
+
 macOS 在目标架构主机按 [BUILD-MACOS.md](BUILD-MACOS.md) 构建、验证。
 需要保留运行中的旧应用时，可将 electron-builder 的
 `directories.output` 指向独立产物目录，随后对该目录执行相同的打包合同、

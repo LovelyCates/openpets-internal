@@ -29,6 +29,15 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Checkout release verification tools
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .local/release-tools
+          sparse-checkout: internal/record-release-payload.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -126,7 +135,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its packaging contract.' }
           node internal/validate-windows-runtime.mjs $app
           if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its native runtime smoke.' }
-          node internal/record-release-payload.mjs --resources-dir (Join-Path $app 'resources') --platform win32 --arch x64 --output apps/desktop/dist-electron/BUILD-METADATA.windows-x64.json
+          node .local/release-tools/internal/record-release-payload.mjs --source-root $env:GITHUB_WORKSPACE --resources-dir (Join-Path $app 'resources') --platform win32 --arch x64 --output apps/desktop/dist-electron/BUILD-METADATA.windows-x64.json
           if ($LASTEXITCODE -ne 0) { throw 'Could not record the verified payload metadata.' }
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([System.IO.Path]::GetFileName($installer))" | Set-Content -Encoding utf8NoBOM apps/desktop/dist-electron/SHA256SUMS.windows-x64.txt
