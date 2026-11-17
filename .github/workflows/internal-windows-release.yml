@@ -48,6 +48,65 @@ jobs:
         with:
           version: 11.0.8
 
+      - name: Sync an exclusively owned temporary fixture
+        shell: node {0}
+        run: |
+          const assert = require('node:assert/strict');
+          const { mkdtemp, writeFile, readFile, open, rm } = require('node:fs/promises');
+          const { tmpdir } = require('node:os');
+          const { join } = require('node:path');
+
+          (async () => {
+            const report = { node: process.version, platform: process.platform, arch: process.arch, results: [], status: 'incomplete' };
+            let directory;
+            try {
+              assert.equal(process.platform, 'win32');
+              assert.equal(process.versions.node.split('.')[0], '24');
+              directory = await mkdtemp(join(tmpdir(), 'openpets-fsync-probe-'));
+              const fixture = join(directory, 'fixture.txt');
+              const original = Buffer.from('openpets-fsync-fixture\n');
+              await writeFile(fixture, original, { flag: 'wx' });
+              for (const flags of ['r', 'r+']) {
+                const result = { flags, opened: false, syncSucceeded: false };
+                let handle;
+                try {
+                  handle = await open(fixture, flags);
+                  result.opened = true;
+                  await handle.sync();
+                  result.syncSucceeded = true;
+                } catch (error) {
+                  result.errorCode = error.code ?? null;
+                } finally {
+                  await handle?.close();
+                }
+                const after = await readFile(fixture);
+                result.bytes = after.length;
+                result.nonTruncating = after.equals(original);
+                report.results.push(result);
+                assert.ok(result.nonTruncating, `${flags} changed the fixture contents.`);
+              }
+              assert.ok(report.results.find(result => result.flags === 'r+').syncSucceeded, 'The read/write handle could not sync.');
+              report.status = 'passed';
+            } catch (error) {
+              report.status = 'failed';
+              report.error = error.message;
+              process.exitCode = 1;
+            } finally {
+              if (directory) {
+                try {
+                  await rm(directory, { recursive: true, force: false });
+                  report.ownedTemporaryDirectoryRemoved = true;
+                } catch (error) {
+                  report.ownedTemporaryDirectoryRemoved = false;
+                  report.cleanupErrorCode = error.code ?? null;
+                  report.status = 'failed';
+                  process.exitCode = 1;
+                }
+              }
+              console.log(JSON.stringify(report, null, 2));
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+
       - name: Install locked dependencies
         shell: bash
         run: |
@@ -95,7 +154,8 @@ jobs:
             'pet-content-stage', 'pet-window-motion', 'pet-window-interaction-recovery',
             'pet-activities-runtime', 'opencode-token-rate',
             'control-center-route', 'control-center-plugin-ipc',
-            'plugin-sdk-bridge', 'plugin-service', 'plugin-service-path-boundaries',
+            'plugin-sdk-bridge', 'plugin-install-durability', 'plugin-install-transaction',
+            'plugin-service', 'plugin-service-path-boundaries',
             'default-pet-check-in-startup',
             'bundled-plugin-interactions',
             'pet-library-state', 'preference-patch', 'pet-local-codex-origin',

@@ -27,7 +27,9 @@ async function syncDirectory(path: string): Promise<void> {
 }
 
 async function syncFile(path: string): Promise<void> {
-  const handle = await fs.open(path, "r");
+  // Windows FlushFileBuffers needs write access. r+ opens an existing file
+  // without creating or truncating it; POSIX can flush read-only handles.
+  const handle = await fs.open(path, process.platform === "win32" ? "r+" : "r");
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error("Invalid staged plugin file.");
@@ -80,12 +82,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function syncState(store: PluginStateStore): Promise<void> {
-  const file = await fs.open(store.statePath, "r");
-  try {
-    await file.sync();
-  } finally {
-    await file.close();
-  }
+  await syncFile(store.statePath);
   await syncDirectory(dirname(store.statePath));
 }
 

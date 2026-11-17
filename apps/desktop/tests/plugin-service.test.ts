@@ -690,7 +690,7 @@ await catalogRollbackScenario("failed activation restores the previous approved 
 
 await catalogRollbackScenario("install selects the highest compatible approved release", async ({ service, store }) => {
   const result = await service.installCatalog("rollback-plug");
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, !result.ok ? result.error : undefined);
   assert.equal(store.getRecord("rollback-plug")?.version, "2.0.0");
 });
 

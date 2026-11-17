@@ -220,7 +220,7 @@ windows.ts → control-center-pet-management-ipc.ts
 ```
 main.ts → initializePluginService(userData, defaultPluginPetApi, appVersion, ElectronPluginJsHost).start()
 ├── plugin-state.ts reads/writes userData/openpets-plugin-state.json
-├── plugin-install-transaction.ts recovers interrupted catalog package/state replacements before plugin discovery or runtime startup
+├── plugin-install-transaction.ts recovers interrupted catalog package/state replacements before plugin discovery or runtime startup; staged/state file flushes use non-truncating write access on Windows and preserve error-driven rollback
 ├── provider-contract.ts provides the pure canonical adapter and preset catalogs, typed profile union, role support, and credential policy
 ├── plugin-platform-settings.ts gates audio/voice/microphone/quiet hours and persists versioned, validated provider profiles/selections with migration quarantine
 ├── provider-service.ts resolves redacted role operation snapshots, credentials, adapter URLs/headers/codecs, and provider diagnostics

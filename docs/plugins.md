@@ -537,6 +537,11 @@ replacement generation's deliveries, pets, or motion.
 ID/version, validates declared files, and prepares a staging directory.
 `plugin-install-transaction.ts` owns a durable marker and the package/state
 replacement; startup recovers unfinished transactions before runtime discovery.
+Staged files and the committed state are flushed before the commit marker.
+On Windows those existing files are opened with non-truncating read/write access
+for `FlushFileBuffers`; POSIX keeps read-only file handles and directory syncs.
+Write-access or flush errors still fail the transaction and preserve rollback;
+they are not treated as successful synchronization.
 `plugin-service.ts` confirms any expanded permissions, preserves existing config
 and enabled state, and requires successful activation before committing the
 replacement. A failed install restores the prior package and permission state.
