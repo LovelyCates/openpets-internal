@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Desktop-specific Cursor integration checks
@@ -15,7 +15,7 @@ try {
   const expectedConfigPath = join(homeDir, ".cursor", "mcp.json");
   
   // Verify the path structure matches what desktop uses
-  assert.ok(expectedConfigPath.endsWith(".cursor/mcp.json"), "Cursor global config path must end with .cursor/mcp.json");
+  assert.ok(expectedConfigPath.endsWith(join(".cursor", "mcp.json")), "Cursor global config path must end with the Cursor MCP config path");
   assert.ok(!expectedConfigPath.includes(".."), "Cursor config path must not contain traversal");
 
   // Test that desktop would handle missing config gracefully
@@ -69,10 +69,10 @@ try {
   const localEntry = {
     type: "stdio",
     command: "node",
-    args: ["/absolute/path/to/mcp.js", "--pet", "test"],
+    args: [join(root, "absolute", "path", "to", "mcp.js"), "--pet", "test"],
   };
   assert.equal(localEntry.command, "node");
-  assert.ok(localEntry.args[0].startsWith("/"), "Local mode must use absolute path");
+  assert.ok(isAbsolute(localEntry.args[0]), "Local mode must use absolute path");
 
   // Test status mapping that desktop uses
   const statusMap = {
@@ -92,7 +92,7 @@ try {
   // Test that desktop would format user paths correctly
   const longPath = join(homeDir, ".cursor", "mcp.json");
   const formattedPath = longPath.replace(homeDir, "~");
-  assert.equal(formattedPath, "~/.cursor/mcp.json");
+  assert.equal(formattedPath, join("~", ".cursor", "mcp.json"));
 
   // Test that desktop would handle action availability correctly
   const actionMatrix = {

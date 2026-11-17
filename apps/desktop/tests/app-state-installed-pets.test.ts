@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import type { InstalledPetState } from "../src/app-state.js";
 interface TestEnvironment {
   readonly userData: string;
   manifestReads: number;
+  renameFailuresRemaining: number;
 }
 
 const testGlobal = globalThis as typeof globalThis & {
@@ -45,12 +46,22 @@ const petPathsMock = `data:text/javascript,${encodeURIComponent(`
 `)}`;
 const fsMock = `data:text/javascript,${encodeURIComponent(`
   export * from "node:fs";
-  import { openSync as realOpenSync } from "node:fs";
+  import { openSync as realOpenSync, renameSync as realRenameSync } from "node:fs";
   export function openSync(file, ...args) {
     if (String(file).endsWith("pet.json")) {
       globalThis.__openPetsInstalledStateTest.manifestReads += 1;
     }
     return realOpenSync(file, ...args);
+  }
+  export function renameSync(from, to) {
+    const environment = globalThis.__openPetsInstalledStateTest;
+    if (String(to).endsWith("openpets-state.json") && environment.renameFailuresRemaining > 0) {
+      environment.renameFailuresRemaining -= 1;
+      const error = new Error("State file is temporarily locked.");
+      error.code = "EPERM";
+      throw error;
+    }
+    return realRenameSync(from, to);
   }
 `)}`;
 
@@ -93,7 +104,7 @@ function withState(
   run: (environment: TestEnvironment) => void,
 ): void {
   const userData = realpathSync(mkdtempSync(join(tmpdir(), "openpets-installed-state-")));
-  const environment = { userData, manifestReads: 0 };
+  const environment = { userData, manifestReads: 0, renameFailuresRemaining: 0 };
   testGlobal.__openPetsInstalledStateTest = environment;
   try {
     const seed = prepare(userData);
@@ -367,6 +378,22 @@ test("activity counters persist immediately without changing preferences or inst
     assert.deepEqual(persisted.pets, JSON.parse(JSON.stringify(before.pets)));
     assert.equal(environment.manifestReads, readsBefore);
     assert.equal(appState.getInstalledPetState("activity-cat")?.broken, before.pets.installed[1]?.broken);
+  });
+});
+
+test("Windows state saves survive brief rename contention and preserve the previous state on lasting failure", { skip: process.platform !== "win32" }, () => {
+  withState(() => undefined, (environment) => {
+    const stateFile = join(environment.userData, "openpets-state.json");
+    environment.renameFailuresRemaining = 2;
+    appState.updatePreferences({ showOpenCodeTokenRate: false });
+    const committed = readFileSync(stateFile);
+    assert.equal(JSON.parse(committed.toString("utf8")).preferences.showOpenCodeTokenRate, false);
+
+    environment.renameFailuresRemaining = 6;
+    assert.throws(() => appState.updatePreferences({ showOpenCodeTokenRate: true }), { code: "EPERM" });
+    assert.deepEqual(readFileSync(stateFile), committed);
+    assert.equal(appState.isOpenCodeTokenRateDisplayEnabled(), false);
+    assert.equal(existsSync(`${stateFile}.${process.pid}.tmp`), false);
   });
 });
 

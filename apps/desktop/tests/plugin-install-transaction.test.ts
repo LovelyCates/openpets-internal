@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitPluginInstall } from "../src/plugin-install-transaction.js";
 import { PluginService } from "../src/plugin-service.js";
 import { PluginStateStore, type PluginStateRecord } from "../src/plugin-state.js";
+import { tryCreateFileLinkSync } from "./symlink-fixtures.js";
 
 const id = "transaction-plug";
 const token = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -133,19 +134,20 @@ for (const damage of ["missing", "invalid"] as const) {
   assert.equal(readdirSync(f.root).some((name) => name.startsWith(".openpets-transaction-")), false);
 }
 
-if (process.platform !== "win32") {
+{
   const f = fixture();
-  symlinkSync(join(f.target, "openpets.plugin.json"), join(f.stage, "link"));
-  await assert.rejects(() => commitPluginInstall({
-    userDataPath: f.userDataPath,
-    id,
-    stagePath: f.stage,
-    previous: f.old,
-    store: f.store,
-    activate: async () => { throw new Error("Must not activate"); },
-  }), /symlink/);
-  assert.equal(existsSync(f.stage), false);
-  assert.equal(f.store.getRecord(id)?.version, "1.0.0");
+  if (tryCreateFileLinkSync(join(f.target, "openpets.plugin.json"), join(f.stage, "link"), "plugin install rejects a linked staged file")) {
+    await assert.rejects(() => commitPluginInstall({
+      userDataPath: f.userDataPath,
+      id,
+      stagePath: f.stage,
+      previous: f.old,
+      store: f.store,
+      activate: async () => { throw new Error("Must not activate"); },
+    }), /symlink/);
+    assert.equal(existsSync(f.stage), false);
+    assert.equal(f.store.getRecord(id)?.version, "1.0.0");
+  }
 }
 
 {

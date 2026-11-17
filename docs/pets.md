@@ -145,6 +145,9 @@ page, they can be played once or enabled to play automatically while idle. Each
 activity uses artwork matching the pet's rendered outfit; without a matching
 representation, it is skipped rather than switching the pet's clothes. Automatic
 play preferences and cooldowns belong to the activity and are shared across outfits.
+The pet-library Activities filter counts packages that declare these separate
+animations. If none are available, its empty state explains the distinction
+from ordinary V1 idle gestures and offers the existing local package import.
 
 Website V1 Classic pets also use their existing waving and jumping atlas rows
 for brief cosmetic gestures during quiet idle, even when they declare no

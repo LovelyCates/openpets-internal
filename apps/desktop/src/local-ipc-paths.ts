@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import { remoteNetworkEnabled } from "./internal-network-policy.js";
 import { openPetsIpcProtocol, openPetsIpcVersion } from "./local-ipc-protocol.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 
 export interface OpenPetsDiscoveryFile {
   readonly protocolVersion: 1;
@@ -240,9 +241,18 @@ export function writeDiscoveryFile(endpoint: string, token: string, appVersion: 
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   try { chmodSync(dirname(path), 0o700); } catch { /* best effort */ }
   const tempPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(discovery, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  try { chmodSync(tempPath, 0o600); } catch { /* best effort */ }
-  renameSync(tempPath, path);
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(discovery, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    try { chmodSync(tempPath, 0o600); } catch { /* best effort */ }
+    retryWindowsLockedRename(() => renameSync(tempPath, path));
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Preserve the discovery write error; a transient lock may delay cleanup.
+    }
+    throw error;
+  }
   try { chmodSync(path, 0o600); } catch { /* best effort */ }
   return discovery;
 }

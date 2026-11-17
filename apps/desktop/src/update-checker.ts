@@ -1,7 +1,7 @@
 import { app } from "electron";
 import https from "node:https";
 
-import { createParsedUpdateStatus, normalizeVersion } from "./update-version.js";
+import { createParsedUpdateStatus, getAppVersionInfo } from "./update-version.js";
 import { openExternalUrl } from "./external-url-opener.js";
 import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
 
@@ -10,6 +10,7 @@ export type UpdateStatusState = "idle" | "checking" | "available" | "current" | 
 export interface UpdateStatus {
   readonly state: UpdateStatusState;
   readonly currentVersion: string;
+  readonly displayVersion: string;
   readonly latestVersion?: string;
   readonly releaseUrl?: string;
   readonly checkedAt?: number;
@@ -27,7 +28,7 @@ const latestReleaseApiUrl = `https://api.github.com/repos/${githubRepository}/re
 const releasesPageUrl = `https://github.com/${githubRepository}/releases`;
 const releaseCheckTimeoutMs = 6_000;
 
-let updateStatus: UpdateStatus = { state: "idle", currentVersion: getCurrentAppVersion() };
+let updateStatus: UpdateStatus = { state: "idle", ...getAppVersionInfo(app.getVersion()) };
 let checkInFlight: Promise<UpdateStatus> | null = null;
 
 export function getUpdateStatus(): UpdateStatus {
@@ -37,15 +38,14 @@ export function getUpdateStatus(): UpdateStatus {
 export async function checkForGitHubReleaseUpdate(): Promise<UpdateStatus> {
   if (!publicNetworkEnabled) return getUpdateStatus();
   if (checkInFlight) return checkInFlight;
-  updateStatus = { ...updateStatus, state: "checking", currentVersion: getCurrentAppVersion() };
+  updateStatus = { ...updateStatus, state: "checking", ...getAppVersionInfo(app.getVersion()) };
   checkInFlight = fetchLatestRelease()
     .then((release) => {
-      const currentVersion = getCurrentAppVersion();
-      updateStatus = createUpdateStatusFromLatestRelease(currentVersion, release, Date.now());
+      updateStatus = createUpdateStatusFromLatestRelease(app.getVersion(), release, Date.now());
       return updateStatus;
     })
     .catch((error: unknown) => {
-      updateStatus = createUpdateErrorStatus(getCurrentAppVersion(), error, Date.now());
+      updateStatus = createUpdateErrorStatus(app.getVersion(), error, Date.now());
       return updateStatus;
     })
     .finally(() => {
@@ -60,21 +60,21 @@ export async function openUpdateReleasePage(): Promise<void> {
   await openExternalUrl(url);
 }
 
-export function createUpdateStatusFromLatestRelease(currentVersion: string, release: GitHubReleaseResponse, checkedAt: number): UpdateStatus {
-  return createParsedUpdateStatus(currentVersion, release, checkedAt, githubRepository, releasesPageUrl);
+export function createUpdateStatusFromLatestRelease(appVersion: string, release: GitHubReleaseResponse, checkedAt: number): UpdateStatus {
+  return createParsedUpdateStatus(appVersion, release, checkedAt, githubRepository, releasesPageUrl);
 }
 
-export function createUpdateErrorStatus(currentVersion: string, error: unknown, checkedAt: number): UpdateStatus {
+export function createUpdateErrorStatus(appVersion: string, error: unknown, checkedAt: number): UpdateStatus {
   return {
     state: "error",
-    currentVersion,
+    ...getAppVersionInfo(appVersion),
     checkedAt,
     error: error instanceof Error ? error.message : "Update check failed.",
   };
 }
 
 export function getCurrentAppVersion(): string {
-  return normalizeVersion(app.getVersion()) || "0.0.0";
+  return getAppVersionInfo(app.getVersion()).currentVersion;
 }
 
 function validateGitHubReleaseUrl(value: unknown): string | null {

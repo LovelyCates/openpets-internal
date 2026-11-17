@@ -279,7 +279,9 @@ credential owner OS-encrypts the complete original ciphertext document as opaque
 `credential-recovery` data before a replacement write. New recovery files cannot
 expose historical weak-key ciphertext, while unreadable active entries remain
 unchanged until explicit re-entry. Invalid credential files block writes instead
-of becoming empty stores. Neither
+of becoming empty stores. Windows credential saves retry brief locked-file
+replacements; a lasting failure preserves the old ciphertext and in-memory
+credentials and removes the temporary candidate when possible. Neither
 recovery mechanism decodes historical mock keys or writes plaintext credentials.
 
 The Electron host awaits native clipboard reads and writes before completing the
@@ -463,6 +465,11 @@ Electron's shell opener if the command fails. The SDK's existing HTTPS and
 credential validation remains in `plugin-sdk-bridge.ts`; other host link
 surfaces retain their own URL allowlists.
 
+Host-owned JSON plugin storage commits through atomic replacement. A short
+Windows file lock on the destination is retried for a bounded interval; a
+persistent write failure preserves the prior stored values and removes the
+temporary file when possible.
+
 The bridge tracks active network requests by API generation, aborts the retired
 generation during teardown, and drains those requests before host cleanup.
 
@@ -480,7 +487,12 @@ replacement generation's deliveries, pets, or motion.
 
 - `plugin-state.ts` - atomic JSON store (`userData/openpets-plugin-state.json`):
   installed plugins, enabled flag, approved permissions, config, source, broken
-  reason, update metadata.
+  reason, update metadata. On Windows, a brief lock during the final rename is
+  retried for a bounded interval. A persistent write failure leaves the prior
+  disk and in-memory state intact.
+- `state-file-rename.ts` - shared bounded Windows retry for atomic app, plugin,
+  provider-settings, remote-control, IPC discovery, and encrypted-credential
+  file replacement when a target is briefly locked.
 - `plugin-config.ts` - default/effective config validation and reference
   resolution.
 - `plugin-assets.ts` - validates/resolves declared assets (formats + size caps)
@@ -493,7 +505,9 @@ replacement generation's deliveries, pets, or motion.
 - `plugin-platform-settings.ts` - global gates for audio, voice, speech,
   microphone, quiet hours, and validated provider profiles/selections. The
   provider service resolves opaque credentials from `PluginSecretsStore` only
-  at operation start and exposes redacted role/realtime diagnostics.
+  at operation start and exposes redacted role/realtime diagnostics. Its
+  encrypted settings file uses atomic replacement with bounded Windows lock
+  retries; a failed save retains the previous disk and in-memory settings.
 - `provider-service.ts` - narrow host-owned text, transcription, speech, and
   private realtime operation boundary. It owns role snapshots and credential
   selection, adapter URLs/headers/payloads and response validation, provider

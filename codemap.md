@@ -20,6 +20,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app, a 
 - `packages/openclaw/src/index.ts`: Native OpenClaw plugin entry point and lifecycle-management exports.
 - `packages/sdk/src/index.ts`: public SDK v3 type contract for plugin authors.
 - `scripts/capture.mjs`: `pnpm capture` runner for the long-running dev screenshot session (`docs/screenshots.md`); scenarios live in `scripts/capture-scenarios/`.
+- `scripts/dev-desktop-plugin-roots.mjs`: cross-platform desktop plugin development launcher that passes absolute plugin roots using the host path delimiter.
 - `plugins/official/`: first-party SDK v3 plugin product source consumed by desktop dev mode and plugin packaging/catalog release workflows.
 - `internal/build-macos.mjs`: internal macOS-only build, packaged-runtime validation, ad-hoc signature verification, DMG/ZIP and checksum entry point.
 - `.github/workflows/internal-windows-release.yml`: manually dispatched native Windows Internal NSIS build, validation and artifact collection; paired GitHub distribution is documented in `internal/GITHUB-RELEASE.md`.

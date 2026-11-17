@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,11 +25,29 @@ import {
   type DevinHookCommandOptions,
 } from "./index.js";
 
-// macOS tmpdir() lives under /var -> /private/var; the symlink guard would
-// rightfully reject it, so work from the resolved path.
-const root = mkdtempSync(join(realpathSync(tmpdir()), "openpets-devin-"));
+// The safety checks reject linked ancestors, so use the physical temp path.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "openpets-devin-")));
 const options: DevinMcpPreviewOptions = { mcpVersion: "4.0.0", petId: "fixer" };
 let caseIndex = 0;
+
+function createDirectoryLink(target: string, link: string): void {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
+function createFileLinkIfPermitted(target: string, link: string): boolean {
+  try {
+    symlinkSync(target, link, "file");
+    return true;
+  } catch (error) {
+    const unavailableOnWindows = process.platform === "win32"
+      && error instanceof Error
+      && "code" in error
+      && ["EPERM", "EACCES", "ENOTSUP"].includes(String(error.code));
+    if (!unavailableOnWindows) throw error;
+    console.warn("[SKIP] Devin config-file symlink rejection: Windows file symlink privilege is unavailable.");
+    return false;
+  }
+}
 
 function freshConfigPath(): string {
   caseIndex += 1;
@@ -180,9 +198,19 @@ try {
     const target = freshConfigPath();
     writeFileSync(target, "{}");
     const linked = join(root, "linked-mcp_config.json");
-    symlinkSync(target, linked);
-    assert.equal(statusOf(linked).status, "invalid");
-    expectBlocked(planDevinMcpInstall(linked, options));
+    if (createFileLinkIfPermitted(target, linked)) {
+      assert.equal(statusOf(linked).status, "invalid");
+      expectBlocked(planDevinMcpInstall(linked, options));
+    }
+
+    const realDir = join(root, "real-config-dir");
+    const linkedDir = join(root, "linked-config-dir");
+    mkdirSync(realDir);
+    createDirectoryLink(realDir, linkedDir);
+    const nestedConfig = join(linkedDir, "mcp_config.json");
+    assert.equal(statusOf(nestedConfig).status, "invalid");
+    expectBlocked(planDevinMcpInstall(nestedConfig, options));
+    assert.equal(existsSync(join(realDir, "mcp_config.json")), false);
   }
 
   // A config edited after planning (e.g. by `devin mcp add`) is not clobbered.

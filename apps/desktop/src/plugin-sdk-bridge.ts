@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { OpenPetsAssistantCapability, OpenPetsAssistantCapabilityHandler } from "@open-pets/plugin-sdk";
@@ -23,6 +23,7 @@ import { createPluginUiApi } from "./plugin-sdk-ui.js";
 import { normalizeAssistantResult, PluginAssistantCapabilityError, validateAssistantCapability, validateAssistantInput, type PluginAssistantCapability, type PluginAssistantCapabilityHandle, type PluginAssistantCapabilityRegistration } from "./plugin-sdk-assistant.js";
 import type { PluginStateRecord, PluginStateStore } from "./plugin-state.js";
 import { classifyPluginError } from "./plugin-diagnostics.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 import { normalizeNetHeaders, safeHttpFetch, safeHttpStream, validateNetOptions } from "./plugin-sdk-network.js";
 import type { PluginSessionDescriptor, PluginSessionEvent, PluginSessionUpdate, SessionStopReason as PluginSessionStopReason } from "./plugin-session-descriptor.js";
 
@@ -389,8 +390,17 @@ export class JsonPluginStorageStore implements PluginStorageStore {
     mkdirSync(this.#root, { recursive: true });
     const path = this.#path(pluginId);
     const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-    renameSync(tmp, path);
+    try {
+      writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+      retryWindowsLockedRename(() => renameSync(tmp, path));
+    } catch (error) {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        // Preserve the write error; a temporary file can be removed after its lock clears.
+      }
+      throw error;
+    }
   }
 }
 

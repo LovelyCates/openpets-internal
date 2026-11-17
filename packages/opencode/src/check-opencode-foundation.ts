@@ -14,7 +14,30 @@ import { classifyOpenCodeInstructionsStatus, classifyOpenCodeMcpStatus, classify
 // system symlinks (e.g. /var on macOS), which ancestor validation must reject.
 // Validation itself never canonicalizes the paths under test.
 const root = mkdtempSync(join(realpathSync(tmpdir()), "openpets-opencode-"));
+
+function createDirectoryLink(target: string, link: string): void {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
+function canCreateFileLinks(): boolean {
+  const target = join(root, "file-link-capability-target");
+  const link = join(root, "file-link-capability-link");
+  writeFileSync(target, "probe");
+  try {
+    symlinkSync(target, link, "file");
+    rmSync(link);
+    return true;
+  } catch (error) {
+    if (process.platform === "win32" && error instanceof Error && "code" in error && ["EPERM", "EACCES", "ENOTSUP"].includes(String(error.code))) {
+      console.log("[SKIP] OpenCode file-link safety cases require Windows symbolic-link privilege.");
+      return false;
+    }
+    throw error;
+  }
+}
+
 try {
+  const fileLinksAvailable = canCreateFileLinks();
   const project = join(root, "project");
   mkdirSync(project);
   const paths = getProjectOpenCodeConfigPaths(project);
@@ -120,15 +143,17 @@ try {
   assert.equal("ok" in outsidePlan ? outsidePlan.ok : true, false);
   const linkTarget = join(root, "link-target");
   mkdirSync(linkTarget);
-  symlinkSync(linkTarget, join(root, "link-parent"));
+  createDirectoryLink(linkTarget, join(root, "link-parent"));
   const linkParentPlan = planOpenCodeConfigWrite(root, join(root, "link-parent", "opencode.jsonc"), "{}\n");
   assert.equal("ok" in linkParentPlan ? linkParentPlan.ok : true, false);
-  const linkedFile = join(root, "linked-file.jsonc");
-  writeFileSync(join(root, "real-file.jsonc"), "{}\n");
-  symlinkSync(join(root, "real-file.jsonc"), linkedFile);
-  const linkedFilePlan = planOpenCodeConfigWrite(root, linkedFile, "{}\n");
-  assert.equal("ok" in linkedFilePlan ? linkedFilePlan.ok : true, false);
-  symlinkSync(project, join(root, "project-link"));
+  if (fileLinksAvailable) {
+    const linkedFile = join(root, "linked-file.jsonc");
+    writeFileSync(join(root, "real-file.jsonc"), "{}\n");
+    symlinkSync(join(root, "real-file.jsonc"), linkedFile, "file");
+    const linkedFilePlan = planOpenCodeConfigWrite(root, linkedFile, "{}\n");
+    assert.equal("ok" in linkedFilePlan ? linkedFilePlan.ok : true, false);
+  }
+  createDirectoryLink(project, join(root, "project-link"));
   assert.throws(() => getProjectOpenCodeConfigPaths(join(root, "project-link")));
 
   const globalDir = join(root, "global-missing");
@@ -270,104 +295,108 @@ try {
   const globalOutside = join(root, "global-outside");
   mkdirSync(globalOutside);
   writeFileSync(join(globalOutside, "opencode.jsonc"), "{}\n", "utf8");
-  symlinkSync(globalOutside, globalSymlink);
+  createDirectoryLink(globalOutside, globalSymlink);
   assert.equal(doctorOpenCodeGlobalSetup(globalSymlink).status, "error");
 
-  // Issue #188: symlinked global opencode.json must be rejected with an
-  // actionable error that names the path and target without mutating it.
-  const symlinkFileDir = join(root, "global-symlink-file");
-  const symlinkFileTargetDir = join(root, "global-symlink-file-target");
-  mkdirSync(symlinkFileDir);
-  mkdirSync(symlinkFileTargetDir);
-  const symlinkTargetFile = join(symlinkFileTargetDir, "opencode.json");
-  writeFileSync(symlinkTargetFile, JSON.stringify({ theme: "dotfiles" }, null, 2), "utf8");
-  const symlinkedConfig = join(symlinkFileDir, "opencode.json");
-  symlinkSync(symlinkTargetFile, symlinkedConfig);
-  const targetBefore = readFileSync(symlinkTargetFile, "utf8");
-  let symlinkFileError = "";
-  try {
-    prepareOpenCodeGlobalSetup({ configDir: symlinkFileDir, petId: "fixer", cliVersion: "0.0.0" });
-  } catch (error) {
-    symlinkFileError = error instanceof Error ? error.message : String(error);
+  if (fileLinksAvailable) {
+    // Issue #188: symlinked global opencode.json must be rejected with an
+    // actionable error that names the path and target without mutating it.
+    const symlinkFileDir = join(root, "global-symlink-file");
+    const symlinkFileTargetDir = join(root, "global-symlink-file-target");
+    mkdirSync(symlinkFileDir);
+    mkdirSync(symlinkFileTargetDir);
+    const symlinkTargetFile = join(symlinkFileTargetDir, "opencode.json");
+    writeFileSync(symlinkTargetFile, JSON.stringify({ theme: "dotfiles" }, null, 2), "utf8");
+    const symlinkedConfig = join(symlinkFileDir, "opencode.json");
+    symlinkSync(symlinkTargetFile, symlinkedConfig, "file");
+    const targetBefore = readFileSync(symlinkTargetFile, "utf8");
+    let symlinkFileError = "";
+    try {
+      prepareOpenCodeGlobalSetup({ configDir: symlinkFileDir, petId: "fixer", cliVersion: "0.0.0" });
+    } catch (error) {
+      symlinkFileError = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(symlinkFileError, new RegExp(escapeCheckRegExp(symlinkedConfig)));
+    assert.match(symlinkFileError, /symlink/);
+    assert.match(symlinkFileError, new RegExp(escapeCheckRegExp(symlinkTargetFile)));
+    assert.match(symlinkFileError, /was not modified/);
+    assert.match(symlinkFileError, /atomic-write/);
+    assert.match(symlinkFileError, /use project-local OpenCode setup/, "global errors suggest project-local setup as a fallback");
+    assert.equal(readFileSync(symlinkTargetFile, "utf8"), targetBefore, "symlink target must remain untouched");
+    assert.equal(readFileSync(symlinkedConfig, "utf8"), targetBefore);
+    const symlinkFileDoctor = doctorOpenCodeGlobalSetup(symlinkFileDir);
+    assert.equal(symlinkFileDoctor.status, "error");
+    assert.match(symlinkFileDoctor.message, new RegExp(escapeCheckRegExp(symlinkedConfig)));
+    assert.match(symlinkFileDoctor.message, /symlink/);
+    assert.equal(readFileSync(symlinkTargetFile, "utf8"), targetBefore, "doctor must remain read-only");
+    assert.equal(hasCheckEntry(join(symlinkFileDir, "openpets.md")), false, "doctor must not create instruction files");
   }
-  assert.match(symlinkFileError, new RegExp(escapeCheckRegExp(symlinkedConfig)));
-  assert.match(symlinkFileError, /symlink/);
-  assert.match(symlinkFileError, new RegExp(escapeCheckRegExp(symlinkTargetFile)));
-  assert.match(symlinkFileError, /was not modified/);
-  assert.match(symlinkFileError, /atomic-write/);
-  assert.match(symlinkFileError, /use project-local OpenCode setup/, "global errors suggest project-local setup as a fallback");
-  assert.equal(readFileSync(symlinkTargetFile, "utf8"), targetBefore, "symlink target must remain untouched");
-  assert.equal(readFileSync(symlinkedConfig, "utf8"), targetBefore);
-  const symlinkFileDoctor = doctorOpenCodeGlobalSetup(symlinkFileDir);
-  assert.equal(symlinkFileDoctor.status, "error");
-  assert.match(symlinkFileDoctor.message, new RegExp(escapeCheckRegExp(symlinkedConfig)));
-  assert.match(symlinkFileDoctor.message, /symlink/);
-  assert.equal(readFileSync(symlinkTargetFile, "utf8"), targetBefore, "doctor must remain read-only");
-  assert.equal(hasCheckEntry(join(symlinkFileDir, "openpets.md")), false, "doctor must not create instruction files");
 
-  // Dangling symlinks must be treated as existing links, never as missing
-  // paths that setup may replace via atomic rename.
-  const danglingGlobalDir = join(root, "global-dangling-config");
-  mkdirSync(danglingGlobalDir);
-  const danglingTarget = join(danglingGlobalDir, "missing-target.json");
-  const danglingConfig = join(danglingGlobalDir, "opencode.json");
-  symlinkSync(danglingTarget, danglingConfig);
-  let danglingConfigError = "";
-  try {
-    prepareOpenCodeGlobalSetup({ configDir: danglingGlobalDir, petId: "fixer", cliVersion: "0.0.0" });
-  } catch (error) {
-    danglingConfigError = error instanceof Error ? error.message : String(error);
-  }
-  assert.match(danglingConfigError, new RegExp(escapeCheckRegExp(danglingConfig)));
-  assert.match(danglingConfigError, /symlink/);
-  assert.match(danglingConfigError, /was not modified/);
-  assert.match(danglingConfigError, new RegExp(escapeCheckRegExp(danglingTarget)));
-  assert.match(danglingConfigError, /use project-local OpenCode setup/, "global errors suggest project-local setup as a fallback");
-  assert.equal(lstatSync(danglingConfig).isSymbolicLink(), true, "dangling symlink itself must not be replaced");
-  assert.equal(hasCheckEntry(danglingTarget), false, "no contents may be created through the dangling link");
-  const danglingDoctor = doctorOpenCodeGlobalSetup(danglingGlobalDir);
-  assert.equal(danglingDoctor.status, "error");
-  assert.match(danglingDoctor.message, new RegExp(escapeCheckRegExp(danglingConfig)));
-  assert.equal(lstatSync(danglingConfig).isSymbolicLink(), true, "doctor must not replace the dangling symlink");
-  assert.equal(hasCheckEntry(join(danglingGlobalDir, "openpets.md")), false, "doctor must remain read-only");
+  if (fileLinksAvailable) {
+    // Dangling symlinks must be treated as existing links, never as missing
+    // paths that setup may replace via atomic rename.
+    const danglingGlobalDir = join(root, "global-dangling-config");
+    mkdirSync(danglingGlobalDir);
+    const danglingTarget = join(danglingGlobalDir, "missing-target.json");
+    const danglingConfig = join(danglingGlobalDir, "opencode.json");
+    symlinkSync(danglingTarget, danglingConfig, "file");
+    let danglingConfigError = "";
+    try {
+      prepareOpenCodeGlobalSetup({ configDir: danglingGlobalDir, petId: "fixer", cliVersion: "0.0.0" });
+    } catch (error) {
+      danglingConfigError = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(danglingConfigError, new RegExp(escapeCheckRegExp(danglingConfig)));
+    assert.match(danglingConfigError, /symlink/);
+    assert.match(danglingConfigError, /was not modified/);
+    assert.match(danglingConfigError, new RegExp(escapeCheckRegExp(danglingTarget)));
+    assert.match(danglingConfigError, /use project-local OpenCode setup/, "global errors suggest project-local setup as a fallback");
+    assert.equal(lstatSync(danglingConfig).isSymbolicLink(), true, "dangling symlink itself must not be replaced");
+    assert.equal(hasCheckEntry(danglingTarget), false, "no contents may be created through the dangling link");
+    const danglingDoctor = doctorOpenCodeGlobalSetup(danglingGlobalDir);
+    assert.equal(danglingDoctor.status, "error");
+    assert.match(danglingDoctor.message, new RegExp(escapeCheckRegExp(danglingConfig)));
+    assert.equal(lstatSync(danglingConfig).isSymbolicLink(), true, "doctor must not replace the dangling symlink");
+    assert.equal(hasCheckEntry(join(danglingGlobalDir, "openpets.md")), false, "doctor must remain read-only");
 
-  // Relative dangling links report an absolute resolved target for actionability.
-  const relativeGlobalDir = join(root, "global-relative-dangling");
-  mkdirSync(relativeGlobalDir);
-  const relativeConfig = join(relativeGlobalDir, "opencode.jsonc");
-  symlinkSync(join("..", "elsewhere", "opencode.jsonc"), relativeConfig);
-  let relativeError = "";
-  try {
-    prepareOpenCodeGlobalSetup({ configDir: relativeGlobalDir, petId: "fixer", cliVersion: "0.0.0" });
-  } catch (error) {
-    relativeError = error instanceof Error ? error.message : String(error);
-  }
-  assert.match(relativeError, /symlink/);
-  assert.match(relativeError, new RegExp(escapeCheckRegExp(join(dirname(relativeConfig), join("..", "elsewhere", "opencode.jsonc")))));
+    // Relative dangling links report an absolute resolved target for actionability.
+    const relativeGlobalDir = join(root, "global-relative-dangling");
+    mkdirSync(relativeGlobalDir);
+    const relativeConfig = join(relativeGlobalDir, "opencode.jsonc");
+    symlinkSync(join("..", "elsewhere", "opencode.jsonc"), relativeConfig, "file");
+    let relativeError = "";
+    try {
+      prepareOpenCodeGlobalSetup({ configDir: relativeGlobalDir, petId: "fixer", cliVersion: "0.0.0" });
+    } catch (error) {
+      relativeError = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(relativeError, /symlink/);
+    assert.match(relativeError, new RegExp(escapeCheckRegExp(join(dirname(relativeConfig), join("..", "elsewhere", "opencode.jsonc")))));
 
-  // Dangling instruction-file symlinks are rejected without replacement.
-  const danglingInstructionDir = join(root, "global-dangling-instruction");
-  mkdirSync(danglingInstructionDir);
-  writeFileSync(join(danglingInstructionDir, "opencode.jsonc"), "{}\n", "utf8");
-  const danglingInstructionTarget = join(danglingInstructionDir, "missing-instruction.md");
-  const danglingInstruction = join(danglingInstructionDir, "openpets.md");
-  symlinkSync(danglingInstructionTarget, danglingInstruction);
-  let danglingInstructionError = "";
-  try {
-    prepareOpenCodeGlobalSetup({ configDir: danglingInstructionDir, petId: "fixer", cliVersion: "0.0.0" });
-  } catch (error) {
-    danglingInstructionError = error instanceof Error ? error.message : String(error);
+    // Dangling instruction-file symlinks are rejected without replacement.
+    const danglingInstructionDir = join(root, "global-dangling-instruction");
+    mkdirSync(danglingInstructionDir);
+    writeFileSync(join(danglingInstructionDir, "opencode.jsonc"), "{}\n", "utf8");
+    const danglingInstructionTarget = join(danglingInstructionDir, "missing-instruction.md");
+    const danglingInstruction = join(danglingInstructionDir, "openpets.md");
+    symlinkSync(danglingInstructionTarget, danglingInstruction, "file");
+    let danglingInstructionError = "";
+    try {
+      prepareOpenCodeGlobalSetup({ configDir: danglingInstructionDir, petId: "fixer", cliVersion: "0.0.0" });
+    } catch (error) {
+      danglingInstructionError = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(danglingInstructionError, new RegExp(escapeCheckRegExp(danglingInstruction)));
+    assert.match(danglingInstructionError, /symlink/);
+    assert.equal(lstatSync(danglingInstruction).isSymbolicLink(), true, "dangling instruction symlink must not be replaced");
+    assert.equal(hasCheckEntry(danglingInstructionTarget), false, "no instruction contents may be created through the link");
   }
-  assert.match(danglingInstructionError, new RegExp(escapeCheckRegExp(danglingInstruction)));
-  assert.match(danglingInstructionError, /symlink/);
-  assert.equal(lstatSync(danglingInstruction).isSymbolicLink(), true, "dangling instruction symlink must not be replaced");
-  assert.equal(hasCheckEntry(danglingInstructionTarget), false, "no instruction contents may be created through the link");
 
   // A dangling config directory symlink is reported as a symlink, not a
   // missing directory, by both setup and doctor.
   const danglingDirTarget = join(root, "missing-config-target");
   const danglingDirLink = join(root, "global-dangling-dir");
-  symlinkSync(danglingDirTarget, danglingDirLink);
+  createDirectoryLink(danglingDirTarget, danglingDirLink);
   let danglingDirError = "";
   try {
     prepareOpenCodeGlobalSetup({ configDir: danglingDirLink, petId: "fixer", cliVersion: "0.0.0" });
@@ -387,7 +416,7 @@ try {
   // offending ancestor instead of a raw ENOENT from following the link.
   const danglingAncestorTarget = join(root, "missing-ancestor-target");
   const danglingAncestorLink = join(root, "ancestor-link");
-  symlinkSync(danglingAncestorTarget, danglingAncestorLink);
+  createDirectoryLink(danglingAncestorTarget, danglingAncestorLink);
   const nestedConfigDir = join(danglingAncestorLink, "opencode");
   let nestedAncestorError = "";
   try {
@@ -407,7 +436,7 @@ try {
   const ancestorRealDir = join(root, "ancestor-real");
   mkdirSync(ancestorRealDir);
   const ancestorLink = join(root, "ancestor-link-valid");
-  symlinkSync(ancestorRealDir, ancestorLink);
+  createDirectoryLink(ancestorRealDir, ancestorLink);
   const nestedValidConfigDir = join(ancestorLink, "opencode");
   let ancestorValidError = "";
   try {
@@ -433,7 +462,7 @@ try {
   // ancestor path and its fallback target, not a raw ENOENT.
   const ancestorDanglingTarget = join(root, "missing-ancestor-dir");
   const ancestorDanglingLink = join(root, "ancestor-link-dangling");
-  symlinkSync(ancestorDanglingTarget, ancestorDanglingLink);
+  createDirectoryLink(ancestorDanglingTarget, ancestorDanglingLink);
   const nestedDanglingConfigDir = join(ancestorDanglingLink, "opencode");
   let ancestorDanglingError = "";
   try {
@@ -453,20 +482,22 @@ try {
   assert.match(ancestorDanglingDoctor.message, new RegExp(escapeCheckRegExp(ancestorDanglingLink)));
   assert.equal(hasCheckEntry(join(nestedDanglingConfigDir, "openpets.md")), false, "doctor must remain read-only");
 
-  // Dangling project config symlinks are rejected at plan time.
-  const danglingProjectDir = join(root, "project-dangling");
-  mkdirSync(danglingProjectDir);
-  const danglingProjectTarget = join(danglingProjectDir, "missing.jsonc");
-  const danglingProjectConfig = join(danglingProjectDir, "opencode.jsonc");
-  symlinkSync(danglingProjectTarget, danglingProjectConfig);
-  const danglingProjectPlan = planOpenCodeConfigWrite(danglingProjectDir, danglingProjectConfig, "{}\n");
-  assert.equal("ok" in danglingProjectPlan && !danglingProjectPlan.ok, true);
-  const danglingProjectMessage = "ok" in danglingProjectPlan && !danglingProjectPlan.ok ? danglingProjectPlan.message : "";
-  assert.match(danglingProjectMessage, new RegExp(escapeCheckRegExp(danglingProjectConfig)));
-  assert.match(danglingProjectMessage, /symlink/);
-  assert.doesNotMatch(danglingProjectMessage, /use project-local/, "project errors must not suggest switching to project-local setup");
-  assert.equal(lstatSync(danglingProjectConfig).isSymbolicLink(), true, "dangling project symlink must not be replaced");
-  assert.equal(hasCheckEntry(danglingProjectTarget), false);
+  if (fileLinksAvailable) {
+    // Dangling project config symlinks are rejected at plan time.
+    const danglingProjectDir = join(root, "project-dangling");
+    mkdirSync(danglingProjectDir);
+    const danglingProjectTarget = join(danglingProjectDir, "missing.jsonc");
+    const danglingProjectConfig = join(danglingProjectDir, "opencode.jsonc");
+    symlinkSync(danglingProjectTarget, danglingProjectConfig, "file");
+    const danglingProjectPlan = planOpenCodeConfigWrite(danglingProjectDir, danglingProjectConfig, "{}\n");
+    assert.equal("ok" in danglingProjectPlan && !danglingProjectPlan.ok, true);
+    const danglingProjectMessage = "ok" in danglingProjectPlan && !danglingProjectPlan.ok ? danglingProjectPlan.message : "";
+    assert.match(danglingProjectMessage, new RegExp(escapeCheckRegExp(danglingProjectConfig)));
+    assert.match(danglingProjectMessage, /symlink/);
+    assert.doesNotMatch(danglingProjectMessage, /use project-local/, "project errors must not suggest switching to project-local setup");
+    assert.equal(lstatSync(danglingProjectConfig).isSymbolicLink(), true, "dangling project symlink must not be replaced");
+    assert.equal(hasCheckEntry(danglingProjectTarget), false);
+  }
 
   // A dangling parent directory symlink in a project is recognized as a
   // symlink — not a missing directory — during config planning.
@@ -474,7 +505,7 @@ try {
   mkdirSync(danglingParentProject);
   const danglingParentTarget = join(danglingParentProject, "missing-dir");
   const danglingParentLink = join(danglingParentProject, ".opencode");
-  symlinkSync(danglingParentTarget, danglingParentLink);
+  createDirectoryLink(danglingParentTarget, danglingParentLink);
   const danglingParentPlan = planOpenCodeConfigWrite(danglingParentProject, join(danglingParentLink, "opencode.jsonc"), "{}\n");
   assert.equal("ok" in danglingParentPlan && !danglingParentPlan.ok, true);
   const danglingParentPlanMessage = "ok" in danglingParentPlan && !danglingParentPlan.ok ? danglingParentPlan.message : "";

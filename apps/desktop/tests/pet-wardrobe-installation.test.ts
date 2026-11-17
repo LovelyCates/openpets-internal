@@ -77,8 +77,9 @@ register(`data:text/javascript,${encodeURIComponent(`
   }
 `)}`, import.meta.url);
 
-const originalHome = process.env.HOME;
-process.env.HOME = fakeHome;
+const homeEnvironmentVariable = process.platform === "win32" ? "USERPROFILE" : "HOME";
+const originalHome = process.env[homeEnvironmentVariable];
+process.env[homeEnvironmentVariable] = fakeHome;
 const originalFetch = globalThis.fetch;
 let releaseStartupInstallLock = (): void => {};
 
@@ -457,8 +458,8 @@ try {
 } finally {
   releaseStartupInstallLock();
   globalThis.fetch = originalFetch;
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
+  if (originalHome === undefined) delete process.env[homeEnvironmentVariable];
+  else process.env[homeEnvironmentVariable] = originalHome;
   rmSync(testRoot, { recursive: true, force: true });
 }
 

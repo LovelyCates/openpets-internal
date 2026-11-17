@@ -693,8 +693,11 @@ truncating a complete response.
 
 Pairing creates a named client and a high-entropy token. The plaintext token is
 returned only by the local pairing/rotation API; persistence stores only its
-SHA-256 verifier plus client metadata and activity timestamps. The main-process
-IPC interface (`openpets:remote-*`) supports Control Center management: configuration,
+SHA-256 verifier plus client metadata and activity timestamps. Its state file uses
+atomic temp+rename writes, with bounded retries for brief Windows sharing
+violations. A failed save keeps the previous disk and in-memory client list and
+removes its temporary file. The main-process IPC interface (`openpets:remote-*`)
+supports Control Center management: configuration,
 pairing, listing, rotation, and revocation. This Internal edition hides the
 remote-management page and its pairing/token dialogs. The existing management
 contract retains listener configuration, explicit IPv4 bind validation, private
@@ -722,7 +725,9 @@ installed.
 ### App state
 
 `app-state.ts` persists a versioned JSON document under
-`userData/openpets-state.json` using atomic temp-write + rename. It holds
+`userData/openpets-state.json` using atomic temp-write + rename. Windows briefly
+retries a locked-target rename before failing the save; a failed replacement
+keeps the previous on-disk and in-memory state. It holds
 installed pets, the default-pet config, reaction→animation overrides, onboarding
 state, locale preference, the pet pool preference (ordered pet list +
 `petPoolEnabled` toggle), the pinned-pet preference (ordered `pinnedPets` list plus the
@@ -982,6 +987,9 @@ messages and disables history for that session. New turns remain usable in memor
 and are not saved to disk while history is unavailable. History management reports
 this status clearly; it never silently shows an empty archive or permits a misleading
 successful erase. No plaintext fallback or plaintext quarantine copy is created.
+A brief Windows lock during archive replacement is retried for a bounded
+interval. If it persists, the previous encrypted file and in-memory messages
+remain available; a failed temporary file is cleaned up when possible.
 A narrow Control Center bridge permits only listing,
 deleting one archived message, or clearing the archive; its local-history panel
 is separate from the active session and updates after a terminal turn or owner
@@ -1045,7 +1053,9 @@ reaction speech, with English fallback. See [Internationalization](/i18n).
 ### Updates
 
 `update-checker.ts` polls GitHub releases and surfaces update status to the tray
-and Dashboard; `update-version.ts` does version parsing/comparison.
+and Control Center. The status keeps the full `app.getVersion()` for display,
+including an Internal prerelease suffix, while `update-version.ts` normalizes
+versions for release comparison and other version-based decisions.
 
 ### Logging
 

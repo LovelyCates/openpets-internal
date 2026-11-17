@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import { readPetActivitySpritesheet, validatePetActivitySpritesheet, validatePet
 import { maxPetActivitySpritesheetBytes, validatePetActivities } from "@open-pets/pet-format/activities";
 import { codexV1Fixture } from "./codex-pet-fixtures.js";
 import { createPetActivityEmptyFramePixels, createPetActivityPixels, petActivityFixture } from "./pet-activity-fixtures.js";
+import { createDirectoryLink, tryCreateFileLink } from "./symlink-fixtures.js";
 
 const activity = validatePetActivities([petActivityFixture])[0]!;
 const root = await mkdtemp(join(tmpdir(), "openpets-activity-files-"));
@@ -99,10 +100,12 @@ try {
   await rm(join(source, "activities", "extra.webp"));
   await rm(join(source, activity.spritesheetPath));
   await assert.rejects(() => validatePetAtlases(source, metadata, 100 * 1024 * 1024), "missing declarations reject before copying");
-  await symlink(join(destination, activity.spritesheetPath), join(source, activity.spritesheetPath));
-  await assert.rejects(() => readPetActivitySpritesheet(source, activity), "activity files cannot be symlinks");
+  if (await tryCreateFileLink(join(destination, activity.spritesheetPath), join(source, activity.spritesheetPath), "pet activity rejects a linked spritesheet")) {
+    await assert.rejects(() => readPetActivitySpritesheet(source, activity), "activity files cannot be symlinks");
+    await rm(join(source, activity.spritesheetPath));
+  }
   await rm(join(source, "activities"), { recursive: true });
-  await symlink(join(destination, "activities"), join(source, "activities"));
+  await createDirectoryLink(join(destination, "activities"), join(source, "activities"));
   await assert.rejects(() => readPetActivitySpritesheet(source, activity), "activity directory cannot redirect outside the package");
   await rm(join(source, "activities"));
   await mkdir(join(source, "activities"));

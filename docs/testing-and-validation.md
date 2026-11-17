@@ -42,15 +42,24 @@ dist checks. The dist-check step wipes `dist/` and rebuilds the full app
   metadata preservation, catalog remote transport/cache behavior and V2/fixture
   fallback behavior, plugin bridge/gateway guards, and `voice-lifecycle.test.ts` for live
   microphone-track accounting, capture cancellation/cleanup races, separate timeouts,
-  empty transcripts, and shutdown behavior. `remote-control.test.ts` covers
+  empty transcripts, and shutdown behavior. `remote-control-state-file.test.ts`
+  verifies brief Windows rename contention and failed-save disk/memory atomicity;
+  `remote-control.test.ts` covers
   secure opt-in configuration, verifier-only persistence, authentication,
   scopes, malformed/oversized requests, rate limiting, rotation, revocation,
   canonical IPv4/CGNAT boundaries, peer normalization, socket caps/deadlines,
   away-pet side-effect suppression, and listener shutdown. Compiled to
   `.test-dist/`.
+- Filesystem safety fixtures use directory junctions on Windows and directory
+  symlinks elsewhere. Windows hosts without file-symlink permission report a
+  `[SKIP]` for each affected file-link security scenario; the rest of that test
+  file, including directory-link and non-link behavior, still runs. A Windows
+  host with Developer Mode or symlink privilege runs those scenarios as well.
+  The OpenCode package foundation checks follow the same rule.
 - Provider-foundation behavior is covered by `provider-profiles.test.ts`,
    `provider-presets-and-roles.test.ts`, `provider-migration.test.ts`,
-   `provider-credential-deletion.test.ts`, `provider-service.test.ts`, and
+   `provider-credential-deletion.test.ts`, `provider-settings-file.test.ts`,
+   `provider-service.test.ts`, and
    `provider-configuration-test.test.ts`,
   `voice-assistant-host-core.test.ts`,
   `voice-realtime-assistant.test.ts`, `text-model-client.test.ts`, and

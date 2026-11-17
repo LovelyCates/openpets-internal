@@ -19,11 +19,14 @@
 
 OpenCode 1.x 与 2.x 使用不同插件入口，详见 `packages/opencode/V1_COMPAT.md`。1.x 使用 `v1-package/index.js` 或内部包 `@open-pets-internal/opencode-v1`；2.x 使用 `v2-package/index.js` 或内部包 `@open-pets-internal/opencode-v2`。推荐运行 `Install-OpenCodeIntegration.ps1` 将相应单文件包复制到项目 `.opencode/plugins/`。两个版本的 MCP 命令都应指向已部署、带齐运行时依赖的本地 CLI 绝对路径，不使用公开 `npx` 下载命令；单独复制 `packages/cli/dist/index.js` 不可运行。实际内网 OpenCode 版本仍需做事件、插件加载及 MCP 验证。
 
+验证 OpenCode 2.3.0 时，冷启动的 `opencode mcp list --standalone` 或 `opencode plugin list --standalone` 可能短暂返回空列表；应等待常驻服务启动并复查其连接与插件状态，避免将启动竞态误判为安装失败。
+
 ## 文档与脚本
 
 - [Windows 构建与发布流程](BUILD-WINDOWS.md)
 - [macOS 构建与本地集成](BUILD-MACOS.md)
 - [Win / Mac 同版本 GitHub Release 分发](GITHUB-RELEASE.md)
+- [4.1.0-internal.15 Windows 本机适配与独立预发布](RELEASE-4.1.0-internal.15-windows.md)
 - [4.1.0-internal.6 macOS arm64 本机构建记录](RELEASE-4.1.0-internal.6-macos.md)
 - [4.1.0-internal.7 大库试用与 macOS 构建记录](RELEASE-4.1.0-internal.7-macos.md)
 - [4.1.0-internal.8 OpenCode 脚下常驻状态条](RELEASE-4.1.0-internal.8-macos.md)
@@ -39,7 +42,8 @@ OpenCode 1.x 与 2.x 使用不同插件入口，详见 `packages/opencode/V1_COM
 - `Test-WindowsBuild.ps1`：只读预检，检查源码基线、工具版本、内部镜像、缓存及原生二进制。默认失败关闭，不会安装依赖、构建、发起 HTTP 下载或修改全局配置。
 - `Prepare-WindowsCodeSignCache.ps1`：用固定哈希的本地归档预置 Windows 资源编辑和签名工具缓存，避免旧工具包中的 macOS 符号链接阻断无管理员权限的构建账号；不下载或覆盖未知缓存。
 - `Install-OpenCodeIntegration.ps1`：将已构建的 V1/V2 单文件插件和 MIT LICENSE 安装到指定项目，并写入指向本地 CLI 的 MCP 配置。只更新本工具以前管理且内容未改动的文件；更新前保留备份。已有未知配置时拒绝覆盖并给出手工合并片段。
-- `install-opencode-integration.mjs`：macOS 可用的 Node 本地安装入口，保留 V1/V2 配置、SHA-256 安装记录、备份与拒绝覆盖规则。
+- `install-opencode-integration.mjs`：Windows/macOS 可用的 Node 本地安装入口，保留 V1/V2 配置、SHA-256 安装记录、备份与拒绝覆盖规则。
+- `install-opencode-integration.test.mjs`：运行 `node --test internal/install-opencode-integration.test.mjs` 验证安装与拒绝覆盖行为。测试在物理临时目录创建夹具，Windows 目录链接使用 junction；无文件符号链接权限时仅跳过相应安全场景，测试输出会说明原因。
 - `build-macos.mjs`：本机构建、验证并生成内部 macOS `.app`、DMG、ZIP 和校验和，不执行公开发布。
 - `validate-macos-runtime.mjs`：验证打包后 macOS 窗口 helper 的架构/执行位，并在打包 Electron 的 Node 模式下加载运行时和验证 Sharp 图像处理。
 - `validate-windows-runtime.mjs`：在原生 Windows x64 下验证打包 PE，使用打包 Electron 加载窗口原生 addon 并验证 Sharp 编解码，不枚举用户窗口。

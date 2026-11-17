@@ -290,6 +290,8 @@ export const zhHant: Partial<Messages> = {
   "pets.search.reset": "顯示全部寵物",
   "pets.search.empty": "沒有匹配的寵物",
   "pets.search.emptyHint": "試試減少關鍵詞，或清除部分篩選條件。",
+  "pets.activities.empty": "目前沒有具備獨立閒置活動的寵物",
+  "pets.activities.emptyHint": "此篩選只統計寵物套件宣告的獨立活動。經典 V1 寵物待機時仍可揮手、跳躍。匯入包含活動素材的完整寵物套件後，就會顯示在這裡。",
   "pets.codex.description": "這裡展示標記為 Codex 來源的導入寵物（含 codex-pets.net）及可發現的本地 Codex 包，不會自動掃描官方帳號寵物庫。",
   "pets.codex.empty": "還沒有可用的 Codex 來源寵物",
   "pets.favorites.empty": "還沒有收藏的寵物",

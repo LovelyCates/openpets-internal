@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { canonicalizePluginPermissions, type KnownPluginRuntime, type PluginPermission } from "./plugin-manifest.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 
 export const openPetsPluginStateFileName = "openpets-plugin-state.json";
 
@@ -417,8 +418,17 @@ function isApprovalToken(value: unknown): value is string {
 function writePluginStateToDisk(path: string, state: OpenPetsPluginStateV1): void {
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  renameSync(tempPath, path);
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    retryWindowsLockedRename(() => renameSync(tempPath, path));
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Preserve the write error; a locked temporary file can be overwritten on the next save.
+    }
+    throw error;
+  }
 }
 
 function cloneState(state: OpenPetsPluginStateV1): OpenPetsPluginStateV1 {

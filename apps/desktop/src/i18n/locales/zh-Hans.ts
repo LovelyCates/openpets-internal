@@ -290,6 +290,8 @@ export const zhHans: Partial<Messages> = {
   "pets.search.reset": "显示全部宠物",
   "pets.search.empty": "没有匹配的宠物",
   "pets.search.emptyHint": "试试减少关键词，或清除部分筛选条件。",
+  "pets.activities.empty": "暂无带独立闲置活动的宠物",
+  "pets.activities.emptyHint": "此筛选只统计宠物包声明的独立活动。经典 V1 宠物待机时仍可挥手、跳跃。导入包含活动素材的完整宠物包后，就会显示在这里。",
   "pets.codex.description": "这里展示标记为 Codex 来源的导入宠物（含 codex-pets.net）及可发现的本地 Codex 包，不会自动扫描官方账号宠物库。",
   "pets.codex.empty": "还没有可用的 Codex 来源宠物",
   "pets.favorites.empty": "还没有收藏的宠物",

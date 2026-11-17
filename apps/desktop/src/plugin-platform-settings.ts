@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { decryptPrivateDocument, encryptPrivateDocument, requirePrivateStorageEncryption, type PrivateStorageEncryption } from "./private-storage-encryption.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 import {
   defaultProviderAuth,
   providerCatalog,
@@ -603,9 +604,14 @@ function persistSettingsFile(path: string, contents: string): void {
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporaryPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    renameSync(temporaryPath, path);
-  } finally {
-    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    retryWindowsLockedRename(() => renameSync(temporaryPath, path));
+  } catch (error) {
+    try {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the write error; cleanup can be retried after a transient lock clears.
+    }
+    throw error;
   }
 }
 function isRecord(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }

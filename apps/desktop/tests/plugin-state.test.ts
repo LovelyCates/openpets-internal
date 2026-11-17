@@ -1,9 +1,39 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { register } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { initializePluginState, openPetsPluginStateFileName, PluginStateStore, type PluginStateRecord } from "../src/plugin-state.js";
+import type { PluginStateRecord } from "../src/plugin-state.js";
+
+const testGlobal = globalThis as typeof globalThis & {
+  __openPetsPluginStateTest: { renameFailuresRemaining: number };
+};
+testGlobal.__openPetsPluginStateTest = { renameFailuresRemaining: 0 };
+const fsMock = `data:text/javascript,${encodeURIComponent(`
+  export * from "node:fs";
+  import { renameSync as realRenameSync } from "node:fs";
+  export function renameSync(from, to) {
+    const test = globalThis.__openPetsPluginStateTest;
+    if (String(to).endsWith("openpets-plugin-state.json") && test.renameFailuresRemaining > 0) {
+      test.renameFailuresRemaining -= 1;
+      const error = new Error("Plugin state file is temporarily locked.");
+      error.code = "EPERM";
+      throw error;
+    }
+    return realRenameSync(from, to);
+  }
+`)}`;
+register(`data:text/javascript,${encodeURIComponent(`
+  export async function resolve(specifier, context, nextResolve) {
+    if (specifier === "node:fs" && context.parentURL?.endsWith("/src/plugin-state.js")) {
+      return { url: ${JSON.stringify(fsMock)}, shortCircuit: true };
+    }
+    return nextResolve(specifier, context);
+  }
+`)}`, import.meta.url);
+
+const { initializePluginState, openPetsPluginStateFileName, PluginStateStore } = await import("../src/plugin-state.js");
 
 const missingDir = tempDir();
 const missingStore = initializePluginState({ userDataPath: missingDir });
@@ -128,6 +158,21 @@ orderingStore.upsertRecord(makeRecord({ id: "order-a", approvedPermissions: ["ti
 orderingStore.upsertRecord(makeRecord({ id: "order-b", approvedPermissions: ["pet:reaction", "pet:speak", "timer"] }));
 assert.deepEqual(orderingStore.getRecord("order-a")?.approvedPermissions, ["pet:speak", "pet:reaction", "timer"]);
 assert.deepEqual(orderingStore.getRecord("order-b")?.approvedPermissions, ["pet:speak", "pet:reaction", "timer"]);
+
+const retryPath = join(tempDir(), openPetsPluginStateFileName);
+const retryStore = initializePluginState({ statePath: retryPath });
+retryStore.upsertRecord(makeRecord({ id: "persist-check" }));
+if (process.platform === "win32") testGlobal.__openPetsPluginStateTest.renameFailuresRemaining = 2;
+retryStore.setEnabled("persist-check", false);
+const committed = readFileSync(retryPath);
+assert.equal(retryStore.getRecord("persist-check")?.enabled, false);
+assert.equal((JSON.parse(committed.toString("utf8")) as { plugins: Record<string, PluginStateRecord> }).plugins["persist-check"].enabled, false);
+
+testGlobal.__openPetsPluginStateTest.renameFailuresRemaining = process.platform === "win32" ? 6 : 1;
+assert.throws(() => retryStore.setEnabled("persist-check", true), { code: "EPERM" });
+assert.deepEqual(readFileSync(retryPath), committed);
+assert.equal(retryStore.getRecord("persist-check")?.enabled, false);
+assert.equal(existsSync(`${retryPath}.${process.pid}.tmp`), false);
 
 console.error("Plugin state validation passed.");
 

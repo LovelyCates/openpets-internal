@@ -58,7 +58,9 @@ on macOS and `%APPDATA%/OpenPets Internal/runtime/ipc.json` on Windows, separate
 from public OpenPets installs. Both native desktop servers ignore the legacy
 `OPENPETS_DISCOVERY_FILE` override. Clients retain an explicit discovery-file
 override for controlled local integrations and tests, subject to the same native
-endpoint validation. A client:
+endpoint validation. Windows replaces an existing discovery file with bounded
+retries for brief sharing violations; a lasting failure preserves the previous
+file, removes the candidate when possible, and fails local IPC startup. A client:
 
 1. Reads a bounded, stable regular-file snapshot (at most 16 KiB); rejects
    symlinks at the file or immediate runtime directory, and Windows network or

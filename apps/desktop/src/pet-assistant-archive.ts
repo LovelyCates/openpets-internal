@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { decryptPrivateDocument, encryptPrivateDocument, requirePrivateStorageEncryption, type PrivateStorageEncryption } from "./private-storage-encryption.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 
 export const PET_ASSISTANT_CONVERSATION_ID = "openpets-control-center-current";
 export const PET_ASSISTANT_ARCHIVE_FILE_NAME = "openpets-conversation-history.json";
@@ -142,9 +143,14 @@ function persistArchiveFile(path: string, contents: string): void {
   const tempPath = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tempPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    renameSync(tempPath, path);
-  } finally {
-    if (existsSync(tempPath)) unlinkSync(tempPath);
+    retryWindowsLockedRename(() => renameSync(tempPath, path));
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Preserve the write error; cleanup can be retried after a transient lock clears.
+    }
+    throw error;
   }
 }
 

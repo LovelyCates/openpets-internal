@@ -16,7 +16,8 @@ const electron = mock(`
   export const ipcMain = { handle: (_channel, handler) => { globalThis.spriteByteHandler = handler; } };
 `);
 const snapshots = mock(`
-  export async function isMotionSnapshotPath(path) { return path.includes('/motion-snapshots/'); }
+  import { sep } from 'node:path';
+  export async function isMotionSnapshotPath(path) { return path.includes(sep + 'motion-snapshots' + sep); }
   export function isWindowMotionSnapshotUrlAuthorized(sender) { return sender.authorized; }
 `);
 const logger = mock("export function warn() {};");

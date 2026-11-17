@@ -284,8 +284,14 @@ function isClaudeHookAsyncSupported(): boolean {
 }
 
 function shellQuote(value: string): string {
-  if (/^[a-zA-Z0-9_@%+=:,./-]+$/.test(value)) return value;
   if (/[\r\n"]/.test(value) || value.includes("\0")) throw new Error("Claude hook path contains unsupported shell characters.");
+  if (process.platform === "win32") {
+    // cmd.exe treats backslashes as path separators, not quote escapes.
+    if (/[%!^&|<>]/.test(value)) throw new Error("Claude hook path contains unsupported cmd characters.");
+    if (/^[a-zA-Z0-9_@+=:,./-]+$/.test(value)) return value;
+    return `"${value}"`;
+  }
+  if (/^[a-zA-Z0-9_@%+=:,./-]+$/.test(value)) return value;
   return `"${value.replaceAll("\\", "\\\\").replaceAll("$", "\\$").replaceAll("`", "\\`")}"`;
 }
 

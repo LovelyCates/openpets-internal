@@ -12,6 +12,7 @@ import { motionMaxTotalBytes } from "@open-pets/pet-format/node/package-validati
 import { bubbleDurationScaleOptions, bubbleScaleOptions, defaultBubbleDurationScale, defaultBubbleScale, defaultBubbleTheme, normalizeBubbleDurationScale, normalizeBubbleScale, normalizeBubbleTheme, type BubbleDurationScaleValue, type BubbleScaleValue, type BubbleTheme, defaultAppearanceTheme, defaultHudScale, defaultIdleCursorGazeEnabled, defaultPetButtonsPosition, defaultPetButtonsSize, defaultPetScale, defaultWaitingAnimationDurationMs, getHudScaleForPetScale, markOnboardingCompleted, normalizeAppearanceTheme, normalizeHudScale, normalizeIdleCursorGazeEnabled, normalizeOnboardingCompleted, normalizePetButtonsPosition, normalizePetButtonsSize, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetHorizontalFlip, normalizePetPhysicsFraction, defaultPetBounciness, defaultPetFloorFriction, normalizePetScale, normalizeWaitingAnimationDurationMs, hudScaleOptions, petScaleOptions, togglePetHorizontalFlipMap, waitingAnimationDurationOptions, type AppearanceTheme, type HudScaleValue, type PetButtonsPosition, type PetButtonsSize, type PetScaleValue, type WaitingAnimationDurationMs } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import { normalizeDefaultPetPositionState, normalizePosition, recordDefaultPetPositionState, resetDefaultPetPositionState, type DefaultPetPosition, type DefaultPetPositionState } from "./default-pet-position-state.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
 import { allowedReactions, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import {
@@ -1033,8 +1034,17 @@ function writeStateToDisk(state: OpenPetsStateV1): void {
 
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  renameSync(tempPath, path);
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    retryWindowsLockedRename(() => renameSync(tempPath, path));
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Preserve the write error; a locked temporary file can be overwritten on the next save.
+    }
+    throw error;
+  }
 }
 
 function validateInstalledPetFiles(petId: string, source: InstalledPetState["source"]): string | undefined {

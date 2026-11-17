@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnOptions, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import { delimiter, join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, parseDoctorArgs, parseInstallArgs, parsePluginNewArgs, parseReactArgs, parseSayArgs, resolveConfiguredPet, runClaudeMcpAddJson, runDoctor, scaffoldPlugin } from "./index.js";
 import { runDevinHookFromStdin } from "./devin-hook.js";
@@ -12,6 +14,7 @@ import { pluginTemplateNames } from "./plugin-templates.js";
 import { validatePluginFolder } from "./plugin-validate.js";
 
 const packageVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { readonly version: string }).version;
+const cliEntryPath = fileURLToPath(new URL("./index.js", import.meta.url));
 
 const parsed = parseConfigureArgs(["--agent", "claude", "--pet", "fixer", "--cwd", "/tmp/project", "--yes"]);
 assert.equal(parsed.agent, "claude");
@@ -150,7 +153,26 @@ assert.deepEqual(mcpJson.args, ["-y", `${cliPackageName}@1.2.3`, "mcp", "--pet",
 // Canonicalize sandbox roots that feed OPENCODE_CONFIG_DIR: platform temp dirs
 // can sit beneath system symlinks (e.g. /var on macOS) that ancestor
 // validation must reject. Validation itself never canonicalizes.
-const dir = mkdtempSync(join(realpathSync(tmpdir()), "openpets-cli-"));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), "openpets-cli-")));
+
+function createDirectoryLink(target: string, link: string): void {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
+function createFileLinkIfPermitted(target: string, link: string, scenario: string): boolean {
+  try {
+    symlinkSync(target, link, "file");
+    return true;
+  } catch (error) {
+    const unavailableOnWindows = process.platform === "win32"
+      && error instanceof Error
+      && "code" in error
+      && ["EPERM", "EACCES", "ENOTSUP"].includes(String(error.code));
+    if (!unavailableOnWindows) throw error;
+    console.warn(`[SKIP] ${scenario}: Windows file symlink privilege is unavailable.`);
+    return false;
+  }
+}
 try {
   const project = join(dir, "project");
   const settingsDir = join(project, ".claude");
@@ -185,20 +207,33 @@ try {
   const outside = join(dir, "outside-claude");
   mkdirSync(symlinkProject);
   mkdirSync(outside);
-  symlinkSync(outside, join(symlinkProject, ".claude"));
+  createDirectoryLink(outside, join(symlinkProject, ".claude"));
   assert.throws(() => assertSafeProjectHookPath(symlinkProject));
 
   const binDir = join(dir, "bin");
   const logPath = join(dir, "claude-log.json");
   mkdirSync(binDir);
-  const fakeClaude = join(binDir, "claude");
+  const fakeClaude = join(binDir, process.platform === "win32" ? "fake-claude.cjs" : "claude");
   writeFileSync(fakeClaude, `#!/usr/bin/env node\nconst fs = require('fs'); let log = []; try { log = JSON.parse(fs.readFileSync(${JSON.stringify(logPath)}, 'utf8')); } catch {} log.push({ cwd: process.cwd(), argv: process.argv.slice(2) }); fs.writeFileSync(${JSON.stringify(logPath)}, JSON.stringify(log)); process.exit(0);\n`, "utf8");
-  chmodSync(fakeClaude, 0o700);
+  if (process.platform !== "win32") chmodSync(fakeClaude, 0o700);
+  const childProcessModule = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
+  const originalSpawnSync = childProcessModule.spawnSync;
+  if (process.platform === "win32") {
+    childProcessModule.spawnSync = ((command: string, args: readonly string[], spawnOptions: SpawnSyncOptionsWithStringEncoding) => {
+      if (command === "claude") return originalSpawnSync(process.execPath, [fakeClaude, ...args], spawnOptions);
+      return originalSpawnSync(command, [...args], spawnOptions);
+    }) as typeof childProcessModule.spawnSync;
+    syncBuiltinESMExports();
+  }
   const oldPath = process.env.PATH;
-  process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+  process.env.PATH = `${binDir}${delimiter}${oldPath ?? ""}`;
   try {
     runClaudeMcpAddJson(project, { type: "stdio", command: "npx", args: ["-y", "@open-pets/cli@1.2.3", "mcp", "--pet", "fixer"], env: {} }, true);
   } finally {
+    if (process.platform === "win32") {
+      childProcessModule.spawnSync = originalSpawnSync;
+      syncBuiltinESMExports();
+    }
     process.env.PATH = oldPath;
   }
   const claudeLog = JSON.parse(readFileSync(logPath, "utf8")) as Array<{ readonly cwd: string; readonly argv: readonly string[] }>;
@@ -219,7 +254,7 @@ try {
   writeFileSync(openClawInventoryPath, JSON.stringify(openClawInventory), "utf8");
   assert.ok(Buffer.byteLength(readFileSync(openClawInventoryPath), "utf8") > 16 * 1024, "OpenClaw inventory fixture must exceed the old output cap");
   writeFileSync(openClawStatePath, JSON.stringify({ installed: false, enabled: false }), "utf8");
-  const fakeOpenClaw = join(binDir, "openclaw");
+  const fakeOpenClaw = join(binDir, process.platform === "win32" ? "fake-openclaw.cjs" : "openclaw");
   writeFileSync(fakeOpenClaw, `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -234,20 +269,33 @@ if (args[0] === "plugins" && args[1] === "install") { save({ installed: true, en
 if (args[0] === "plugins" && args[1] === "enable") { save({ installed: true, enabled: true }); process.exit(0); }
 process.exit(0);
 `, "utf8");
-  chmodSync(fakeOpenClaw, 0o700);
-  process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+  if (process.platform !== "win32") chmodSync(fakeOpenClaw, 0o700);
+  const originalSpawn = childProcessModule.spawn;
+  if (process.platform === "win32") {
+    childProcessModule.spawn = ((command: string, args: readonly string[], spawnOptions: SpawnOptions) => {
+      if (command === "openclaw") return originalSpawn(process.execPath, [fakeOpenClaw, ...args], spawnOptions);
+      return originalSpawn(command, [...args], spawnOptions);
+    }) as typeof childProcessModule.spawn;
+    syncBuiltinESMExports();
+  }
+  process.env.PATH = `${binDir}${delimiter}${oldPath ?? ""}`;
   try {
     await configureProject({ agent: "openclaw", cwd: process.cwd(), yes: true, force: false, localDev: false });
   } finally {
+    if (process.platform === "win32") {
+      childProcessModule.spawn = originalSpawn;
+      syncBuiltinESMExports();
+    }
     process.env.PATH = oldPath;
   }
   assert.deepEqual(JSON.parse(readFileSync(openClawStatePath, "utf8")), { installed: true, enabled: true });
 
   const cliBinLink = join(binDir, "openpets");
-  symlinkSync(new URL("./index.js", import.meta.url).pathname, cliBinLink);
-  const symlinkedHelp = spawnSync(process.execPath, [cliBinLink, "--help"], { encoding: "utf8" });
-  assert.equal(symlinkedHelp.status, 0);
-  assert.match(symlinkedHelp.stdout, /Usage:/);
+  if (createFileLinkIfPermitted(cliEntryPath, cliBinLink, "Symlinked CLI entry")) {
+    const symlinkedHelp = spawnSync(process.execPath, [cliBinLink, "--help"], { encoding: "utf8" });
+    assert.equal(symlinkedHelp.status, 0);
+    assert.match(symlinkedHelp.stdout, /Usage:/);
+  }
 
   const opencodeProject = join(dir, "opencode-project");
   mkdirSync(opencodeProject);
@@ -305,7 +353,7 @@ process.exit(0);
   mkdirSync(outsideOpenCode);
   writeFileSync(join(outsideOpenCode, "opencode.jsonc"), "{}\n", "utf8");
   writeFileSync(join(outsideOpenCode, "openpets.md"), "outside\n", "utf8");
-  symlinkSync(outsideOpenCode, join(symlinkOpenCodeProject, ".opencode"));
+  createDirectoryLink(outsideOpenCode, join(symlinkOpenCodeProject, ".opencode"));
   await assert.rejects(() => configureProject({ agent: "opencode", petId: "fixer", cwd: symlinkOpenCodeProject, yes: true, force: false, localDev: false }));
 
   // Dangling project config symlinks must be rejected without replacement.
@@ -313,18 +361,19 @@ process.exit(0);
   mkdirSync(danglingProject);
   const danglingProjectTarget = join(danglingProject, "missing.jsonc");
   const danglingProjectConfig = join(danglingProject, "opencode.jsonc");
-  symlinkSync(danglingProjectTarget, danglingProjectConfig);
-  let danglingProjectError = "";
-  try {
-    await configureProject({ agent: "opencode", petId: "fixer", cwd: danglingProject, yes: true, force: false, localDev: false });
-  } catch (error) {
-    danglingProjectError = error instanceof Error ? error.message : String(error);
+  if (createFileLinkIfPermitted(danglingProjectTarget, danglingProjectConfig, "Dangling OpenCode project config symlink")) {
+    let danglingProjectError = "";
+    try {
+      await configureProject({ agent: "opencode", petId: "fixer", cwd: danglingProject, yes: true, force: false, localDev: false });
+    } catch (error) {
+      danglingProjectError = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(danglingProjectError, /symlink/);
+    assert.match(danglingProjectError, new RegExp(danglingProjectConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(danglingProjectError, /use project-local/, "project errors must not suggest switching to project-local setup");
+    assert.equal(lstatSync(danglingProjectConfig).isSymbolicLink(), true, "dangling project symlink must not be replaced");
+    assert.equal(hasCliCheckEntry(danglingProjectTarget), false, "no contents may be created through the dangling link");
   }
-  assert.match(danglingProjectError, /symlink/);
-  assert.match(danglingProjectError, new RegExp(danglingProjectConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.doesNotMatch(danglingProjectError, /use project-local/, "project errors must not suggest switching to project-local setup");
-  assert.equal(lstatSync(danglingProjectConfig).isSymbolicLink(), true, "dangling project symlink must not be replaced");
-  assert.equal(hasCliCheckEntry(danglingProjectTarget), false, "no contents may be created through the dangling link");
 
   // Dangling project instruction symlinks must be rejected without replacement.
   const danglingInstructionProject = join(dir, "opencode-dangling-instruction");
@@ -332,10 +381,11 @@ process.exit(0);
   writeFileSync(join(danglingInstructionProject, "opencode.jsonc"), "{}\n", "utf8");
   const danglingInstructionTarget = join(danglingInstructionProject, ".opencode", "missing-target.md");
   const danglingInstruction = join(danglingInstructionProject, ".opencode", "openpets.md");
-  symlinkSync(danglingInstructionTarget, danglingInstruction);
-  await assert.rejects(() => configureProject({ agent: "opencode", petId: "fixer", cwd: danglingInstructionProject, yes: true, force: false, localDev: false }));
-  assert.equal(lstatSync(danglingInstruction).isSymbolicLink(), true, "dangling instruction symlink must not be replaced");
-  assert.equal(hasCliCheckEntry(danglingInstructionTarget), false);
+  if (createFileLinkIfPermitted(danglingInstructionTarget, danglingInstruction, "Dangling OpenCode project instruction symlink")) {
+    await assert.rejects(() => configureProject({ agent: "opencode", petId: "fixer", cwd: danglingInstructionProject, yes: true, force: false, localDev: false }));
+    assert.equal(lstatSync(danglingInstruction).isSymbolicLink(), true, "dangling instruction symlink must not be replaced");
+    assert.equal(hasCliCheckEntry(danglingInstructionTarget), false);
+  }
 
   // Issue #188: global OpenCode configure uses the existing global setup path.
   // Project-local behaviour above remains the default and is unchanged.
@@ -590,36 +640,37 @@ writeFileSync(doctorSymlinkTargetFile, JSON.stringify({ theme: "dotfiles" }, nul
 mkdirSync(join(doctorSymlinkGlobalDir, "opencode-home"));
 const doctorSymlinkedConfig = join(doctorSymlinkGlobalDir, "opencode-home", "opencode.json");
 mkdirSync(join(doctorSymlinkGlobalDir, "opencode-home"), { recursive: true });
-symlinkSync(doctorSymlinkTargetFile, doctorSymlinkedConfig);
-const previousDoctorEnv = process.env.OPENCODE_CONFIG_DIR;
-process.env.OPENCODE_CONFIG_DIR = join(doctorSymlinkGlobalDir, "opencode-home");
-const doctorSymlinkTargetBefore = readFileSync(doctorSymlinkTargetFile, "utf8");
-let doctorSymlinkReport: Record<string, unknown>;
-try {
-  doctorSymlinkReport = await captureDoctorJson(doctorMissingProject);
-} finally {
-  if (previousDoctorEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-  else process.env.OPENCODE_CONFIG_DIR = previousDoctorEnv;
+if (createFileLinkIfPermitted(doctorSymlinkTargetFile, doctorSymlinkedConfig, "OpenCode doctor linked global config")) {
+  const previousDoctorEnv = process.env.OPENCODE_CONFIG_DIR;
+  process.env.OPENCODE_CONFIG_DIR = join(doctorSymlinkGlobalDir, "opencode-home");
+  const doctorSymlinkTargetBefore = readFileSync(doctorSymlinkTargetFile, "utf8");
+  let doctorSymlinkReport: Record<string, unknown>;
+  try {
+    doctorSymlinkReport = await captureDoctorJson(doctorMissingProject);
+  } finally {
+    if (previousDoctorEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousDoctorEnv;
+  }
+  const doctorOpencode = doctorSymlinkReport.opencode as { status?: string; message?: string; configDir?: string };
+  assert.equal(doctorOpencode.status, "error");
+  assert.match(doctorOpencode.message ?? "", new RegExp(doctorSymlinkedConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(doctorOpencode.message ?? "", /symlink/);
+  assert.match(doctorOpencode.message ?? "", new RegExp(doctorSymlinkTargetFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(doctorOpencode.message ?? "", /project-local/, "global doctor errors suggest project-local setup as a fallback");
+  assert.equal(readFileSync(doctorSymlinkTargetFile, "utf8"), doctorSymlinkTargetBefore, "doctor must not modify symlink targets");
+  assert.equal(hasCliCheckEntry(join(doctorSymlinkGlobalDir, "opencode-home", "openpets.md")), false, "doctor must remain read-only");
+  process.env.OPENCODE_CONFIG_DIR = join(doctorSymlinkGlobalDir, "opencode-home");
+  let doctorSymlinkText: { readonly text: string; readonly exitCode: number | undefined };
+  try {
+    doctorSymlinkText = await captureDoctorText(doctorMissingProject);
+  } finally {
+    if (previousDoctorEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousDoctorEnv;
+  }
+  assert.match(doctorSymlinkText.text, /OpenCode/);
+  assert.match(doctorSymlinkText.text, /symlink/);
+  assert.equal(doctorSymlinkText.exitCode, 1, "genuine OpenCode diagnostic errors must set non-zero exit");
 }
-const doctorOpencode = doctorSymlinkReport.opencode as { status?: string; message?: string; configDir?: string };
-assert.equal(doctorOpencode.status, "error");
-assert.match(doctorOpencode.message ?? "", new RegExp(doctorSymlinkedConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-assert.match(doctorOpencode.message ?? "", /symlink/);
-assert.match(doctorOpencode.message ?? "", new RegExp(doctorSymlinkTargetFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-assert.match(doctorOpencode.message ?? "", /project-local/, "global doctor errors suggest project-local setup as a fallback");
-assert.equal(readFileSync(doctorSymlinkTargetFile, "utf8"), doctorSymlinkTargetBefore, "doctor must not modify symlink targets");
-assert.equal(hasCliCheckEntry(join(doctorSymlinkGlobalDir, "opencode-home", "openpets.md")), false, "doctor must remain read-only");
-process.env.OPENCODE_CONFIG_DIR = join(doctorSymlinkGlobalDir, "opencode-home");
-let doctorSymlinkText: { readonly text: string; readonly exitCode: number | undefined };
-try {
-  doctorSymlinkText = await captureDoctorText(doctorMissingProject);
-} finally {
-  if (previousDoctorEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-  else process.env.OPENCODE_CONFIG_DIR = previousDoctorEnv;
-}
-assert.match(doctorSymlinkText.text, /OpenCode/);
-assert.match(doctorSymlinkText.text, /symlink/);
-assert.equal(doctorSymlinkText.exitCode, 1, "genuine OpenCode diagnostic errors must set non-zero exit");
 rmSync(doctorSymlinkGlobalDir, { recursive: true, force: true });
 rmSync(doctorSymlinkTargetDir, { recursive: true, force: true });
 
@@ -627,23 +678,24 @@ rmSync(doctorSymlinkTargetDir, { recursive: true, force: true });
 const doctorDanglingDir = mkdtempSync(join(realpathSync(tmpdir()), "openpets-doctor-dangling-"));
 const doctorDanglingTarget = join(doctorDanglingDir, "missing-target.json");
 const doctorDanglingConfig = join(doctorDanglingDir, "opencode.json");
-symlinkSync(doctorDanglingTarget, doctorDanglingConfig);
-const previousDanglingEnv = process.env.OPENCODE_CONFIG_DIR;
-process.env.OPENCODE_CONFIG_DIR = doctorDanglingDir;
-let doctorDanglingReport: Record<string, unknown>;
-try {
-  doctorDanglingReport = await captureDoctorJson(doctorMissingProject);
-} finally {
-  if (previousDanglingEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-  else process.env.OPENCODE_CONFIG_DIR = previousDanglingEnv;
+if (createFileLinkIfPermitted(doctorDanglingTarget, doctorDanglingConfig, "OpenCode doctor dangling global config")) {
+  const previousDanglingEnv = process.env.OPENCODE_CONFIG_DIR;
+  process.env.OPENCODE_CONFIG_DIR = doctorDanglingDir;
+  let doctorDanglingReport: Record<string, unknown>;
+  try {
+    doctorDanglingReport = await captureDoctorJson(doctorMissingProject);
+  } finally {
+    if (previousDanglingEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousDanglingEnv;
+  }
+  const doctorDangling = doctorDanglingReport.opencode as { status?: string; message?: string };
+  assert.equal(doctorDangling.status, "error");
+  assert.match(doctorDangling.message ?? "", new RegExp(doctorDanglingConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(doctorDangling.message ?? "", /symlink/);
+  assert.equal(lstatSync(doctorDanglingConfig).isSymbolicLink(), true, "doctor must not replace the dangling symlink");
+  assert.equal(hasCliCheckEntry(doctorDanglingTarget), false, "no contents may be created through the dangling link");
+  assert.equal(hasCliCheckEntry(join(doctorDanglingDir, "openpets.md")), false, "doctor must remain read-only");
 }
-const doctorDangling = doctorDanglingReport.opencode as { status?: string; message?: string };
-assert.equal(doctorDangling.status, "error");
-assert.match(doctorDangling.message ?? "", new RegExp(doctorDanglingConfig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-assert.match(doctorDangling.message ?? "", /symlink/);
-assert.equal(lstatSync(doctorDanglingConfig).isSymbolicLink(), true, "doctor must not replace the dangling symlink");
-assert.equal(hasCliCheckEntry(doctorDanglingTarget), false, "no contents may be created through the dangling link");
-assert.equal(hasCliCheckEntry(join(doctorDanglingDir, "openpets.md")), false, "doctor must remain read-only");
 rmSync(doctorDanglingDir, { recursive: true, force: true });
 rmSync(doctorMissingProject, { recursive: true, force: true });
 
@@ -657,18 +709,18 @@ function hasCliCheckEntry(path: string): boolean {
   }
 }
 
-const invalidHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
+const invalidHook = spawnSync(process.execPath, [cliEntryPath, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(invalidHook.status, 1);
-const missingPetHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
+const missingPetHook = spawnSync(process.execPath, [cliEntryPath, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(missingPetHook.status, 1);
 
 for (const args of [["--help"], ["-h"], ["status", "--help"], ["doctor", "--help"], ["pets", "--help"], ["react", "--help"], ["say", "--help"], ["install", "--help"], ["configure", "--help"], ["configure", "-h"], ["plugin", "--help"], ["plugin", "new", "--help"], ["mcp", "--help"], ["hook", "--help"]]) {
-  const help = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, ...args], { encoding: "utf8" });
+  const help = spawnSync(process.execPath, [cliEntryPath, ...args], { encoding: "utf8" });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage:/);
 }
 
-const doctorHelp = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "doctor", "--help"], { encoding: "utf8" });
+const doctorHelp = spawnSync(process.execPath, [cliEntryPath, "doctor", "--help"], { encoding: "utf8" });
 assert.equal(doctorHelp.status, 0);
 assert.match(doctorHelp.stdout, /doctor/);
 

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import electron from "electron";
 import { encryptPrivateDocument, requirePrivateStorageEncryption, type PrivateStorageEncryption } from "./private-storage-encryption.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 
 /**
  * Encrypted per-plugin credential store (§13.3): values are encrypted with
@@ -120,9 +121,14 @@ export class PluginSecretsStore {
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
     try {
       writeFileSync(tmp, contents, { mode: 0o600, flag: "wx" });
-      renameSync(tmp, this.#path);
-    } finally {
-      if (existsSync(tmp)) unlinkSync(tmp);
+      retryWindowsLockedRename(() => renameSync(tmp, this.#path));
+    } catch (error) {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp);
+      } catch {
+        // Preserve the credential write error; cleanup can follow a transient lock.
+      }
+      throw error;
     }
   }
 }

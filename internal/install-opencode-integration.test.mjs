@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -9,9 +10,9 @@ import test from 'node:test';
 const installer = fileURLToPath(new URL('./install-opencode-integration.mjs', import.meta.url));
 
 function fixture(t) {
-  // macOS /tmp and /var are symlinks; use a physical path to test the same
-  // strict ancestor-link policy that protects real project installations.
-  const root = fs.mkdtempSync('/private/tmp/openpets mac installer ');
+  // Resolve macOS /tmp and /var aliases before testing the installer policy
+  // that rejects symbolic links in any ancestor of a project path.
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'openpets installer '));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const project = path.join(root, 'project with spaces');
   const source = path.join(root, 'local deployment with spaces');
@@ -24,6 +25,19 @@ function fixture(t) {
   fs.writeFileSync(bundle, 'export default async () => ({});\n');
   fs.writeFileSync(license, 'MIT License\nCopyright Test\n');
   return { root, project, source, cli, bundle, license };
+}
+
+function createFileLinkOrSkip(t, target, alias, linked) {
+  try {
+    fs.symlinkSync(target, alias, 'file');
+    return true;
+  } catch (error) {
+    if (process.platform === 'win32' && (error.code === 'EPERM' || error.code === 'EACCES')) {
+      t.skip(`Windows file symbolic-link privilege unavailable for ${linked} (${error.code})`);
+      return false;
+    }
+    throw error;
+  }
 }
 
 function run(f, major = 1, extra = []) {
@@ -72,7 +86,7 @@ for (const major of [1, 2]) {
     assert.equal(record.majorVersion, major);
     for (const field of ['bundle', 'license', 'config']) {
       const bytes = fs.readFileSync(targets[field]);
-      assert.equal(record[field].path, path.relative(f.project, targets[field]));
+      assert.equal(record[field].path, path.relative(f.project, targets[field]).split(path.sep).join('/'));
       assert.equal(record[field].sha256, createHash('sha256').update(bytes).digest('hex'));
     }
   });
@@ -176,26 +190,26 @@ for (const linked of ['project parent', 'plugin directory', 'managed file', 'dan
     fs.writeFileSync(path.join(outside, 'precious'), 'Do not change\n');
     const extra = [];
     if (linked === 'project parent') {
-      fs.symlinkSync(f.project, path.join(outside, 'project alias'));
+      fs.symlinkSync(f.project, path.join(outside, 'project alias'), process.platform === 'win32' ? 'junction' : 'dir');
       f.project = path.join(outside, 'project alias');
     } else if (linked === 'plugin directory') {
       fs.mkdirSync(path.join(f.project, '.opencode'));
-      fs.symlinkSync(outside, path.join(f.project, '.opencode/plugins'));
+      fs.symlinkSync(outside, path.join(f.project, '.opencode/plugins'), process.platform === 'win32' ? 'junction' : 'dir');
     } else if (linked === 'managed file') {
       assert.equal(run(f).status, 0);
       const target = installedFiles(f).config;
       fs.unlinkSync(target);
-      fs.symlinkSync(path.join(outside, 'precious'), target);
+      if (!createFileLinkOrSkip(t, path.join(outside, 'precious'), target, linked)) return;
     } else if (linked === 'dangling file') {
       fs.mkdirSync(path.join(f.project, '.opencode'));
-      fs.symlinkSync(path.join(outside, 'absent'), installedFiles(f).manifest);
+      if (!createFileLinkOrSkip(t, path.join(outside, 'absent'), installedFiles(f).manifest, linked)) return;
     } else if (linked === 'bundle') {
       const alias = path.join(f.source, 'alias.js');
-      fs.symlinkSync(f.bundle, alias);
+      if (!createFileLinkOrSkip(t, f.bundle, alias, linked)) return;
       f.bundle = alias;
     } else {
       const alias = path.join(f.source, 'node');
-      fs.symlinkSync(process.execPath, alias);
+      if (!createFileLinkOrSkip(t, process.execPath, alias, linked)) return;
       extra.push('--node-path', alias);
     }
     const before = snapshot(f.root);
@@ -209,7 +223,7 @@ for (const linked of ['project parent', 'plugin directory', 'managed file', 'dan
 test('help has no side effects even with nonexistent installation paths', (t) => {
   const f = fixture(t);
   const before = snapshot(f.root);
-  const result = spawnSync(process.execPath, [installer, '--help', '--project-root', '/does/not/exist'], {
+  const result = spawnSync(process.execPath, [installer, '--help', '--project-root', path.join(f.root, 'does-not-exist')], {
     cwd: f.root, encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);

@@ -80,7 +80,7 @@ type PreferencePatch = Omit<Partial<SettingsState["preferences"]>, "personality"
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
 type LanStatusSnapshot = { mode: "off" | "server" | "client"; localHost: string; serverUrl: string; port: number; auth: "token" | "none"; authSource: "env" | "stored" | "generated" | "none"; authInsecure: boolean; tokenHint: string | null; topologyHosts: number; topologyLinks: number; topologyIssues: LanTopologyIssue[]; currentHost: string | null; clients: Array<{ host: string; lastSeen: number; position?: { x: number; y: number } }>; updatedAt: number; persistedCurrentHost: string | null; persistedUpdatedAt: number | null };
-type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
+type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; displayVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
 type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
 type DashboardSnapshot = { defaultPet: { id: string; displayName: string; assetName?: string; petName?: string; previewSpriteUrl: string; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; spriteLayout?: PetSpriteLayout }; installedPetCount: number; catalog: { source: string; total?: number; page?: number; pageCount?: number; error?: string }; plugins: { installed: number; enabled: number; broken: number }; updateStatus: UpdateStatus; activity: DashboardActivity };
 type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: PetSpriteLayout & { states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; frameDurationsMs?: readonly number[]; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string; previewFormat?: "image" | "atlas"; previewWidth?: number; previewHeight?: number; waitingAnimationDurationMs: number; waitingAnimationDurationOptions: { value: number; label: string }[] };
@@ -868,7 +868,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
           <div className="mt-auto pt-4 border-t border-blue-100/30">
              <div className="flex items-center justify-between text-[10px] font-bold text-slatecopy uppercase tracking-wider">
                <span>{t("dashboard.system.version")}</span>
-               <span className="font-mono">{updateStatus.currentVersion}</span>
+               <span className="font-mono">{updateStatus.displayVersion}</span>
              </div>
           </div>
         </GlassCard>
@@ -1166,7 +1166,7 @@ function formatUpdateStatus(status: UpdateStatus | null, t: (key: string, vars?:
   if (status.state === "available") return t("settings.update.available", { version: status.latestVersion ?? t("common.latest") });
   if (status.state === "current") return t("settings.update.current");
   if (status.state === "error") return status.error || t("settings.update.failed");
-  return t("settings.update.version", { version: status.currentVersion });
+  return t("settings.update.version", { version: status.displayVersion });
 }
 
 function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimationSettings; state: UserSelectableAnimationState }) {
@@ -1786,7 +1786,7 @@ function SettingsView({ onAppearanceThemeChange }: { onAppearanceThemeChange: (t
               <div className="settings-system-info">
                 <RefreshIcon />
                 <span>{t("settings.general.systemStatus")}</span>
-                <span className="settings-system-version">{updateStatus?.currentVersion}</span>
+                <span className="settings-system-version">{updateStatus?.displayVersion}</span>
                 <span className="opacity-60">{formatUpdateStatus(updateStatus, t)}</span>
               </div>
               <div className="flex gap-2">
@@ -3402,6 +3402,23 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
   const currentMeta = routeMetadata[currentRoute];
 
   const hasSearchQuery = query.trim().length > 0;
+  const showActivitiesEmpty = filter === "activities"
+    && !hasSearchQuery
+    && !petFacets.kind
+    && !petFacets.tag
+    && !petFacets.uploader;
+  let emptyTitleKey = "pets.search.empty";
+  let emptyHintKey = "pets.search.emptyHint";
+  if (showActivitiesEmpty) {
+    emptyTitleKey = "pets.activities.empty";
+    emptyHintKey = "pets.activities.emptyHint";
+  } else if (filter === "favorites" && !hasSearchQuery) {
+    emptyTitleKey = "pets.favorites.empty";
+    emptyHintKey = "pets.favorites.hint";
+  } else if (filter === "codex") {
+    emptyTitleKey = !hasSearchQuery ? "pets.codex.empty" : "pets.search.empty";
+    emptyHintKey = "pets.codex.description";
+  }
 
   return (
     <main className="app-shell">
@@ -3502,9 +3519,14 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
             {filter === "codex" && <p className="mb-3 text-xs text-slate-500">{t("pets.codex.description")}{codex.error ? ` ${codex.error}` : ""}</p>}
             {state !== null && petLibrary.total === 0 && (
               <div className="mb-3 rounded-xl border border-slate-200 p-4 text-sm" role="status">
-                <strong>{t(filter === "favorites" && !hasSearchQuery ? "pets.favorites.empty" : filter === "codex" && !hasSearchQuery ? "pets.codex.empty" : "pets.search.empty")}</strong>
-                <p className="mt-1 text-xs text-slate-500">{t(filter === "codex" ? "pets.codex.description" : filter === "favorites" && !hasSearchQuery ? "pets.favorites.hint" : "pets.search.emptyHint")}</p>
-                <Button variant="secondary" size="compact" onClick={resetPetFilters}>{t("pets.search.reset")}</Button>
+                <strong>{t(emptyTitleKey)}</strong>
+                <p className="mt-1 text-xs text-slate-500">{t(emptyHintKey)}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {showActivitiesEmpty && (
+                    <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void act(t("pets.busy.importing"), () => api.installLocalPet())}>{t("pets.import")}</Button>
+                  )}
+                  <Button variant="secondary" size="compact" onClick={resetPetFilters}>{t("pets.search.reset")}</Button>
+                </div>
               </div>
             )}
             <div ref={petsGridRef} className="pets-grid" aria-busy={petsLoading}>

@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { isValidOpaqueId, isValidRemoteBindAddress, validateRemoteScopeList, type RemoteControlScope } from "./remote-control-protocol.js";
+import { retryWindowsLockedRename } from "./state-file-rename.js";
 
 export const remoteControlStateVersion = 1 as const;
 
@@ -51,8 +52,17 @@ export function loadRemoteControlState(path: string): RemoteControlState {
 export function saveRemoteControlState(path: string, state: RemoteControlState): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tempPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(tempPath, path);
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    retryWindowsLockedRename(() => renameSync(tempPath, path));
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Preserve the save error; a locked temporary file can be overwritten on the next save.
+    }
+    throw error;
+  }
 }
 
 export function normalizeRemoteControlState(value: unknown): RemoteControlState {

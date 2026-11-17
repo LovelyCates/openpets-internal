@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, openPetsClaudeImportLine, uninstallClaudeOpenPetsMemory } from "../src/claude-memory.js";
+import { createDirectoryLinkSync, tryCreateFileLinkSync } from "./symlink-fixtures.js";
 
 const dir = mkdtempSync(join(tmpdir(), "openpets-claude-memory-"));
 try {
@@ -50,14 +51,15 @@ try {
   const symlinkTarget = join(dir, "outside");
   mkdirSync(symlinkHome);
   mkdirSync(symlinkTarget);
-  symlinkSync(symlinkTarget, join(symlinkHome, ".claude"));
+  createDirectoryLinkSync(symlinkTarget, join(symlinkHome, ".claude"));
   assert.throws(() => installClaudeOpenPetsMemory(symlinkHome));
 
   const symlinkFileHome = join(dir, "symlink-file-home");
   mkdirSync(join(symlinkFileHome, ".claude"), { recursive: true });
   writeFileSync(join(dir, "outside-file"), "x", "utf8");
-  symlinkSync(join(dir, "outside-file"), join(symlinkFileHome, ".claude", "CLAUDE.md"));
-  assert.throws(() => installClaudeOpenPetsMemory(symlinkFileHome));
+  if (tryCreateFileLinkSync(join(dir, "outside-file"), join(symlinkFileHome, ".claude", "CLAUDE.md"), "Claude memory rejects a linked CLAUDE.md")) {
+    assert.throws(() => installClaudeOpenPetsMemory(symlinkFileHome));
+  }
 
   const oversizedHome = join(dir, "oversized-home");
   mkdirSync(join(oversizedHome, ".claude"), { recursive: true });

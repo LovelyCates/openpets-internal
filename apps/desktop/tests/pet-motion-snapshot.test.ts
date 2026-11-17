@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserWindow, WebContents } from "electron";
+import { createDirectoryLink } from "./symlink-fixtures.js";
 
 const root = await mkdtemp(join(tmpdir(), "openpets-motion-snapshot-test-"));
 const mock = (source: string): string => `data:text/javascript,${encodeURIComponent(source)}`;
@@ -104,7 +105,7 @@ try {
   await writeFile(join(outside, "keep"), "outside");
   await writeFile(join(snapshotRoot, "unrelated"), "keep");
   await mkdir(join(snapshotRoot, "other-directory"));
-  await symlink(outside, join(snapshotRoot, "snapshot-DEF456"));
+  await createDirectoryLink(outside, join(snapshotRoot, "snapshot-DEF456"));
   const petDir = join(root, "pets", "test");
   await mkdir(join(petDir, "clips"), { recursive: true });
   await writeFile(join(petDir, "pet.json"), "{}");

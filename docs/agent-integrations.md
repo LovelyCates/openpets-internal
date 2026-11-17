@@ -139,7 +139,9 @@ The deepest integration, because Claude Code has a rich hook system.
   (a `PermissionRequest` for `AskUserQuestion` speaks "Question for you"-style
   question speech instead of "Approval needed", since it asks, not approves),
   stop → success, stop-failure → error, and `PreToolUse` is classified by tool
-  (Edit/Write/MultiEdit → editing, Bash test commands → testing).
+  (Edit/Write/MultiEdit → editing, Bash test commands → testing). On Windows,
+  local and bundled hook commands quote paths for `cmd.exe` without doubling
+  path separators and reject unsupported command metacharacters.
 - **Project-local awareness**: if a project defines its own OpenPets hook
   (`.claude/settings.local.json` with `--project-local`), the global hook stands
   down to avoid double-firing.

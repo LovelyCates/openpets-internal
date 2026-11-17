@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import { addOpenPetsHooks, assertInstalledClaudeCliPath, claudeHookEvents, createOpenPetsHookCommand, createOpenPetsHookSettingsPreview, doctorClaudeHooks, findInstalledOpenPetsClaudeCli, getBundledClaudeCliPath, getLocalClaudeCliPath, installClaudeHooks, openPetsHookMarker, removeOpenPetsHooks, uninstallClaudeHooks } from "./hook-settings.js";
 import { hookSpeechPools } from "./hook-messages.js";
@@ -52,7 +53,22 @@ const client = {
   say: async (message: string, options?: { readonly leaseId?: string }) => { calls.push({ kind: "say", value: message, leaseId: options?.leaseId }); },
   showMedia: async () => ({ ok: true, shown: true }),
 };
-const dir = mkdtempSync(join(tmpdir(), "openpets-hooks-"));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), "openpets-hooks-")));
+
+function tryCreateFileSymlink(target: string, link: string, scenario: string): boolean {
+  try {
+    symlinkSync(target, link, "file");
+    return true;
+  } catch (error) {
+    const missingWindowsPrivilege = process.platform === "win32"
+      && error instanceof Error
+      && "code" in error
+      && (error.code === "EPERM" || error.code === "EACCES");
+    if (!missingWindowsPrivilege) throw error;
+    console.warn(`[SKIP] ${scenario}: Windows file symlink privilege is unavailable; enable Developer Mode or grant symlink creation permission to run this security scenario.`);
+    return false;
+  }
+}
 try {
 await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "never shown" }), { client, configuredPetId: "fixer", throttlePath: join(dir, "throttle.json"), now: () => 100_000, random: () => 0 });
 assert.deepEqual(calls[0], { kind: "lease", value: "acquire", requestedPetId: "fixer" });
@@ -150,42 +166,55 @@ assert.equal(doctorClaudeHooks(settingsPath).status, "error");
 writeFileSync(settingsPath, JSON.stringify({ hooks: { Stop: { bad: true } } }), "utf8");
 assert.equal(doctorClaudeHooks(settingsPath).status, "error");
 const symlinkPath = join(dir, "settings-link.json");
-symlinkSync(settingsPath, symlinkPath);
-assert.equal(doctorClaudeHooks(symlinkPath).status, "error");
+if (tryCreateFileSymlink(settingsPath, symlinkPath, "Claude hooks reject linked settings")) {
+  assert.equal(doctorClaudeHooks(symlinkPath).status, "error");
+}
 
 process.env.OPENPETS_DISABLE_CLAUDE_ASYNC_HOOKS = "1";
 assert.throws(() => installClaudeHooks(join(dir, "async-disabled.json")));
 delete process.env.OPENPETS_DISABLE_CLAUDE_ASYNC_HOOKS;
 
 const isolatedEnv = { ...process.env, OPENPETS_DISCOVERY_FILE: join(dir, "missing-ipc.json") };
-const normalHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const cliPath = fileURLToPath(new URL("./cli.js", import.meta.url));
+const notification = JSON.stringify({ hook_event_name: "Notification", message: "safe" });
+const normalHook = spawnSync(process.execPath, [cliPath, "hook", "--openpets-managed"], { input: notification, encoding: "utf8", env: isolatedEnv });
 assert.equal(normalHook.status, 0);
 assert.equal(normalHook.stdout, "");
 
-const petHookRun = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "fixer"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+if (process.platform === "win32" && localHook) {
+  const commandOutput = execSync(localHook.command, { shell: process.env.ComSpec ?? "cmd.exe", input: notification, encoding: "utf8", env: isolatedEnv });
+  assert.equal(commandOutput, "");
+}
+
+const petHookRun = spawnSync(process.execPath, [cliPath, "hook", "--openpets-managed", "--pet", "fixer"], { input: notification, encoding: "utf8", env: isolatedEnv });
 assert.equal(petHookRun.status, 0);
 assert.equal(petHookRun.stdout, "");
 
-const invalidPetHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const invalidPetHook = spawnSync(process.execPath, [cliPath, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: notification, encoding: "utf8", env: isolatedEnv });
 assert.equal(invalidPetHook.status, 1);
-const missingPetHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const missingPetHook = spawnSync(process.execPath, [cliPath, "hook", "--openpets-managed", "--pet"], { input: notification, encoding: "utf8", env: isolatedEnv });
 assert.equal(missingPetHook.status, 1);
 
-const malformedHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed"], { input: "not json", encoding: "utf8", env: isolatedEnv });
+const malformedHook = spawnSync(process.execPath, [cliPath, "hook", "--openpets-managed"], { input: "not json", encoding: "utf8", env: isolatedEnv });
 assert.equal(malformedHook.status, 0);
 assert.equal(malformedHook.stdout, "");
 
 // Explicit installed-CLI path: hooks run as `node <abs-path> hook ...`, and the
 // resolved command must round-trip cleanly through install -> doctor (status
 // stays "installed", not "needs_update").
-const fakeAppCliDir = join(dir, "OpenPets.app", "Contents", "Resources", "app.asar.unpacked", "node_modules", "@open-pets", "claude", "dist");
+const fakeAppCliDir = join(dir, "Open Pets.app", "Contents", "Resources", "app.asar.unpacked", "node_modules", "@open-pets", "claude", "dist");
 mkdirSync(fakeAppCliDir, { recursive: true });
 const fakeAppCliPath = join(fakeAppCliDir, "cli.js");
-writeFileSync(fakeAppCliPath, "// bundled cli", "utf8");
+const hookProbePath = join(dir, "hook-command-args.json");
+writeFileSync(fakeAppCliPath, `require("node:fs").writeFileSync(${JSON.stringify(hookProbePath)}, JSON.stringify(process.argv.slice(2)));\n`, "utf8");
 assertInstalledClaudeCliPath(fakeAppCliPath);
 const installedCliCommand = createOpenPetsHookCommand("published", undefined, "node", fakeAppCliPath);
-assert.ok(installedCliCommand.startsWith(`node ${fakeAppCliPath} hook ${openPetsHookMarker}`), "explicit installed CLI path must produce a node + absolute-path hook command");
+assert.equal(installedCliCommand, `node "${fakeAppCliPath}" hook ${openPetsHookMarker}`, "explicit installed CLI path must produce a node + absolute-path hook command");
 assert.ok(!installedCliCommand.includes("npx"), "explicit installed CLI path must not fall back to npx");
+if (process.platform === "win32") {
+  execSync(installedCliCommand, { shell: process.env.ComSpec ?? "cmd.exe", input: notification, encoding: "utf8", env: isolatedEnv });
+  assert.deepEqual(JSON.parse(readFileSync(hookProbePath, "utf8")), ["hook", openPetsHookMarker]);
+}
 const installedCliPreview = createOpenPetsHookSettingsPreview("published", undefined, "node", fakeAppCliPath);
 const installedCliHook = (((installedCliPreview.hooks as Record<string, unknown>).Stop as Array<{ hooks: Array<{ command: string }> }>)[0]?.hooks[0]);
 assert.equal(installedCliHook?.command, installedCliCommand);
@@ -207,8 +236,9 @@ assert.throws(() => assertInstalledClaudeCliPath(join(dir, "OpenPets.app", "Cont
 assert.throws(() => assertInstalledClaudeCliPath(join(fakeAppCliDir, "index.js")));
 const symlinkedCliPath = join(dir, "linked-cli.js-target", "@open-pets", "claude", "dist", "cli.js");
 mkdirSync(join(dir, "linked-cli.js-target", "@open-pets", "claude", "dist"), { recursive: true });
-symlinkSync(fakeAppCliPath, symlinkedCliPath);
-assert.throws(() => assertInstalledClaudeCliPath(symlinkedCliPath));
+if (tryCreateFileSymlink(fakeAppCliPath, symlinkedCliPath, "Claude hooks reject a linked installed CLI")) {
+  assert.throws(() => assertInstalledClaudeCliPath(symlinkedCliPath));
+}
 
 } finally {
   rmSync(dir, { recursive: true, force: true });

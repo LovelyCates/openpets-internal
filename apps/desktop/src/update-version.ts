@@ -7,6 +7,7 @@ export interface UpdateStatusFromReleaseInput {
 export interface ParsedUpdateStatus {
   readonly state: "available" | "current";
   readonly currentVersion: string;
+  readonly displayVersion: string;
   readonly latestVersion: string;
   readonly releaseUrl: string;
   readonly checkedAt: number;
@@ -18,13 +19,22 @@ export function normalizeVersion(value: unknown): string | null {
   return match ? `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}` : null;
 }
 
-export function createParsedUpdateStatus(currentVersion: string, release: UpdateStatusFromReleaseInput, checkedAt: number, repository: string, releasesPageUrl: string): ParsedUpdateStatus {
+export function getAppVersionInfo(appVersion: string): { readonly currentVersion: string; readonly displayVersion: string } {
+  return {
+    currentVersion: normalizeVersion(appVersion) || "0.0.0",
+    displayVersion: appVersion,
+  };
+}
+
+export function createParsedUpdateStatus(appVersion: string, release: UpdateStatusFromReleaseInput, checkedAt: number, repository: string, releasesPageUrl: string): ParsedUpdateStatus {
+  const { currentVersion, displayVersion } = getAppVersionInfo(appVersion);
   const latestVersion = normalizeVersion(release.tag_name) || normalizeVersion(release.name);
   if (!latestVersion) throw new Error("Latest GitHub release did not include a valid version tag.");
   const releaseUrl = validateGitHubReleaseUrl(release.html_url, repository) || releasesPageUrl;
   return {
     state: isVersionNewer(latestVersion, currentVersion) ? "available" : "current",
     currentVersion,
+    displayVersion,
     latestVersion,
     releaseUrl,
     checkedAt,

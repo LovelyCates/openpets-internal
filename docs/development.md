@@ -179,6 +179,12 @@ catch.
   that contains `openpets.plugin.json` through `OPENPETS_DEV_PLUGIN_ROOTS`, with
   the plugin catalog disabled. Non-plugin folders are ignored, and changes to a
   discovered plugin's manifest or entry file hot-reload it.
+- Both plugin development commands use `scripts/dev-desktop-plugin-roots.mjs` to
+  pass absolute roots with the host path delimiter (`;` on Windows, `:` on
+  macOS/Linux). The launcher also disables the remote plugin catalog and works
+  regardless of which package directory invokes it. For console diagnostics,
+  `pnpm --filter @open-pets/desktop dev:debug` sets the log variables through
+  `cross-env` on every platform.
 - To open the Control Center on a route during development, set
    `OPENPETS_DEV_ROUTE` before starting the Control Center-focused dev command,
    for example `OPENPETS_DEV_ROUTE=teams pnpm dev:desktop:control-center`.

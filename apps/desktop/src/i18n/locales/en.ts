@@ -302,6 +302,8 @@ export const en = {
   "pets.search.reset": "Show all pets",
   "pets.search.empty": "No matching pets",
   "pets.search.emptyHint": "Try fewer keywords or clear a filter.",
+  "pets.activities.empty": "No pets with separate idle activities",
+  "pets.activities.emptyHint": "This filter counts packages with declared activity animations. Classic pets can still wave or jump while idle. Import a complete pet package with activity artwork to add one here.",
   "pets.codex.description": "Pets imported with a Codex source, including codex-pets.net, plus discoverable local Codex packages. This does not scan your official account library.",
   "pets.codex.empty": "No Codex-source pets available",
   "pets.favorites.empty": "No favorites yet",
