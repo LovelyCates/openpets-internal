@@ -6,6 +6,10 @@ OpenCode editor integration for OpenPets.
 uses a separate single-export entrypoint in `src/plugin-v1.ts`; `build:v1` and
 `build:v2` generate self-contained local bundles in `v1-package/` and
 `v2-package/`. See `V1_COMPAT.md` for version selection and internal deployment.
+Both builds minify whitespace without minifying identifiers or syntax. This
+also removes esbuild's dependency-path headers, which otherwise differ between
+Windows' shortened pnpm peer directories and the macOS install layout. Release
+builds regenerate both tracked bundles and require an exact clean diff.
 
 ## Responsibility
 
