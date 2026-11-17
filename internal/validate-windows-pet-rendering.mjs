@@ -8,7 +8,8 @@ import { createRequire } from 'node:module';
 import { release as osRelease } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { animationClockAdvanced, makeSyntheticV1Pixels, parseRenderingArguments, summarizeFrameIntervals } from './windows-pet-rendering-core.mjs';
+import { animationClockAdvanced, findStableIdleWindow, keyframeBackgroundPosition, makeSyntheticV1Pixels, parseRenderingArguments, sharesAnimationClock, summarizeFrameIntervals } from './windows-pet-rendering-core.mjs';
+import { drainCollectorExpression, installCollectorExpression, observationExpression, stopCollectorExpression } from './windows-pet-rendering-sampling.mjs';
 
 const sleep = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
 const deadline = (milliseconds) => Date.now() + milliseconds;
@@ -28,6 +29,7 @@ class PageConnection {
     this.nextId = 0;
     this.pending = new Map();
     this.exceptions = [];
+    this.lifecycle = [];
     this.ready = new Promise((done, reject) => {
       const timer = setTimeout(() => {
         this.socket.close();
@@ -44,6 +46,13 @@ class PageConnection {
       try { message = JSON.parse(String(event.data)); } catch { return; }
       if (message.method === 'Runtime.exceptionThrown' && this.exceptions.length < 20) {
         this.exceptions.push(String(message.params?.exceptionDetails?.text ?? 'Renderer exception').slice(0, 512));
+      }
+      if (['Page.frameNavigated', 'Runtime.executionContextsCleared', 'Runtime.executionContextDestroyed', 'Runtime.executionContextCreated'].includes(message.method)
+        && this.lifecycle.length < 100) {
+        this.lifecycle.push({ method: message.method, observedAt: new Date().toISOString(),
+          frameId: message.params?.frame?.id ?? null, loaderId: message.params?.frame?.loaderId ?? null,
+          executionContextId: message.params?.executionContextId ?? message.params?.context?.id ?? null,
+          defaultContext: message.params?.context?.auxData?.isDefault ?? null });
       }
       const pending = this.pending.get(message.id);
       if (!pending) return;
@@ -109,34 +118,6 @@ async function poll(description, read, milliseconds = 45_000) {
   throw new Error(`${description} was not ready${lastError ? `: ${lastError.message}` : '.'}`);
 }
 
-const observationExpression = `(() => {
-  const root = document.documentElement;
-  const sprite = document.querySelector('.pet-shell .installed-sprite, .pet-shell .sprite');
-  const style = sprite && getComputedStyle(sprite);
-  const rect = sprite && sprite.getBoundingClientRect();
-  return {
-    observedAt: performance.now(), userAgent: navigator.userAgent,
-    visibility: document.visibilityState, focused: document.hasFocus(),
-    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-    devicePixelRatio, readyState: document.readyState,
-    spriteVersion: root.dataset.codexSpriteVersion,
-    reaction: root.dataset.reactionState, motion: root.dataset.motionState,
-    paused: root.dataset.paused, classicRest: root.dataset.classicRest || null,
-    idleAnimation: root.dataset.idleAnimation || null,
-    sprite: sprite ? { display: style.display, visibility: style.visibility,
-      opacity: style.opacity, backgroundPosition: style.backgroundPosition,
-      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      backgroundImagePresent: style.backgroundImage !== 'none' } : null,
-    viewport: { width: innerWidth, height: innerHeight },
-    animations: sprite ? sprite.getAnimations().map(animation => ({
-      name: animation.animationName || animation.id || 'unnamed',
-      time: typeof animation.currentTime === 'number' ? animation.currentTime : null,
-      state: animation.playState, pending: animation.pending,
-      duration: animation.effect?.getComputedTiming().duration,
-    })) : [],
-  };
-})()`;
-
 async function observe(page) { return page.evaluate(observationExpression); }
 
 async function verifyImage(page) {
@@ -152,21 +133,66 @@ async function verifyImage(page) {
 }
 
 async function measureCallbacks(page) {
-  const first = await poll('Running CSS animation', async () => {
-    const snapshot = await observe(page);
-    return snapshot.animations.some((animation) => animation.state === 'running'
-      && Number.isFinite(animation.time)) ? snapshot : null;
-  });
-  const intervals = await page.evaluate(`new Promise((done) => {
-    const values = []; const start = performance.now(); let previous = start;
-    function tick(now) {
-      values.push(now - previous); previous = now;
-      if (now - start >= 4000) done(values); else requestAnimationFrame(tick);
+  const observations = [];
+  const mutations = [];
+  const intervals = [];
+  const contextInterruptions = [];
+  const startedAt = Date.now();
+  const until = deadline(30_000);
+  let stable;
+  let collectorInstalled = false;
+  let collectionError;
+  let mutationEventsSeen = 0;
+  try {
+    while (Date.now() < until) {
+      try {
+        if (!collectorInstalled) {
+          await page.evaluate(installCollectorExpression);
+          collectorInstalled = true;
+        }
+        const batch = await page.evaluate(drainCollectorExpression);
+        if (!batch) { collectorInstalled = false; continue; }
+        observations.push(...batch.observations);
+        mutationEventsSeen += batch.mutationEventsSeen;
+        if (mutations.length < 400) mutations.push(...batch.mutations.slice(0, 400 - mutations.length));
+        intervals.push(...batch.intervals);
+        stable = findStableIdleWindow(observations);
+        if (stable) break;
+      } catch (error) {
+        if (!/context.*destroy|context.*not found|cannot find context/i.test(error.message)) throw error;
+        contextInterruptions.push({ at: new Date().toISOString(), error: error.message });
+        collectorInstalled = false;
+      }
+      await sleep(250);
     }
-    requestAnimationFrame(tick);
-  })`);
-  const last = await observe(page);
-  return { first, last, cssClockAdvanced: animationClockAdvanced(first, last), raf: summarizeFrameIntervals(intervals) };
+  } catch (error) {
+    collectionError = error instanceof Error ? error.message : String(error);
+  } finally {
+    await page.evaluate(stopCollectorExpression).catch(() => {});
+  }
+  const coldFirst = observations[0] ?? await observe(page);
+  const last = stable?.last ?? observations.at(-1) ?? coldFirst;
+  const clockSteps = observations.slice(1).map((current, index) => {
+    const previous = observations[index];
+    const before = previous.animations[0];
+    const after = current.animations[0];
+    return { at: current.observedAt, documentTimeOrigin: current.documentTimeOrigin,
+      elapsedMs: current.documentTimeOrigin === previous.documentTimeOrigin ? current.observedAt - previous.observedAt : null,
+      sameObject: Boolean(before && after && current.documentIdentity === previous.documentIdentity
+        && current.documentTimeOrigin === previous.documentTimeOrigin && current.sprite?.identity === previous.sprite?.identity
+        && before.identity === after.identity && before.name === after.name && before.startTime === after.startTime),
+      advanceMs: Number.isFinite(before?.time) && Number.isFinite(after?.time) ? after.time - before.time : null };
+  });
+  return { first: stable?.first ?? coldFirst, last, coldFirst,
+    cssClockAdvanced: Boolean(stable) && !collectionError,
+    stableIdleWindow: stable ? { requiredMs: 8000, elapsedMs: stable.elapsedMs, advanceMs: stable.advanceMs,
+      playbackRate: stable.playbackRate } : null,
+    deadlineMs: 30_000, measuredWallMs: Date.now() - startedAt,
+    collectionError: collectionError ?? null, observations, clockSteps, mutations,
+    mutationsTruncated: mutationEventsSeen > mutations.length,
+    navigationAndContexts: [...page.lifecycle], contextInterruptions,
+    observationGaps: summarizeFrameIntervals(clockSteps.map(step => step.elapsedMs).filter(value => value !== null)),
+    raf: summarizeFrameIntervals(intervals) };
 }
 
 async function screenshot(page, sharp, output, name) {
@@ -198,18 +224,22 @@ async function screenshot(page, sharp, output, name) {
 }
 
 async function captureBuiltinIdleFrames(page, sharp, output) {
-  const authored = await page.evaluate(`(() => {
+  const authored = await poll('Bundled authored idle after any startup interruption', () => page.evaluate(`(() => {
+    const backgroundPositionOf = ${keyframeBackgroundPosition.toString()};
     const sprite = document.querySelector('.pet-shell .sprite');
     const animation = sprite?.getAnimations().find(item => item.animationName === 'pet-builtin-idle');
-    if (!animation) throw new Error('Bundled pet authored idle animation is absent.');
+    const root = document.documentElement;
+    if (!animation || animation.playState !== 'running' || animation.pending
+      || root.dataset.reactionState !== 'idle' || root.dataset.motionState !== 'idle'
+      || root.dataset.paused !== 'false' || matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
     const duration = animation.effect.getComputedTiming().duration;
     const keyframes = animation.effect.getKeyframes();
     return { duration, holds: keyframes.slice(0, -1).map((frame, index) => ({
-      position: frame.backgroundPosition,
+      position: backgroundPositionOf(frame),
       start: frame.computedOffset * duration,
       end: keyframes[index + 1].computedOffset * duration,
     })) };
-  })()`);
+  })()`), 30_000);
   assert.ok(Number.isFinite(authored.duration) && authored.duration > 0, 'Bundled idle has no finite authored period.');
   // Observe the two longest actual authored holds. The 110ms blink is too short
   // to attribute a screenshot reliably on a shared runner; no CSS clock is forced.
@@ -231,7 +261,11 @@ async function captureBuiltinIdleFrames(page, sharp, output) {
         const image = await screenshot(page, sharp, output, `builtin-v2-idle-${index}.png`);
         const after = await observe(page);
         if (image.snapshot.sprite.backgroundPosition === hold.position
-          && after.sprite.backgroundPosition === hold.position) {
+          && after.sprite.backgroundPosition === hold.position
+          && sharesAnimationClock(state, image.snapshot, 'pet-builtin-idle')
+          && sharesAnimationClock(image.snapshot, after, 'pet-builtin-idle')
+          && [image.snapshot, after].every(snapshot => snapshot.reaction === 'idle'
+            && snapshot.motion === 'idle' && snapshot.paused === 'false' && !snapshot.reducedMotion)) {
           captured = image;
           break;
         }
@@ -283,7 +317,22 @@ async function setMotionTestMedia(page) {
   }
   return { observedSystemReducedMotion: actual.reducedMotion,
     testMediaOverride: actual.reducedMotion ? 'no-preference (test-only renderer emulation)' : null,
+    noPreferencePlaybackVerified: false, defaultSystemAnimationVerified: false,
+    defaultSystemAnimationScope: actual.reducedMotion
+      ? 'System requests reduced motion. A test-only no-preference pass does not verify default system animation.'
+      : 'No media override; default animation is verified only if the clock and pixel gate succeeds.',
     actualSystemObservation: actual };
+}
+
+function markPlaybackVerified(media) {
+  media.noPreferencePlaybackVerified = true;
+  media.defaultSystemAnimationVerified = !media.observedSystemReducedMotion;
+}
+
+async function captureClockFailure(page, sharp, output, name) {
+  const scope = 'Captured after the failed clock measurement; screenshot-triggered composition cannot change its verdict.';
+  try { return { scope, image: await screenshot(page, sharp, output, name) }; }
+  catch (error) { return { scope, error: error instanceof Error ? error.message : String(error) }; }
 }
 
 async function waitQuietGesture(page, sharp, output, heartbeatFailure, prefix = 'v1') {
@@ -410,7 +459,7 @@ async function main() {
   const ownershipPath = join(profile, '.render-validation-owner.json');
   await writeFile(ownershipPath, ownership, { flag: 'wx' });
   const report = {
-    schemaVersion: 1, startedAt: new Date().toISOString(), status: 'incomplete',
+    schemaVersion: 2, startedAt: new Date().toISOString(), status: 'incomplete',
     appVersion: packageMetadata.version, actualProductExecutable: true, testCarrier: false,
     executableSha256: await hashFile(executable), appAsarSha256: await hashFile(asarPath),
     platform: process.platform, arch: process.arch, windowsKernelVersion: osRelease(),
@@ -419,6 +468,7 @@ async function main() {
     comparisonReference: { macAppVersion: '4.1.0-internal.12', macElectronVersion: '42.0.0',
       scope: 'User-approved Mac baseline reported separately; this script does not execute that Mac app.' },
     limitation: 'Native hosted Windows renderer evidence; not the user GPU/DPI, physical DWM frame presentation, installed shortcuts, or a full cross-platform GUI equivalence proof.',
+    animationValidationScope: 'No-preference playback gate. Actual system reduced-motion and test-only media overrides are reported separately; emulation never proves default-system animation playback.',
   };
   const connections = [];
   let child;
@@ -475,13 +525,16 @@ async function main() {
     report.builtinV2 = { media: await setMotionTestMedia(builtin), image: await verifyImage(builtin) };
     const callbacks = await measureCallbacks(builtin);
     report.builtinV2.callbacks = callbacks;
+    if (!callbacks.cssClockAdvanced) {
+      report.builtinV2.failedClockCapture = await captureClockFailure(builtin, sharp, output, 'builtin-v2-failed-clock.png');
+    }
     assert.ok(report.builtinV2.image.loaded && callbacks.last.spriteVersion === '2', 'Actual Builtin V2 artwork did not load.');
     assert.ok(callbacks.cssClockAdvanced, 'Actual Builtin V2 CSS animation clock did not advance.');
-    assert.ok(callbacks.raf.intervalCount > 0, 'Native page received no animation callbacks.');
     report.builtinV2.screenshot = await screenshot(builtin, sharp, output, 'builtin-v2.png');
     assert.ok(report.builtinV2.screenshot.opaquePixels > 0
       && report.builtinV2.screenshot.distinctColorsCapped1024 > 1, 'Builtin V2 sprite capture is empty or a flat blank surface.');
     report.builtinV2.idle = await captureBuiltinIdleFrames(builtin, sharp, output);
+    markPlaybackVerified(report.builtinV2.media);
 
     fixture = join(runnerTemp, `openpets-render-v1-${randomUUID()}`);
     await mkdir(fixture);
@@ -504,9 +557,13 @@ async function main() {
     report.v1 = { media: await setMotionTestMedia(v1), image: await verifyImage(v1) };
     const v1Callbacks = await measureCallbacks(v1);
     report.v1.callbacks = v1Callbacks;
+    if (!v1Callbacks.cssClockAdvanced) {
+      report.v1.failedClockCapture = await captureClockFailure(v1, sharp, output, 'v1-failed-clock.png');
+    }
     assert.equal(v1Callbacks.last.spriteVersion, '1');
     assert.ok(report.v1.image.loaded && v1Callbacks.cssClockAdvanced, 'Actual imported V1 atlas/CSS clock is unavailable.');
     report.v1.quietGesture = await waitQuietGesture(v1, sharp, output, () => heartbeatError);
+    markPlaybackVerified(report.v1.media);
     report.v1.exceptions = v1.exceptions;
     report.builtinV2.exceptions = builtin.exceptions;
     assert.equal(v1.exceptions.length + builtin.exceptions.length, 0, 'The pet renderer reported an uncaught exception.');
@@ -537,10 +594,14 @@ async function main() {
         report.publicYukino.media = await setMotionTestMedia(yukino);
         report.publicYukino.image = await verifyImage(yukino);
         report.publicYukino.callbacks = await measureCallbacks(yukino);
+        if (!report.publicYukino.callbacks.cssClockAdvanced) {
+          report.publicYukino.failedClockCapture = await captureClockFailure(yukino, sharp, output, 'yukino-failed-clock.png');
+        }
         assert.equal(report.publicYukino.callbacks.last.spriteVersion, '1');
         assert.ok(report.publicYukino.callbacks.cssClockAdvanced, 'Public Yukino CSS clock did not advance.');
         report.publicYukino.idle = await captureIdleColumns(yukino, sharp, output);
         report.publicYukino.quietGesture = await waitQuietGesture(yukino, sharp, output, () => heartbeatError, 'yukino');
+        markPlaybackVerified(report.publicYukino.media);
         report.publicYukino.exceptions = yukino.exceptions;
         assert.equal(yukino.exceptions.length, 0, 'Public Yukino renderer reported an uncaught exception.');
         report.publicYukino.status = 'passed';

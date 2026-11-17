@@ -119,19 +119,39 @@ Production entry points and IPC policy are unchanged.
 The Builtin V2 gate requires a decoded atlas, a visible nonblank sprite capture,
 an advancing CSS animation clock and different visible pixels in two naturally
 reached authored idle holds. These holds are read from the packaged CSS; the gate
-does not force its clock or depend on capturing the brief blink. A generated, distinguishable V1 atlas is
+does not force its clock or depend on capturing the brief blink. The clock check
+retains the cold-start trace, allows bounded startup greetings/replacements, and
+requires a final continuous eight-second idle window within a 30-second deadline.
+Document time origin, document/sprite/animation identities, animation start time,
+playback rate, phase, semantic attribute mutations and navigation/context events
+distinguish a legitimate idle restart from a clock that never advances. Same-value
+HUD attribute writes do not reset this window; a short busy-to-idle transition
+between samples still invalidates it. The same active animation must naturally
+advance by at least 80% of the elapsed page time at its playback rate. Repeated
+restarts or a stalled clock fail even if rAF callbacks continue. Per-observation
+clock deltas and sample gaps remain diagnostic; this does not establish DWM
+smoothness. The two V2 hold captures must share the expected active clock around
+each screenshot, so a replacement returning to the same position cannot pass.
+
+A generated, distinguishable V1 atlas is
 then installed through the packaged local IPC client and shown using an explicit
 lease. Lease heartbeats do not change the reaction. Within 35 seconds of quiet
 observation, the V1 idle gesture must appear, its CSS clock must advance and
 staged sprite captures must differ. Resource dimensions, document visibility,
 focus, DPI, actual reduced-motion preference and any test-only no-preference
-media override are recorded. Neither an authored long frame hold nor a CSS
+media override are recorded. When the actual system requests reduced motion,
+the report keeps `defaultSystemAnimationVerified: false` even after a test-only
+no-preference scenario passes; emulated animation playback never proves the
+default Windows experience. Neither an authored long frame hold nor a CSS
 animation object alone counts as a rendering failure or success.
 
 The workflow retains the JSON report, bounded product log and pet-only PNGs on
 failure as well as success. rAF callback intervals are sampled separately from
 screenshots: they describe renderer scheduling, not DWM presentation or the
-user's GPU. Native hosted rendering evidence supplements the package digests;
+user's GPU, and no rAF count or FPS threshold can pass the gate. A failed clock
+may be followed by a separately labeled diagnostic screenshot; the composition
+requested by that capture cannot retroactively change the failed verdict.
+Native hosted rendering evidence supplements the package digests;
 it does not establish complete Windows/macOS GUI equivalence. The Mac reference
 reported in this gate is the separately user-approved Internal 12 / Electron 42
 application, not a concurrently executed Mac build. Run

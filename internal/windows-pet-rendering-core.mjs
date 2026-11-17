@@ -21,11 +21,74 @@ export function summarizeFrameIntervals(intervals) {
   };
 }
 
+/** Chromium expands background-position into X/Y in computed keyframes. */
+export function keyframeBackgroundPosition(frame) {
+  if (typeof frame.backgroundPosition === 'string') return frame.backgroundPosition;
+  if (typeof frame.backgroundPositionX === 'string' && typeof frame.backgroundPositionY === 'string') {
+    return `${frame.backgroundPositionX} ${frame.backgroundPositionY}`;
+  }
+  return null;
+}
+
 export function animationClockAdvanced(first, last) {
+  if (!sameDocumentAndSprite(first, last)) return false;
   return first.animations.some((before) => last.animations.some((after) => {
-    return before.name === after.name && Number.isFinite(before.time) && Number.isFinite(after.time)
+    return sameAnimation(before, after) && before.state === 'running' && after.state === 'running'
+      && !before.pending && !after.pending && Number.isFinite(before.time) && Number.isFinite(after.time)
       && after.time > before.time + 100;
   }));
+}
+
+export function sharesAnimationClock(first, last, name) {
+  return sameDocumentAndSprite(first, last) && first.animations.some((before) => before.name === name
+    && last.animations.some((after) => sameAnimation(before, after)
+      && before.state === 'running' && after.state === 'running' && !before.pending && !after.pending
+      && Number.isFinite(before.time) && Number.isFinite(after.time) && after.time >= before.time));
+}
+
+function sameDocumentAndSprite(first, last) {
+  return Number.isFinite(first.documentTimeOrigin) && first.documentTimeOrigin === last.documentTimeOrigin
+    && first.documentIdentity !== undefined && first.documentIdentity === last.documentIdentity
+    && first.semanticEpoch === last.semanticEpoch
+    && first.sprite?.identity !== undefined && first.sprite.identity === last.sprite?.identity;
+}
+
+function sameAnimation(before, after) {
+  return before.identity !== undefined && before.identity === after.identity && before.name === after.name
+    && Number.isFinite(before.startTime) && before.startTime === after.startTime
+    && Number.isFinite(before.playbackRate) && before.playbackRate > 0 && before.playbackRate === after.playbackRate;
+}
+
+/** A startup greeting may interrupt idle; only an uninterrupted natural clock proves idle playback. */
+export function findStableIdleWindow(observations, durationMs = 8000) {
+  let first;
+  let previous;
+  let selected;
+  for (const current of observations) {
+    const idle = current.visibility === 'visible' && current.reaction === 'idle' && current.motion === 'idle'
+      && current.paused === 'false' && !current.reducedMotion && !current.idleAnimation;
+    const active = idle ? current.animations.filter((animation) => animation.changesBackgroundPosition
+      && animation.state === 'running' && !animation.pending && Number.isFinite(animation.time)
+      && Number.isFinite(animation.startTime) && Number.isFinite(animation.playbackRate) && animation.playbackRate > 0) : [];
+    const animation = active.find((candidate) => selected && sameAnimation(selected, candidate)) ?? active[0];
+    if (!animation) {
+      first = previous = selected = undefined;
+      continue;
+    }
+    if (!first || !sameDocumentAndSprite(first, current) || !sameAnimation(selected, animation)
+      || current.observedAt < previous.observedAt || animation.time < selected.time - 1) {
+      first = current;
+    }
+    previous = current;
+    selected = animation;
+    const firstAnimation = first.animations.find((candidate) => sameAnimation(candidate, animation));
+    const elapsedMs = current.observedAt - first.observedAt;
+    const advanceMs = animation.time - firstAnimation.time;
+    if (elapsedMs >= durationMs && advanceMs >= elapsedMs * animation.playbackRate * 0.8) {
+      return { first, last: current, elapsedMs, advanceMs, playbackRate: animation.playbackRate };
+    }
+  }
+  return null;
 }
 
 export function makeSyntheticV1Pixels() {

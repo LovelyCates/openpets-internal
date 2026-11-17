@@ -34,6 +34,19 @@ busy 状态；等待至多 35 秒，要求 V1 空闲手势出现、动画时钟�
 启动日志及宠物窗口 PNG，不截取桌面或用户数据。rAF 采样和截图阶段分开，
 不把截图促成的绘制当作无干扰帧率测量。
 
+时钟验收保留从冷启动起的连续观测，在 30 秒期限内要求同一 document、sprite
+和 CSSAnimation 最终连续 8 秒保持 idle，并按自身 playbackRate 自然推进
+至少对应页面 elapsed 时间的 80%。启动欢迎动作可以让 idle 合法重启；观测
+保留对象小型 ID、timeOrigin、startTime、每步时钟/帧位、关键 root/DOM 变化及
+导航/context 事件，不再只比较两端同名动画。普通 HUD 同值写回不重置稳定窗，
+采样间短暂进入再退出 busy 仍会使该窗口失效。持续重启或长期停住必须失败。
+V2 的自然帧截图前后还要保持同一活跃时钟，不能以替换后碰巧相同的位置通过。
+
+系统实际 reduced-motion 与验证用 no-preference 是两个结果：当真实系统值
+为 reduce 时，即使模拟 no-preference 播放通过，报告仍明确
+`defaultSystemAnimationVerified: false`。rAF 只保存调度统计，不作为通过标准。
+若时钟门槛失败，之后保存的诊断截图单独标记，不能以截图促成的绘制反转失败。
+
 工作流还启用 `--with-public-yukino`：只向临时目录下载公开 catalog 的原始
 Yukino ZIP，要求固定 1,139,788 字节和 SHA-256
 `0021e18df93dbb4afd2215c03ef3c2a81d60fcde9340662907e816da6f441e1e`。
