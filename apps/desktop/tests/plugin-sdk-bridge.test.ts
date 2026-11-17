@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { Agent } from "undici";
 
-import { PluginSdkBridge, type PluginDeliveryHostHandle, type PluginHostCapabilities } from "../src/plugin-sdk-bridge.js";
+import { PluginSdkBridge, type PluginBubbleCallbacks, type PluginDeliveryHostHandle, type PluginHostCapabilities } from "../src/plugin-sdk-bridge.js";
 import { pluginSdkQuotas } from "../src/plugin-sdk-quotas.js";
 import { PluginStateStore, type PluginStateRecord } from "../src/plugin-state.js";
 import type { OpenPetsJavascriptPluginManifest, PluginJavascriptPermission } from "../src/plugin-manifest.js";
@@ -200,6 +200,37 @@ await scenario("pet action quotas are independent for each live handle", async (
     "the pinned handle retains the same independent action cap",
   );
   await movementApi.pets.forPet("pinned:owl").wander({ distance: 1 });
+});
+
+await scenario("async bubble callbacks report errors and stop before a disposed plugin is called", async ({ store, bridge, capabilities, errors }) => {
+  let callbacks: PluginBubbleCallbacks | undefined;
+  capabilities.bubbles.show = async (options) => {
+    callbacks = options.callbacks;
+    return {
+      id: "recorded-bubble",
+      update: async () => undefined,
+      dismiss: async () => { options.callbacks.onDismiss("manual"); },
+      pin: async () => undefined,
+      unpin: async () => undefined,
+    };
+  };
+  const record = store.getRecord("plug")!;
+  const approved = { ...record, approvedPermissions: [...record.approvedPermissions, "pet:speak" as const] };
+  store.upsertRecord(approved);
+  const api = bridge.createApi(approved, manifest({ permissions: approved.approvedPermissions as OpenPetsJavascriptPluginManifest["permissions"] }));
+  const bubble = await api.ui.bubble({ text: "Choose an action" });
+  api.ui.bubbleSubscribe(bubble.bubbleId, "action", async () => { throw new Error("Action failed asynchronously."); });
+  assert.ok(callbacks);
+  callbacks.onAction("go");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(errors, ["Action failed asynchronously."]);
+
+  let lateDismissals = 0;
+  api.ui.bubbleSubscribe(bubble.bubbleId, "dismiss", async () => { lateDismissals += 1; });
+  await bridge.clearPlugin("plug");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(lateDismissals, 0, "teardown must not start an IPC callback after its renderer is disposed");
+  assert.deepEqual(errors, ["Action failed asynchronously."]);
 });
 
 await scenario("hud bubble spec validation is enforced", async ({ store, bridge }) => {

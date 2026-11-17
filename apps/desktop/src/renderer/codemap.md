@@ -10,6 +10,7 @@ Vite renderer workspace for the desktop React/Tailwind Control Center. It owns t
 - Uses `control-center-preload.cjs` as the only bridge to the main process; `ipcRenderer` is not exposed directly.
 - Production output is emitted to `apps/desktop/dist/renderer/`; development can load a loopback-only Vite URL.
 - Transparent pet windows and plugin JavaScript host windows are separate lightweight renderers and do not live here.
+- The internal Control Center omits provider management, remote control and LAN settings, including their navigation/deep links. General settings includes the persisted display switch for the pet's realtime and average token rates.
 
 ## Key Files
 

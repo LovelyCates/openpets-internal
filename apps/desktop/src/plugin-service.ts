@@ -892,7 +892,8 @@ export async function getDefaultPetPluginMenuItems(maxPlugins = Number.POSITIVE_
 
 export async function executeDefaultPetPluginCommand(pluginId: string, commandId: string, args?: Record<string, unknown>): Promise<void> {
   if (!appPluginService) return;
-  await appPluginService.executeCommand(pluginId, commandId, args);
+  const result = await appPluginService.executeCommand(pluginId, commandId, args);
+  if (!result.ok) throw new Error(result.error);
 }
 
 export async function executeDefaultPetPluginMenuSelect(pluginId: string, itemId: string): Promise<void> {

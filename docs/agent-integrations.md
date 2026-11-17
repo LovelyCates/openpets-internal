@@ -64,7 +64,8 @@ port-forwarded listeners, or shared/untrusted Wi-Fi; prefer an encrypted
 overlay with its own ACLs. A CGNAT-range endpoint is only an allowed private
 address classification, not an encryption boundary. Remote control configuration,
 client pairing, token rotation, and credential revocation can be managed directly
-in Control Center under Settings → Remote.
+through the remote-control service. This Internal edition hides the remote
+management page; it does not offer pairing from Control Center.
 
 ## Pet pool: multiple agents, multiple pets
 
@@ -286,8 +287,12 @@ Ships both a config manager and a runtime plugin.
   and is never an arithmetic mean of rolling rates or a whole-session statistic.
   A final report can retain the sampled AVG; a report without sampled output
   timing cannot invent one. The dock uses `tk/s` for both metrics, with separate
-  speed colors and no agent brand label;
-  a completed step/message can replace it with OpenCode's reported output-token
+  speed colors and no agent brand label.
+  **Settings → General → Token speed (tk/s / AVG)** controls the dock on all pet
+  windows. Its default is on for new and existing profiles. The saved display
+  preference takes effect immediately; hiding it preserves local sampling,
+  session reactions and the latest average so enabling it restores current data.
+  A completed step/message can replace it with OpenCode's reported output-token
   count. Successful idle clears a live estimate, while a freshly reported final
   count remains current until the desktop's eight-second expiry. The dock then
   remains idle with the last available AVG labeled as historical; expired

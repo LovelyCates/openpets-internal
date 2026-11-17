@@ -6,13 +6,10 @@ export type ControlCenterRoute =
   | "plugins"
   | "integrations";
 
-export type ControlCenterAssistantTab = "providers";
-
 export type ControlCenterRouteTarget =
-  | { readonly route: "assistant"; readonly assistantTab?: ControlCenterAssistantTab; readonly petId?: never }
   /** `petId` opens that pet's detail (e.g. its wardrobe) once the Pets page loads. */
-  | { readonly route: "pets"; readonly petId?: string; readonly assistantTab?: never }
-  | { readonly route: Exclude<ControlCenterRoute, "assistant" | "pets">; readonly assistantTab?: never; readonly petId?: never };
+  | { readonly route: "pets"; readonly petId?: string }
+  | { readonly route: Exclude<ControlCenterRoute, "pets">; readonly petId?: never };
 
 const controlCenterRoutes = new Set<ControlCenterRoute>([
   "dashboard",
@@ -35,11 +32,8 @@ export function normalizeControlCenterRouteTarget(target: unknown): ControlCente
   if (typeof target === "string") return { route: normalizeControlCenterRoute(target) };
   if (!target || typeof target !== "object") return { route: "dashboard" };
 
-  const candidate = target as { readonly route?: unknown; readonly assistantTab?: unknown; readonly petId?: unknown };
+  const candidate = target as { readonly route?: unknown; readonly petId?: unknown };
   const route = normalizeControlCenterRoute(candidate.route);
-  if (route === "assistant" && candidate.assistantTab === "providers") {
-    return { route, assistantTab: "providers" };
-  }
   if (route === "pets" && typeof candidate.petId === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(candidate.petId)) {
     return { route, petId: candidate.petId };
   }
@@ -48,7 +42,6 @@ export function normalizeControlCenterRouteTarget(target: unknown): ControlCente
 
 export type DevControlCenterRouteResolution =
   | { readonly kind: "route"; readonly route: ControlCenterRoute }
-  | { readonly kind: "target"; readonly target: ControlCenterRouteTarget }
   | { readonly kind: "invalid"; readonly rawValue: string }
   | null;
 
@@ -60,10 +53,6 @@ export function resolveDevControlCenterRoute(
 ): DevControlCenterRouteResolution {
   if (isPackaged || rawValue === undefined) return null;
   if (isControlCenterRoute(rawValue)) return { kind: "route", route: rawValue };
-  if (rawValue === "providers") {
-    return { kind: "target", target: { route: "assistant", assistantTab: "providers" } };
-  }
-
   return {
     kind: "invalid",
     rawValue: rawValue.slice(0, maxInvalidRouteLogLength).replace(/[\u0000-\u001f\u007f]/g, "�"),

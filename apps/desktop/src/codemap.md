@@ -98,7 +98,11 @@ OpenCode token usage display:
 independent speed tiers, and bounded per-target idle history → `local-ipc.ts`
 sends the formatted two-column dock to the target pet window,
 refreshing geometry only when its presence changes → `pet-preload.cjs` updates
-the existing dock DOM. `pet-window-render.ts` supplies initial dock markup;
+the existing dock DOM. The saved `showOpenCodeTokenRate` preference controls
+initial markup, live dock visibility and geometry without discarding local
+readings. The preload retains incoming values while its stage disables the dock,
+so re-enabling it restores the latest live/AVG pair immediately.
+`pet-window-render.ts` supplies initial dock markup;
 `pet-window-shape.ts` shares its lift across gaze, Motion, input and overlay
 geometry. `pet-window-styles.ts` stacks it below the separate pinned plugin HUD
 slot. Lease release clears
@@ -324,7 +328,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `pet-assistant-personality.ts`: Pure personality defaults, bounds, patch validation, and safe deterministic serialization
 - `pet-assistant-feedback.ts`: Reducer mapping assistant activity and terminal events to pet reactions, suppressing duplicate text during expanded chat while preserving sprite activity/reaction animations
 - `team-service.ts`: Teams enrollment preview lifecycle, authoritative identity/expiry snapshots, serialized enrollment/sync/leave operations, and preview-change subscriptions used to refresh an already-running Control Center route
-- `manager-check-in-service.ts`: Bundled weekly Manager Check-ins lifecycle; synchronizes organization settings/history, computes local-week due state, presents a history-free pet snapshot, owns explicit submission and idempotent retry behavior, and keeps pause state device-private
+- `manager-check-in-service.ts`: Bundled weekly Manager Check-ins lifecycle; synchronizes organization settings/history, computes local-week due state, presents a history-free pet snapshot, owns explicit submission and idempotent retry behavior, and keeps pause state device-private. Pet-only reads project an empty item/count before initialization or when Teams is disabled; operations retain the strict initialized-service accessor.
 - `manager-check-in-state.ts`: Atomic local Manager Check-ins state with bounded history, pending client-generated submission identity, local-week offer/submission markers, and scheduled-offer pause
 - `team-api-client.ts`: Teams enrollment, Team Pack, and Manager Check-ins API adapter; validates fixed feelings and bounded submissions, while the pet card enforces its 500-character note limit and client-generated IDs provide idempotent immutable retries
 - `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui, voice, provider), bounded serialized live rotation and pending writes, shutdown flush, private POSIX files, credential redaction
@@ -468,7 +472,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-sdk-state.ts`: Shared plugin context state, listener cleanup, and lifecycle bookkeeping used by route handlers.
 - `plugin-sdk-storage.ts`: Quota-bound plugin storage namespace with key enumeration and subscriptions.
 - `plugin-sdk-types.ts`: Internal host-side SDK interfaces mirroring the published `@open-pets/plugin-sdk` contract.
-- `plugin-sdk-ui.ts`: Host-rendered UI namespace for bubbles, alerts, menu items, panels, practice session overlays, and dynamic interaction callbacks.
+- `plugin-sdk-ui.ts`: Host-rendered UI namespace for bubbles, alerts, menu items, panels, practice session overlays, and dynamic interaction callbacks; bubble action/submit/dismiss handlers use the shared async-error and generation guard before calling a plugin renderer.
 - `plugin-assets.ts`: Declared asset resolution and validation for icon/image/svg/sprite/sound references used by plugin SDK calls and catalog cards.
 - `plugin-bubble-arbiter.ts`: Priority/coalescing arbiter for transient and pinned plugin bubble slots.
 - `system-metrics-core.ts`: Electron-independent metric/counter types, pure parsers/calculations, network throughput sampler, and stale-while-revalidate cache.

@@ -723,11 +723,22 @@ await scenario("right-click command helper keeps explicit caps while exposing ev
   } as unknown as PluginService);
   assert.deepEqual((await getDefaultPetPluginMenuItems()).map((item) => item.pluginId), manyPlugins.map((plugin) => plugin.id));
   assert.deepEqual((await getDefaultPetPluginMenuItems(2)).map((item) => item.pluginId), ["plugin-01", "plugin-02"]);
-  setPluginServiceForTests({ getSnapshot: async () => ({ plugins: [{ id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] }, { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [] }] }), executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); }, stop() {} } as unknown as PluginService);
+  setPluginServiceForTests({ getSnapshot: async () => ({ plugins: [{ id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] }, { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [] }] }), executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); return { ok: true, snapshot: { plugins: [] } }; }, stop() {} } as unknown as PluginService);
   assert.deepEqual((await getDefaultPetPluginCommands()).map((command) => command.pluginId), ["alpha"]);
   await executeDefaultPetPluginCommand("alpha", "run");
   assert.deepEqual(runtime.executed, [{ pluginId: "alpha", commandId: "run" }]);
   stopPluginService();
+});
+
+await scenario("pet-menu form failures propagate instead of being treated as a successful submit", async ({ service, store, runtime }) => {
+  addPlugin(store);
+  runtime.commandError = new Error("Message is required.");
+  setPluginServiceForTests(service);
+  try {
+    await assert.rejects(() => executeDefaultPetPluginCommand("plug", "set-reminder"), /Message is required/);
+  } finally {
+    setPluginServiceForTests(null);
+  }
 });
 
 await scenario("executeCommand returns plugin command validation errors", async ({ service, store, runtime }) => {

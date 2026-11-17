@@ -317,16 +317,14 @@ its own access-control list is strongly preferred. CGNAT-range addressing is
 only an address classification for the boundary check; it does not provide
 encryption or confidentiality.
 
-### Control Center Setup & Pairing Flow
+### Remote management contract
 
-Control Center provides UI management under **Settings → Remote**:
-
-1. **Status & Listener Configuration**: Disabled by default. Enabling requires entering an explicit concrete IPv4 bind address and port (no wildcard `0.0.0.0` or default autocomplete).
-2. **Transport Warning & Acknowledgement**: Enabling requires reading a prominent warning regarding raw unencrypted TCP and explicitly checking an acknowledgement of the private network requirement before the listener can be started.
-3. **Paired Client Management**: Displays active/revoked clients with scopes (`status`, `react`, `say`), creation date, and last activity time.
-4. **Pairing Flow**: Pairing requires a client name and scope selection (`status` and `react` required; `say` unchecked by default).
-5. **One-Time Token Handoff**: Pair and rotate return the plaintext bearer token exactly once in a dedicated setup modal along with Client ID, environment variable examples (`OPENPETS_REMOTE_ENDPOINT="tcp://<address>:<port>"`, `OPENPETS_REMOTE_CLIENT_ID`, `OPENPETS_REMOTE_TOKEN`), and copy controls. Dismissing the modal immediately clears the token from component state. The token is never stored in plaintext or logged.
-6. **Rotation & Revocation**: Destructive actions require explicit confirmation modals. Revoking immediately invalidates access for the client ID.
+This Internal edition hides the remote-control page and pairing/token dialogs.
+The host APIs retain listener configuration, explicit private IPv4 validation,
+transport acknowledgement, scoped client listing, pairing, rotation and revocation.
+Pairing and rotation return the plaintext token only once; persistence keeps its
+verifier rather than the token. Hiding the page does not start a listener or alter
+stored configuration, client scopes, transport restrictions or token lifetime.
 
 ## Security
 

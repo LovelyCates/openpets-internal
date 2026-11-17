@@ -114,6 +114,22 @@ function installed(id: string): InstalledPetState {
   return pet;
 }
 
+test("token dock visibility defaults on for existing profiles and survives preference saves and restart", () => {
+  withState(() => ({ preferences: { petScale: 1 } }), ({ userData }) => {
+    assert.equal(appState.getPetRenderPreferences().showOpenCodeTokenRate, true);
+    appState.updatePreferences({ showOpenCodeTokenRate: false });
+    assert.equal(appState.isOpenCodeTokenRateDisplayEnabled(), false);
+    appState.updatePreferences({ openDefaultPetOnLaunch: false });
+    const saved = JSON.parse(readFileSync(join(userData, "openpets-state.json"), "utf8"));
+    assert.equal(saved.preferences.showOpenCodeTokenRate, false);
+    appState.releaseStartupInstallLock();
+    appState.initializeAppState();
+    assert.equal(appState.getPetRenderPreferences().showOpenCodeTokenRate, false);
+    appState.updatePreferences({ showOpenCodeTokenRate: true });
+    assert.equal(appState.isOpenCodeTokenRateDisplayEnabled(), true);
+  });
+});
+
 test("library favorites persist independently of installation, desktop pins and pools", () => {
   withState((userData) => {
     writePet(userData, "bookmark-cat");

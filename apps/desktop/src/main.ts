@@ -28,7 +28,7 @@ import { startVoiceAssistantHost } from "./voice-assistant-host.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
 import { publicNetworkEnabled, remoteNetworkEnabled, thirdPartyPluginsEnabled } from "./internal-network-policy.js";
-import { broadcastDashboardRefresh, broadcastManagerCheckInsRefresh, broadcastPluginRecordsRefresh, installInternalUiHandlers, installInternalUiProtocol, openControlCenterWindow, openControlCenterWindowTarget } from "./windows.js";
+import { broadcastDashboardRefresh, broadcastManagerCheckInsRefresh, broadcastPluginRecordsRefresh, installInternalUiHandlers, installInternalUiProtocol, openControlCenterWindow } from "./windows.js";
 import { sessionMediaScheme } from "./session-media-cache.js";
 import { broadcastDefaultPetManagerCheckInSnapshot, installDefaultPetChatIpcHandlers } from "./default-pet-chat.js";
 import { initializeVoiceAssistantShortcut } from "./voice-assistant-shortcut.js";
@@ -474,8 +474,6 @@ if (!gotSingleInstanceLock) {
       warn("ui", "ignored invalid OPENPETS_DEV_ROUTE", { value: devRoute.rawValue });
     } else if (devRoute?.kind === "route") {
       openControlCenterWindow(devRoute.route);
-    } else if (devRoute?.kind === "target") {
-      openControlCenterWindowTarget(devRoute.target);
     }
     console.log("OpenPets desktop shell ready.");
   }).catch((error: unknown) => {

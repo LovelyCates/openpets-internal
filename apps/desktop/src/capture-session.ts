@@ -16,7 +16,7 @@ import { getManagerCheckInService } from "./manager-check-in-service.js";
 import { setDefaultInstalledPet } from "./pet-installation.js";
 import { getPluginPlatformSettings, profileSupportsRole, selectProviderProfile, type ProviderRole } from "./plugin-platform-settings.js";
 import { getTeamService, type TeamServiceSnapshot } from "./team-service.js";
-import { getControlCenterWindow, openControlCenterWindow, openControlCenterWindowTarget } from "./windows.js";
+import { getControlCenterWindow, openControlCenterWindow } from "./windows.js";
 import { refreshPetGazePreference } from "./pet-window-gaze.js";
 import { getActiveDeliveryWindows } from "./plugin-delivery.js";
 import type { PluginHostCapabilities } from "./plugin-sdk-bridge.js";
@@ -261,8 +261,6 @@ async function openControlCenter(params: Record<string, unknown>): Promise<unkno
   const resolved = resolveDevControlCenterRoute(requireString(params, "route"), false);
   if (resolved?.kind === "route") {
     openControlCenterWindow(resolved.route);
-  } else if (resolved?.kind === "target") {
-    openControlCenterWindowTarget(resolved.target);
   } else {
     throw new Error("\"route\" is not a Control Center route.");
   }

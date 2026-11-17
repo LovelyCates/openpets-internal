@@ -291,9 +291,9 @@ export function createPluginUiApi(options: {
       bubbleSubscribe: (bubbleId: unknown, kind: unknown, handler: (...args: never[]) => void) => {
         const slot = state.bubbles.get(String(bubbleId));
         if (!slot) { logger("debug", "plugin bubble subscribe skipped", { id: manifest.id, bubbleId: String(bubbleId), reason: "not-live" }); return { ok: false }; }
-        if (kind === "action") slot.onAction = handler as (actionId: string) => void;
-        else if (kind === "submit") slot.onSubmit = handler as (values: Record<string, string | number>) => void;
-        else if (kind === "dismiss") slot.onDismiss = handler as (reason: PluginBubbleDismissReason) => void;
+        if (kind === "action") slot.onAction = guardCallback(handler as (actionId: string) => void);
+        else if (kind === "submit") slot.onSubmit = guardCallback(handler as (values: Record<string, string | number>) => void);
+        else if (kind === "dismiss") slot.onDismiss = guardCallback(handler as (reason: PluginBubbleDismissReason) => void);
         else throw new Error("Invalid bubble subscription kind.");
         return { ok: true };
       },

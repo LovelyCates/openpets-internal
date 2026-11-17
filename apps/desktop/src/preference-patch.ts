@@ -23,6 +23,7 @@ export type PreferencePatch = {
   bubbleTheme?: BubbleTheme;
   waitingAnimationDurationMs?: WaitingAnimationDurationMs;
   idleCursorGazeEnabled?: boolean;
+  showOpenCodeTokenRate?: boolean;
   reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>;
   petPoolEnabled?: boolean;
   favoritePetIds?: readonly string[];
@@ -99,6 +100,11 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
   if ("idleCursorGazeEnabled" in value) {
     if (typeof value.idleCursorGazeEnabled !== "boolean") throw new Error("Invalid idle-cursor-gaze-enabled value.");
     patch.idleCursorGazeEnabled = value.idleCursorGazeEnabled;
+  }
+
+  if ("showOpenCodeTokenRate" in value) {
+    if (typeof value.showOpenCodeTokenRate !== "boolean") throw new Error("Invalid token rate visibility value.");
+    patch.showOpenCodeTokenRate = value.showOpenCodeTokenRate;
   }
 
   if ("petCrossDisplayEnabled" in value) {

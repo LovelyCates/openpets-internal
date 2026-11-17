@@ -497,4 +497,9 @@ export function getManagerCheckInService(): ManagerCheckInService {
   return appManagerCheckInService;
 }
 
+/** Pet windows can read before startup completes or when Teams is disabled. */
+export function getManagerCheckInPetSnapshot(): ManagerCheckInPetSnapshot {
+  return appManagerCheckInService?.getPetSnapshot() ?? { pendingCount: 0, activeItem: null };
+}
+
 export function stopManagerCheckInService(): Promise<void> { return appManagerCheckInService?.stop() ?? Promise.resolve(); }

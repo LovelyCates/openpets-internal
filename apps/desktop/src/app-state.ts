@@ -80,6 +80,8 @@ export interface OpenPetsStateV1 {
     readonly waitingAnimationDurationMs: WaitingAnimationDurationMs;
     /** Whether idle V2 pets follow the global cursor. Defaults to true. */
     readonly idleCursorGazeEnabled: boolean;
+    /** Show the local generation-speed dock (live tk/s and AVG) below pets. */
+    readonly showOpenCodeTokenRate: boolean;
     readonly reactionAnimationOverrides?: ReactionAnimationOverrides;
     readonly onboardingCompleted: boolean;
     readonly claudeCommandPath?: string;
@@ -192,6 +194,7 @@ export type PetRenderPreferences = Readonly<Pick<OpenPetsStateV1["preferences"],
   | "bubbleDurationScale"
   | "bubbleTheme"
   | "waitingAnimationDurationMs"
+  | "showOpenCodeTokenRate"
   | "showChatButton"
   | "showTalkButton"
   | "petButtonsPosition"
@@ -243,6 +246,7 @@ export function getPetRenderPreferences(): PetRenderPreferences {
     bubbleDurationScale: preferences.bubbleDurationScale,
     bubbleTheme: preferences.bubbleTheme,
     waitingAnimationDurationMs: preferences.waitingAnimationDurationMs,
+    showOpenCodeTokenRate: preferences.showOpenCodeTokenRate,
     reactionAnimationOverrides: preferences.reactionAnimationOverrides
       ? Object.freeze({ ...preferences.reactionAnimationOverrides })
       : undefined,
@@ -268,6 +272,11 @@ export function getInstalledPetState(petId: string): InstalledPetState | undefin
 /** Hot cursor sampling needs one preference, not a clone of the entire pet library. */
 export function isIdleCursorGazeEnabled(): boolean {
   return getInitializedState().preferences.idleCursorGazeEnabled;
+}
+
+/** Token updates need the visibility preference without copying the pet library. */
+export function isOpenCodeTokenRateDisplayEnabled(): boolean {
+  return getInitializedState().preferences.showOpenCodeTokenRate;
 }
 
 export function updatePreferences(patch: OpenPetsPreferencePatch): OpenPetsStateV1 {
@@ -835,6 +844,9 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     bubbleTheme: normalizeBubbleTheme(value.bubbleTheme),
     waitingAnimationDurationMs: normalizeWaitingAnimationDurationMs(value.waitingAnimationDurationMs),
     idleCursorGazeEnabled: normalizeIdleCursorGazeEnabled(value.idleCursorGazeEnabled, defaultState.preferences.idleCursorGazeEnabled),
+    showOpenCodeTokenRate: typeof value.showOpenCodeTokenRate === "boolean"
+      ? value.showOpenCodeTokenRate
+      : defaultState.preferences.showOpenCodeTokenRate,
     reactionAnimationOverrides: normalizeReactionAnimationOverrides(value.reactionAnimationOverrides),
     onboardingCompleted: normalizeOnboardingCompleted(value),
     claudeCommandPath: normalizeCommandPath(value.claudeCommandPath),
@@ -967,6 +979,7 @@ function createDefaultState(): OpenPetsStateV1 {
       bubbleTheme: defaultBubbleTheme,
       waitingAnimationDurationMs: defaultWaitingAnimationDurationMs,
       idleCursorGazeEnabled: defaultIdleCursorGazeEnabled,
+      showOpenCodeTokenRate: true,
       reactionAnimationOverrides: undefined,
       onboardingCompleted: false,
       claudeCommandPath: undefined,

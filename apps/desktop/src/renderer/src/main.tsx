@@ -6,7 +6,6 @@ import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets-logo.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 import {
-  ProvidersSection,
   type ProviderRole,
   type ProviderAdapter,
   type ProviderHeader,
@@ -76,7 +75,7 @@ type VoiceAssistantShortcutSnapshot = {
   readonly status: VoiceAssistantShortcutStatus;
   readonly reason?: string;
 };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; appearanceTheme: AppearanceTheme; locale?: "system" | string; petScale: number; hudScale: number; bubbleScale: number; bubbleDurationScale: number; bubbleTheme: "light" | "dark" | "system"; waitingAnimationDurationMs: number; idleCursorGazeEnabled: boolean; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; favoritePetIds?: readonly string[]; petPoolOrder?: readonly string[]; pinnedPets?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; petBounciness: number; petFloorFriction: number; personality: PetAssistantPersonality; voiceAssistantShortcut?: string; chatShortcut?: string; petToggleShortcut?: string; showChatButton: boolean; showTalkButton: boolean; petButtonsPosition: "left" | "right"; petButtonsSize: "small" | "medium" | "large" }; petScaleOptions: PetScaleOption[]; hudScaleOptions: PetScaleOption[]; bubbleScaleOptions: PetScaleOption[]; bubbleDurationScaleOptions: PetScaleOption[]; petPoolCandidates: ReadonlyArray<PetPoolCandidate>; pinnedPetsLimit: number; voiceAssistantShortcutStatus?: VoiceAssistantShortcutSnapshot; chatShortcutStatus?: VoiceAssistantShortcutSnapshot; petToggleShortcutStatus?: VoiceAssistantShortcutSnapshot };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; appearanceTheme: AppearanceTheme; locale?: "system" | string; petScale: number; hudScale: number; bubbleScale: number; bubbleDurationScale: number; bubbleTheme: "light" | "dark" | "system"; waitingAnimationDurationMs: number; idleCursorGazeEnabled: boolean; showOpenCodeTokenRate: boolean; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; favoritePetIds?: readonly string[]; petPoolOrder?: readonly string[]; pinnedPets?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; petBounciness: number; petFloorFriction: number; personality: PetAssistantPersonality; voiceAssistantShortcut?: string; chatShortcut?: string; petToggleShortcut?: string; showChatButton: boolean; showTalkButton: boolean; petButtonsPosition: "left" | "right"; petButtonsSize: "small" | "medium" | "large" }; petScaleOptions: PetScaleOption[]; hudScaleOptions: PetScaleOption[]; bubbleScaleOptions: PetScaleOption[]; bubbleDurationScaleOptions: PetScaleOption[]; petPoolCandidates: ReadonlyArray<PetPoolCandidate>; pinnedPetsLimit: number; voiceAssistantShortcutStatus?: VoiceAssistantShortcutSnapshot; chatShortcutStatus?: VoiceAssistantShortcutSnapshot; petToggleShortcutStatus?: VoiceAssistantShortcutSnapshot };
 type PreferencePatch = Omit<Partial<SettingsState["preferences"]>, "personality"> & { personality?: Partial<PetAssistantPersonality> };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
@@ -104,7 +103,7 @@ type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "err
 type PluginConfigError = { path?: string; code?: string; message?: string };type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; iconDataUrl?: string; source: "catalog" | "local"; sourcePath?: string; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; spritePreviews?: Record<string, { url: string; frameWidth: number; frameHeight: number; frames: number; durationMs: number }>; commands?: PluginCommand[]; status?: PluginStatus };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
-type PluginConfigSoundPickResult = { ok: true; sound: { kind: "user-sound"; id: string; name?: string }; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
+type PluginConfigSoundPickResult = { ok: true; sound: { kind: "user-sound"; id: string; name?: string }; snapshot: PluginServiceSnapshot } | { ok: true; canceled: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
 type PluginEntry = { id: string; installed: SafePluginRecord };
 type RemoteControlScope = "status" | "react" | "say";
 type RemoteControlConfigSnapshot = { enabled: boolean; address?: string; port?: number; listening: boolean };
@@ -380,14 +379,6 @@ const CloseIcon = () => (
   </svg>
 );
 
-const KeyIcon = () => (
-  <svg className="settings-nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" />
-    <path d="m21 2-9.6 9.6" />
-    <circle cx="7.5" cy="16.5" r="4.5" />
-  </svg>
-);
-
 const PrevIcon = () => (
   <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <path d="m15 18-6-6 6-6" />
@@ -531,9 +522,8 @@ type TeamsSnapshot = {
 };
 type Route = "dashboard" | "pets" | "assistant" | "settings" | "plugins" | "integrations";
 type ControlCenterRouteTarget =
-  | { readonly route: "assistant"; readonly assistantTab?: "providers"; readonly petId?: never }
-  | { readonly route: "pets"; readonly petId?: string; readonly assistantTab?: never }
-  | { readonly route: Exclude<Route, "assistant" | "pets">; readonly assistantTab?: never; readonly petId?: never };
+  | { readonly route: "pets"; readonly petId?: string }
+  | { readonly route: Exclude<Route, "pets">; readonly petId?: never };
 
 
 const DashboardIcon = () => (
@@ -572,15 +562,6 @@ const PluginsIcon = () => (
   <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path fill="currentColor" d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2" />
     <rect fill="currentColor" width="8" height="8" x="14" y="2" rx="1" />
-  </svg>
-);
-
-const ProvidersIcon = ({ className = "nav-icon" }: { className?: string }) => (
-  <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-    <line x1="6" y1="6" x2="6.01" y2="6" />
-    <line x1="6" y1="18" x2="6.01" y2="18" />
   </svg>
 );
 
@@ -944,10 +925,10 @@ function isRoute(value: string | null | undefined): value is Route {
 
 function isControlCenterRouteTarget(value: unknown): value is ControlCenterRouteTarget {
   if (!value || typeof value !== "object") return false;
-  const target = value as { readonly route?: unknown; readonly assistantTab?: unknown; readonly petId?: unknown };
+  const target = value as { readonly route?: unknown; readonly petId?: unknown };
   if (!isRoute(typeof target.route === "string" ? target.route : undefined)) return false;
   if (target.petId !== undefined && (target.route !== "pets" || !isTargetPetId(target.petId))) return false;
-  return target.assistantTab === undefined || (target.route === "assistant" && target.assistantTab === "providers");
+  return true;
 }
 
 function isTargetPetId(value: unknown): value is string {
@@ -958,11 +939,10 @@ function initialControlCenterRoute(): ControlCenterRouteTarget {
   try {
     const params = new URLSearchParams(window.location.search);
     const route = params.get("route");
-    const assistantTab = params.get("assistantTab");
     const petId = params.get("petId");
     if (!isRoute(route)) return { route: "dashboard" };
     if (route === "pets" && isTargetPetId(petId)) return { route, petId };
-    return route === "assistant" && assistantTab === "providers" ? { route, assistantTab } : { route };
+    return { route };
   } catch {
     return { route: "dashboard" };
   }
@@ -1278,7 +1258,7 @@ function ShortcutRecorder({ accelerator, disabled, clearable, onCapture, onClear
   );
 }
 
-type SettingsTab = "general" | "reactions" | "plugins" | "lan" | "remote";
+type SettingsTab = "general" | "reactions" | "plugins";
 
 const settingsNavGroups: ReadonlyArray<{
   readonly labelKey: string;
@@ -1295,22 +1275,14 @@ const settingsNavGroups: ReadonlyArray<{
     labelKey: "settings.nav.group.platform",
     items: [{ id: "plugins", labelKey: "settings.nav.plugins", icon: <PluginsIcon /> }],
   },
-  {
-    labelKey: "settings.nav.group.connectivity",
-    items: [
-      { id: "lan", labelKey: "settings.nav.lan", icon: <IntegrationsIcon /> },
-      { id: "remote", labelKey: "settings.nav.remote", icon: <KeyIcon /> },
-    ],
-  },
 ];
 
-function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanceThemeChange: (theme: AppearanceTheme) => void; onTokenHandoff: (result: RemotePairingResult, endpoint: string | null) => void }) {
+function SettingsView({ onAppearanceThemeChange }: { onAppearanceThemeChange: (theme: AppearanceTheme) => void }) {
   const { t, localePreference, availableLocales, reload: reloadI18n } = useI18n();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [petToggleShortcutSaveError, setPetToggleShortcutSaveError] = useState<string>("");
   const [reactionSettings, setReactionSettings] = useState<ReactionAnimationSettings | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
-  const [lanStatus, setLanStatus] = useState<LanStatusSnapshot | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginServiceSnapshot | null>(null);
@@ -1324,13 +1296,12 @@ function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanc
 
   async function loadSettings() {
     setError("");
-    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextProvider, nextLanStatus, nextPluginsSnapshot, nextVoiceDevices] = await Promise.all([
+    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextProvider, nextPluginsSnapshot, nextVoiceDevices] = await Promise.all([
       api.getSettingsState(),
       api.getReactionAnimationSettings(),
       api.getLaunchAtLogin(),
       api.getUpdateStatus(),
       api.getProviderProfiles().catch(() => null),
-      api.getLanStatus().catch(() => null),
       api.getPluginsSnapshot().catch(() => null),
       api.getVoiceDevices().catch(() => null),
     ]);
@@ -1341,7 +1312,6 @@ function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanc
     setUpdateStatus(nextUpdate);
     setProviderSnapshot(nextProvider);
     setVoiceDevicesSnapshot(nextVoiceDevices);
-    setLanStatus(nextLanStatus);
     setPluginsSnapshot(nextPluginsSnapshot);
     if (nextUpdate.state === "checking") {
       void api.checkForUpdates().then(setUpdateStatus).catch((err) => setError(String(err?.message ?? err)));
@@ -1611,6 +1581,14 @@ function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanc
                     {(settings?.hudScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
+                <ToggleRow
+                  testId="setting-token-rate"
+                  title={t("settings.general.tokenRate.title")}
+                  description={t("settings.general.tokenRate.description")}
+                  checked={settings?.preferences.showOpenCodeTokenRate ?? true}
+                  disabled={!settings || !!busy}
+                  onChange={(checked) => patchPreferences({ showOpenCodeTokenRate: checked }, t("settings.toast.tokenRateSaved"))}
+                />
                 <div className="settings-row">
                   <div className="settings-row-info">
                     <strong>{t("settings.general.bubbleScale.title")}</strong>
@@ -1888,14 +1866,6 @@ function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanc
         )}
 
 
-        {activeTab === "lan" && (
-          <LanSettingsPanel status={lanStatus} onRefresh={() => void run(t("settings.busy.checking"), async () => { setLanStatus(await api.getLanStatus()); })} busy={!!busy} />
-        )}
-
-        {activeTab === "remote" && (
-          <RemoteControlSettingsPanel busy={!!busy} onSetMessage={setMessage} onSetError={setError} onTokenHandoff={onTokenHandoff} />
-        )}
-
         {activeTab === "plugins" && (
           <div className="settings-section">
             <p className="eyebrow">{t("settings.plugins.eyebrow")}</p>
@@ -1960,39 +1930,31 @@ function SettingsView({ onAppearanceThemeChange, onTokenHandoff }: { onAppearanc
   </div>;
 }
 
-type AssistantTab = "chat" | "personality" | "history" | "providers";
+type AssistantTab = "chat" | "personality" | "history";
 
 const assistantNavItems: ReadonlyArray<{ readonly id: AssistantTab; readonly labelKey: string; readonly icon: React.ReactNode }> = [
   { id: "chat", labelKey: "settings.nav.assistant", icon: <MicIcon className="settings-nav-icon" /> },
   { id: "personality", labelKey: "settings.nav.personality", icon: <MessageIcon className="settings-nav-icon" /> },
   { id: "history", labelKey: "settings.nav.history", icon: <HistoryIcon className="settings-nav-icon" /> },
-  { id: "providers", labelKey: "settings.nav.providers", icon: <ProvidersIcon className="settings-nav-icon" /> },
 ];
 
-function AssistantView({ initialTab = "chat" }: { initialTab?: AssistantTab }) {
+function AssistantView() {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<AssistantTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<AssistantTab>("chat");
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [shortcutSaveError, setShortcutSaveError] = useState<string>("");
   const [chatShortcutSaveError, setChatShortcutSaveError] = useState<string>("");
   const [personalityDraft, setPersonalityDraft] = useState<PetAssistantPersonality | null>(null);
-  const [providerSnapshot, setProviderSnapshot] = useState<ProviderControlCenterSnapshot | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => { setActiveTab(initialTab); }, [initialTab]);
-
   useEffect(() => {
     void (async () => {
-      const [nextSettings, nextProvider] = await Promise.all([
-        api.getSettingsState(),
-        api.getProviderProfiles().catch(() => null),
-      ]);
+      const nextSettings = await api.getSettingsState();
       setSettings(nextSettings);
       setShortcutSaveError("");
       setPersonalityDraft(nextSettings.preferences.personality);
-      setProviderSnapshot(nextProvider);
     })().catch((err) => setError(String((err as Error)?.message ?? err)));
   }, []);
 
@@ -2322,822 +2284,12 @@ function AssistantView({ initialTab = "chat" }: { initialTab?: AssistantTab }) {
           />
         )}
 
-        {activeTab === "providers" && (
-          <ProvidersSection
-            snapshot={providerSnapshot}
-            onSnapshotChange={setProviderSnapshot}
-            busy={busy}
-            run={run}
-            setMessage={setMessage}
-            setError={setError}
-          />
-        )}
       </main>
     </div>
   </div>;
 }
 
 
-function LanSettingsPanel({ status, onRefresh, busy }: { status: LanStatusSnapshot | null; onRefresh: () => void; busy: boolean }) {
-  const { t } = useI18n();
-  const clients = status?.clients ?? [];
-  const authLabel = getLanAuthLabel(status, t);
-  const topologyIssues = status?.topologyIssues ?? [];
-  return (
-    <div className="settings-section">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="eyebrow">{t("settings.lan.eyebrow")}</p>
-          <h2 className="settings-section-title">{t("settings.lan.title")}</h2>
-        </div>
-        <Button variant="secondary" size="compact" disabled={busy} onClick={onRefresh}>
-          <RefreshIcon />
-          {t("settings.lan.refresh")}
-        </Button>
-      </div>
-      <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.lan.description")}</p>
-
-      <div className="settings-group">
-        <div className="lan-status-grid">
-          <LanStatusMetric label={t("settings.lan.mode")} value={status?.mode ?? "off"} />
-          <LanStatusMetric label={t("settings.lan.host")} value={status?.localHost ?? "-"} />
-          <LanStatusMetric label={t("settings.lan.server")} value={status?.serverUrl ?? "-"} />
-          <LanStatusMetric label={t("settings.lan.auth")} value={authLabel} tone={status?.auth === "token" ? "ok" : "warn"} />
-          <LanStatusMetric label={t("settings.lan.tokenHint")} value={status?.tokenHint ? t("settings.lan.tokenHintValue", { hint: status.tokenHint }) : t("settings.lan.none")} />
-          <LanStatusMetric label={t("settings.lan.currentOwner")} value={status?.currentHost ?? t("settings.lan.none")} />
-          <LanStatusMetric label={t("settings.lan.persistedOwner")} value={status?.persistedCurrentHost ?? t("settings.lan.none")} />
-          <LanStatusMetric label={t("settings.lan.clients")} value={String(clients.length)} />
-          <LanStatusMetric label={t("settings.lan.topology")} value={status?.topologyHosts ? t("settings.lan.topologyConfigured", { hosts: status.topologyHosts, links: status.topologyLinks }) : t("settings.lan.topologyFallback")} />
-          <LanStatusMetric label={t("settings.lan.topologyWarnings")} value={String(topologyIssues.length)} tone={topologyIssues.length ? "warn" : "ok"} />
-        </div>
-      </div>
-
-      {topologyIssues.length ? (
-        <div className="settings-group">
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <strong>{t("settings.lan.topologyWarnings")}</strong>
-              <small>{t("settings.lan.topologyWarningsDescription")}</small>
-            </div>
-          </div>
-          {topologyIssues.map((issue) => (
-            <div className="settings-row" key={`${issue.host}-${issue.edge}-${issue.neighbor}-${issue.code}`}>
-              <div className="settings-row-info">
-                <strong>{issue.host} {issue.edge} {issue.neighbor}</strong>
-                <small>{getLanTopologyIssueLabel(issue, t)}</small>
-              </div>
-              <span className="pill pill-orange">{t("settings.lan.warning")}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="settings-group">
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <strong>{t("settings.lan.connectedHosts")}</strong>
-            <small>{t("settings.lan.connectedHostsDescription")}</small>
-          </div>
-        </div>
-        {clients.length ? clients.map((client) => (
-          <div className="settings-row" key={client.host}>
-            <div className="settings-row-info">
-              <strong>{client.host}</strong>
-              <small>{client.position ? [client.position.x, client.position.y].join(", ") : t("settings.lan.noPosition")}</small>
-            </div>
-            <span className={client.host === status?.currentHost ? "pill pill-green" : "pill pill-slate"}>{client.host === status?.currentHost ? t("settings.lan.owner") : t("settings.lan.connected")}</span>
-          </div>
-        )) : (
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <strong>{t("settings.lan.noClients")}</strong>
-              <small>{t("settings.lan.noClientsDescription")}</small>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function getLanAuthLabel(status: LanStatusSnapshot | null, t: (key: string, values?: Record<string, string | number>) => string): string {
-  if (!status) return t("settings.lan.authNone");
-  if (status.authInsecure) return t("settings.lan.authInsecure");
-  if (status.authSource === "env") return t("settings.lan.authEnv");
-  if (status.authSource === "stored") return t("settings.lan.authStored");
-  if (status.authSource === "generated") return t("settings.lan.authGenerated");
-  return t("settings.lan.authNone");
-}
-
-function formatRemoteDate(timestampMs: number, locale: string): string {
-  try {
-    return new Date(timestampMs).toLocaleString(locale, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  } catch {
-    return new Date(timestampMs).toLocaleString();
-  }
-}
-
-type RemoteTokenHandoffState = {
-  result: RemotePairingResult;
-  endpoint: string | null;
-} | null;
-
-function RemoteTokenHandoffModal({
-  handoff,
-  onDismiss,
-}: {
-  handoff: RemoteTokenHandoffState;
-  onDismiss: () => void;
-}) {
-  const { t } = useI18n();
-  const [copiedToken, setCopiedToken] = useState(false);
-  const [copiedPosix, setCopiedPosix] = useState(false);
-  const [copiedPowerShell, setCopiedPowerShell] = useState(false);
-  const [copiedCliCheck, setCopiedCliCheck] = useState(false);
-
-  const result = handoff?.result;
-  const endpoint = handoff?.endpoint;
-
-  const posixSnippet = endpoint && result ? `export OPENPETS_REMOTE_ENDPOINT="${endpoint}"
-export OPENPETS_REMOTE_CLIENT_ID="${result.clientId}"
-export OPENPETS_REMOTE_TOKEN="${result.token}"` : "";
-
-  const powerShellSnippet = endpoint && result ? `$env:OPENPETS_REMOTE_ENDPOINT="${endpoint}"
-$env:OPENPETS_REMOTE_CLIENT_ID="${result.clientId}"
-$env:OPENPETS_REMOTE_TOKEN="${result.token}"` : "";
-
-  const cliCheckSnippet = "npx -y @open-pets/cli@latest status";
-
-  async function handleCopyToken() {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result.token);
-      setCopiedToken(true);
-      setTimeout(() => setCopiedToken(false), 2000);
-    } catch {}
-  }
-
-  async function handleCopyPosix() {
-    if (!posixSnippet) return;
-    try {
-      await navigator.clipboard.writeText(posixSnippet);
-      setCopiedPosix(true);
-      setTimeout(() => setCopiedPosix(false), 2000);
-    } catch {}
-  }
-
-  async function handleCopyPowerShell() {
-    if (!powerShellSnippet) return;
-    try {
-      await navigator.clipboard.writeText(powerShellSnippet);
-      setCopiedPowerShell(true);
-      setTimeout(() => setCopiedPowerShell(false), 2000);
-    } catch {}
-  }
-
-  async function handleCopyCliCheck() {
-    try {
-      await navigator.clipboard.writeText(cliCheckSnippet);
-      setCopiedCliCheck(true);
-      setTimeout(() => setCopiedCliCheck(false), 2000);
-    } catch {}
-  }
-
-  function handleDone() {
-    setCopiedToken(false);
-    setCopiedPosix(false);
-    setCopiedPowerShell(false);
-    setCopiedCliCheck(false);
-    onDismiss();
-  }
-
-  return (
-    <AccessibleDialog
-      isOpen={Boolean(handoff)}
-      onClose={handleDone}
-      titleId="remote-token-title"
-      descriptionId="remote-token-warning"
-      closeOnBackdropClick={false}
-      preventEscapeClose={true}
-      className="max-w-lg"
-    >
-      {result && (
-        <>
-          <div className="flex items-center gap-2 text-emerald-600">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="m9 12 2 2 4-4" />
-            </svg>
-            <h3 id="remote-token-title" className="m-0 font-monoDisplay text-xl font-black text-navy">{t("settings.remote.tokenModal.title")}</h3>
-          </div>
-          <p id="remote-token-warning" className="text-xs font-semibold text-amber-800 bg-amber-50 p-3 rounded-xl border border-amber-200 m-0">
-            {t("settings.remote.tokenModal.warning")}
-          </p>
-
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("settings.remote.tokenModal.clientIdLabel")}</span>
-              <code className="bg-slate-100 p-2 rounded-xl text-xs font-mono text-navy select-all break-all border border-slate-200">
-                {result.clientId}
-              </code>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("settings.remote.tokenModal.tokenLabel")}</span>
-                <Button variant="secondary" size="compact" onClick={() => void handleCopyToken()}>
-                  {copiedToken ? t("settings.remote.tokenModal.copied") : t("settings.remote.tokenModal.copyToken")}
-                </Button>
-              </div>
-              <code className="bg-blue-50/70 p-3 rounded-xl text-xs font-mono text-brand select-all break-all border border-blue-200/80 font-bold">
-                {result.token}
-              </code>
-            </div>
-
-            <div className="flex flex-col gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("settings.remote.tokenModal.guidanceTitle")}</span>
-              {endpoint ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase">{t("settings.remote.tokenModal.posixLabel")}</span>
-                      <Button variant="secondary" size="compact" onClick={() => void handleCopyPosix()}>
-                        {copiedPosix ? t("settings.remote.tokenModal.copied") : t("settings.remote.tokenModal.copyToken")}
-                      </Button>
-                    </div>
-                    <pre className="m-0 p-2 bg-white rounded border border-slate-200 text-[11px] font-mono text-navy overflow-x-auto leading-relaxed select-all">
-{posixSnippet}
-                    </pre>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase">{t("settings.remote.tokenModal.powerShellLabel")}</span>
-                      <Button variant="secondary" size="compact" onClick={() => void handleCopyPowerShell()}>
-                        {copiedPowerShell ? t("settings.remote.tokenModal.copied") : t("settings.remote.tokenModal.copyToken")}
-                      </Button>
-                    </div>
-                    <pre className="m-0 p-2 bg-white rounded border border-slate-200 text-[11px] font-mono text-navy overflow-x-auto leading-relaxed select-all">
-{powerShellSnippet}
-                    </pre>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase">{t("settings.remote.tokenModal.cliCheckLabel")}</span>
-                      <Button variant="secondary" size="compact" onClick={() => void handleCopyCliCheck()}>
-                        {copiedCliCheck ? t("settings.remote.tokenModal.copied") : t("settings.remote.tokenModal.copyToken")}
-                      </Button>
-                    </div>
-                    <pre className="m-0 p-2 bg-white rounded border border-slate-200 text-[11px] font-mono text-navy overflow-x-auto leading-relaxed select-all">
-{cliCheckSnippet}
-                    </pre>
-                    <small className="text-[11px] text-slatecopy mt-0.5">{t("settings.remote.tokenModal.cliCheckExplanation")}</small>
-                  </div>
-                </div>
-              ) : (
-                <p className="m-0 text-xs text-amber-800 bg-amber-50 p-2 rounded border border-amber-200 font-semibold">
-                  {t("settings.remote.tokenModal.noEndpointGuidance")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-2">
-            <Button variant="primary" size="compact" onClick={handleDone}>
-              {t("settings.remote.tokenModal.done")}
-            </Button>
-          </div>
-        </>
-      )}
-    </AccessibleDialog>
-  );
-}
-
-function RemoteControlSettingsPanel({
-  busy,
-  onSetMessage,
-  onSetError,
-  onTokenHandoff,
-}: {
-  busy: boolean;
-  onSetMessage: (msg: string) => void;
-  onSetError: (err: string) => void;
-  onTokenHandoff: (result: RemotePairingResult, endpoint: string | null) => void;
-}) {
-  const { t, locale } = useI18n();
-  const [snapshot, setSnapshot] = useState<RemoteControlSnapshot | null>(null);
-  const [addressDraft, setAddressDraft] = useState("");
-  const [portDraft, setPortDraft] = useState("");
-  const [showWarningModal, setShowWarningModal] = useState(false);
-  const [warningAck, setWarningAck] = useState(false);
-  const [showPairModal, setShowPairModal] = useState(false);
-  const [pairNameDraft, setPairNameDraft] = useState("");
-  const [pairSayScope, setPairSayScope] = useState(false);
-  const [confirmRotateClient, setConfirmRotateClient] = useState<RemoteControlClientSummary | null>(null);
-  const [confirmRevokeClient, setConfirmRevokeClient] = useState<RemoteControlClientSummary | null>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-
-  const isBusy = busy || actionBusy;
-
-  async function loadSnapshot() {
-    try {
-      const snap = await api.getRemoteSnapshot();
-      setSnapshot(snap);
-      setAddressDraft(snap.config.address || "");
-      setPortDraft(snap.config.port ? String(snap.config.port) : "");
-    } catch (err) {
-      onSetError(String((err as Error)?.message ?? err));
-    }
-  }
-
-  useEffect(() => {
-    void loadSnapshot();
-  }, []);
-
-  const isEnabled = snapshot?.config.enabled ?? false;
-  const isListening = snapshot?.config.listening === true;
-  const clients = snapshot?.clients ?? [];
-
-  // Pairing readiness and setup guidance MUST require config.listening === true
-  const activeEndpoint = isListening && snapshot?.config.address && snapshot?.config.port
-    ? `tcp://${snapshot.config.address}:${snapshot.config.port}`
-    : null;
-
-  async function handleToggleEnable(nextEnabled: boolean) {
-    if (nextEnabled) {
-      setWarningAck(false);
-      setShowWarningModal(true);
-    } else {
-      try {
-        setActionBusy(true);
-        onSetError("");
-        const nextSnap = await api.configureRemote({ enabled: false });
-        setSnapshot(nextSnap);
-        onSetMessage(t("settings.toast.remoteConfigSaved"));
-      } catch {
-        onSetError(t("settings.remote.error.configInvalid"));
-      } finally {
-        setActionBusy(false);
-      }
-    }
-  }
-
-  async function confirmEnableRemote() {
-    if (!warningAck) return;
-    setShowWarningModal(false);
-    try {
-      setActionBusy(true);
-      onSetError("");
-      const portNum = Number(portDraft);
-      const nextSnap = await api.configureRemote({
-        enabled: true,
-        address: addressDraft.trim(),
-        port: portNum,
-      });
-      setSnapshot(nextSnap);
-      onSetMessage(t("settings.toast.remoteConfigSaved"));
-    } catch {
-      onSetError(t("settings.remote.error.configInvalid"));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleSaveConfig() {
-    try {
-      setActionBusy(true);
-      onSetError("");
-      const portNum = Number(portDraft);
-      const nextSnap = await api.configureRemote({
-        enabled: true,
-        address: addressDraft.trim(),
-        port: portNum,
-      });
-      setSnapshot(nextSnap);
-      onSetMessage(t("settings.toast.remoteConfigSaved"));
-    } catch {
-      onSetError(t("settings.remote.error.configInvalid"));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handlePairSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!pairNameDraft.trim()) return;
-    try {
-      setActionBusy(true);
-      onSetError("");
-      const scopes: RemoteControlScope[] = pairSayScope
-        ? ["status", "react", "say"]
-        : ["status", "react"];
-      const result = await api.pairRemoteClient({
-        name: pairNameDraft.trim(),
-        scopes,
-      });
-      setShowPairModal(false);
-      setPairNameDraft("");
-      setPairSayScope(false);
-      onTokenHandoff(result, activeEndpoint);
-      await loadSnapshot();
-      onSetMessage(t("settings.toast.remoteClientPaired"));
-    } catch {
-      onSetError(t("settings.remote.error.pairFailed"));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmRotate() {
-    if (!confirmRotateClient) return;
-    const clientId = confirmRotateClient.id;
-    setConfirmRotateClient(null);
-    try {
-      setActionBusy(true);
-      onSetError("");
-      const result = await api.rotateRemoteClient(clientId);
-      onTokenHandoff(result, activeEndpoint);
-      await loadSnapshot();
-      onSetMessage(t("settings.toast.remoteClientRotated"));
-    } catch {
-      onSetError(t("settings.remote.error.rotateFailed"));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmRevoke() {
-    if (!confirmRevokeClient) return;
-    const clientId = confirmRevokeClient.id;
-    setConfirmRevokeClient(null);
-    try {
-      setActionBusy(true);
-      onSetError("");
-      await api.revokeRemoteClient(clientId);
-      await loadSnapshot();
-      onSetMessage(t("settings.toast.remoteClientRevoked"));
-    } catch {
-      onSetError(t("settings.remote.error.revokeFailed"));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  return (
-    <div className="settings-section">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="eyebrow">{t("settings.remote.eyebrow")}</p>
-          <h2 className="settings-section-title">{t("settings.remote.title")}</h2>
-        </div>
-        <Button variant="secondary" size="compact" disabled={isBusy} onClick={() => void loadSnapshot()}>
-          <RefreshIcon />
-          {t("settings.lan.refresh")}
-        </Button>
-      </div>
-      <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.remote.description")}</p>
-
-      {/* Scope & Safety Boundary Notice */}
-      <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-100/70 flex flex-col gap-1.5">
-        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">{t("settings.remote.notice.eyebrow")}</span>
-        <p className="text-xs text-slatecopy leading-relaxed m-0">{t("settings.remote.notice.body")}</p>
-      </div>
-
-      {/* Listener Status & Configuration Group */}
-      <div className="settings-group">
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <label htmlFor="remote-enable-toggle" className="font-bold text-navy text-sm cursor-pointer">
-              {t("settings.remote.status.label")}
-            </label>
-            <small>{t("settings.remote.enable.description")}</small>
-          </div>
-          <div className="flex items-center gap-3">
-            {isListening ? (
-              <StatusPill tone="green">{t("settings.remote.status.listening", { address: snapshot?.config.address ?? "127.0.0.1", port: snapshot?.config.port ?? 18420 })}</StatusPill>
-            ) : isEnabled ? (
-              <StatusPill tone="red">{t("settings.remote.status.error")}</StatusPill>
-            ) : (
-              <StatusPill tone="slate">{t("settings.remote.status.disabled")}</StatusPill>
-            )}
-            <input
-              id="remote-enable-toggle"
-              type="checkbox"
-              className="settings-toggle"
-              checked={isEnabled}
-              disabled={isBusy}
-              onChange={(e) => void handleToggleEnable(e.target.checked)}
-            />
-          </div>
-        </div>
-
-        {/* Concrete IPv4 Bind Address Input */}
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <label htmlFor="remote-bind-address" className="font-bold text-navy text-sm cursor-pointer">
-              {t("settings.remote.bindAddress.label")}
-            </label>
-            <small id="remote-bind-address-desc">{t("settings.remote.bindAddress.description")}</small>
-          </div>
-          <input
-            id="remote-bind-address"
-            type="text"
-            aria-describedby="remote-bind-address-desc"
-            className="settings-select w-56 font-mono text-xs"
-            placeholder={t("settings.remote.bindAddress.placeholder")}
-            value={addressDraft}
-            disabled={isBusy}
-            onChange={(e) => setAddressDraft(e.target.value)}
-          />
-        </div>
-
-        {/* Port Input */}
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <label htmlFor="remote-port" className="font-bold text-navy text-sm cursor-pointer">
-              {t("settings.remote.port.label")}
-            </label>
-            <small id="remote-port-desc">{t("settings.remote.port.description")}</small>
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              id="remote-port"
-              type="number"
-              aria-describedby="remote-port-desc"
-              className="settings-select w-32 font-mono text-xs"
-              placeholder={t("settings.remote.port.placeholder")}
-              value={portDraft}
-              disabled={isBusy}
-              onChange={(e) => setPortDraft(e.target.value)}
-            />
-            <Button
-              variant="secondary"
-              size="compact"
-              disabled={isBusy || !isEnabled || !addressDraft || !portDraft}
-              onClick={() => void handleSaveConfig()}
-            >
-              {t("settings.remote.saveConfig")}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Paired Clients Section */}
-      <div className="settings-section mt-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="settings-section-title text-xl">{t("settings.remote.clients.title")}</h2>
-            <p className="text-xs text-slatecopy mt-0.5">{t("settings.remote.clients.description")}</p>
-          </div>
-          <Button
-            variant="primary"
-            size="compact"
-            disabled={isBusy || !activeEndpoint}
-            onClick={() => {
-              setPairNameDraft("");
-              setPairSayScope(false);
-              setShowPairModal(true);
-            }}
-          >
-            {t("settings.remote.clients.pairNew")}
-          </Button>
-        </div>
-
-        <div className="settings-group">
-          {clients.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slatecopy">
-              {t("settings.remote.clients.none")}
-            </div>
-          ) : (
-            <div className="divide-y divide-blue-50">
-              {clients.map((client) => {
-                const isRevoked = client.revoked;
-                const formattedLastActive = client.lastActivityAt
-                  ? formatRemoteDate(client.lastActivityAt, locale)
-                  : t("settings.remote.clients.neverActive");
-                return (
-                  <div key={client.id} className="flex items-center justify-between gap-4 p-4 hover:bg-white/80 transition-colors">
-                    <div className="flex flex-col gap-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <strong className="text-sm font-bold text-navy">{client.name}</strong>
-                        <StatusPill tone={isRevoked ? "red" : "green"}>
-                          {isRevoked ? t("settings.remote.clients.revoked") : t("settings.remote.clients.active")}
-                        </StatusPill>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slatecopy">
-                        <span>{t("settings.remote.clients.idLabel", { id: `${client.id.slice(0, 8)}…` })}</span>
-                        <span>•</span>
-                        <span>{t("settings.remote.clients.lastActive", { time: formattedLastActive })}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {client.scopes.map((scope) => (
-                          <StatusPill key={scope} tone={scope === "say" ? "orange" : "blue"}>
-                            {scope}
-                          </StatusPill>
-                        ))}
-                      </div>
-                    </div>
-
-                    {!isRevoked && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="secondary"
-                          size="compact"
-                          disabled={isBusy}
-                          onClick={() => setConfirmRotateClient(client)}
-                        >
-                          {t("settings.remote.clients.rotate")}
-                        </Button>
-                        <Button
-                          variant="danger"
-                          size="compact"
-                          disabled={isBusy}
-                          onClick={() => setConfirmRevokeClient(client)}
-                        >
-                          {t("settings.remote.clients.revoke")}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Warning Modal before Enable */}
-      <AccessibleDialog
-        isOpen={showWarningModal}
-        onClose={() => setShowWarningModal(false)}
-        titleId="remote-warning-title"
-        descriptionId="remote-warning-body"
-        role="alertdialog"
-        isBusy={isBusy}
-        className="max-w-lg"
-      >
-        <div className="flex items-center gap-3 text-amber-600">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-            <line x1="12" y1="9" x2="12" y2="13" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          <h3 id="remote-warning-title" className="m-0 font-monoDisplay text-xl font-black text-navy">{t("settings.remote.warning.title")}</h3>
-        </div>
-        <p id="remote-warning-body" className="text-sm text-slatecopy leading-relaxed m-0">
-          {t("settings.remote.warning.body")}
-        </p>
-        <label htmlFor="remote-warning-ack" className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200/70 text-xs font-semibold text-amber-900 cursor-pointer">
-          <input
-            id="remote-warning-ack"
-            type="checkbox"
-            className="mt-0.5 accent-amber-600 shrink-0"
-            checked={warningAck}
-            onChange={(e) => setWarningAck(e.target.checked)}
-          />
-          <span>{t("settings.remote.warning.ack")}</span>
-        </label>
-        <div className="flex justify-end gap-3 mt-2">
-          <Button variant="secondary" size="compact" onClick={() => setShowWarningModal(false)}>
-            {t("settings.remote.warning.cancel")}
-          </Button>
-          <Button variant="primary" size="compact" disabled={!warningAck || isBusy} onClick={() => void confirmEnableRemote()}>
-            {t("settings.remote.warning.confirm")}
-          </Button>
-        </div>
-      </AccessibleDialog>
-
-      {/* Pair New Client Modal */}
-      <AccessibleDialog
-        isOpen={showPairModal}
-        onClose={() => setShowPairModal(false)}
-        titleId="remote-pair-title"
-        isBusy={isBusy}
-        className="max-w-md"
-      >
-        <form onSubmit={(e) => void handlePairSubmit(e)} className="flex flex-col gap-4">
-          <h3 id="remote-pair-title" className="m-0 font-monoDisplay text-xl font-black text-navy">{t("settings.remote.pairModal.title")}</h3>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="remote-pair-name" className="text-xs font-bold text-navy">{t("settings.remote.pairModal.nameLabel")}</label>
-            <input
-              id="remote-pair-name"
-              type="text"
-              className="settings-select w-full"
-              placeholder={t("settings.remote.pairModal.namePlaceholder")}
-              value={pairNameDraft}
-              onChange={(e) => setPairNameDraft(e.target.value)}
-              autoFocus
-              required
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-navy">{t("settings.remote.pairModal.scopesLabel")}</label>
-            <label className="flex items-center gap-2 text-xs text-slatecopy cursor-not-allowed opacity-80">
-              <input type="checkbox" checked disabled readOnly className="accent-brand" />
-              <span>{t("settings.remote.pairModal.scopeStatus")}</span>
-            </label>
-            <label className="flex items-center gap-2 text-xs text-slatecopy cursor-not-allowed opacity-80">
-              <input type="checkbox" checked disabled readOnly className="accent-brand" />
-              <span>{t("settings.remote.pairModal.scopeReact")}</span>
-            </label>
-            <label htmlFor="remote-scope-say" className="flex items-center gap-2 text-xs text-navy font-semibold cursor-pointer">
-              <input
-                id="remote-scope-say"
-                type="checkbox"
-                checked={pairSayScope}
-                onChange={(e) => setPairSayScope(e.target.checked)}
-                className="accent-brand"
-              />
-              <span>{t("settings.remote.pairModal.scopeSay")}</span>
-            </label>
-          </div>
-          <div className="flex justify-end gap-3 mt-2">
-            <Button variant="secondary" size="compact" type="button" onClick={() => setShowPairModal(false)}>
-              {t("settings.remote.warning.cancel")}
-            </Button>
-            <Button variant="primary" size="compact" type="submit" disabled={!pairNameDraft.trim() || isBusy}>
-              {t("settings.remote.pairModal.submit")}
-            </Button>
-          </div>
-        </form>
-      </AccessibleDialog>
-
-      {/* Confirmation Modal for Token Rotation */}
-      <AccessibleDialog
-        isOpen={Boolean(confirmRotateClient)}
-        onClose={() => setConfirmRotateClient(null)}
-        titleId="remote-rotate-title"
-        descriptionId="remote-rotate-body"
-        role="alertdialog"
-        isBusy={isBusy}
-        className="max-w-md"
-      >
-        <h3 id="remote-rotate-title" className="m-0 font-monoDisplay text-xl font-black text-navy">{t("settings.remote.clients.confirmRotateTitle")}</h3>
-        <p id="remote-rotate-body" className="text-sm text-slatecopy leading-relaxed m-0">
-          {confirmRotateClient && t("settings.remote.clients.confirmRotateBody").replace("{name}", confirmRotateClient.name)}
-        </p>
-        <div className="flex justify-end gap-3 mt-2">
-          <Button variant="secondary" size="compact" onClick={() => setConfirmRotateClient(null)}>
-            {t("settings.remote.warning.cancel")}
-          </Button>
-          <Button variant="primary" size="compact" disabled={isBusy} onClick={() => void handleConfirmRotate()}>
-            {t("settings.remote.clients.rotate")}
-          </Button>
-        </div>
-      </AccessibleDialog>
-
-      {/* Confirmation Modal for Client Revocation */}
-      <AccessibleDialog
-        isOpen={Boolean(confirmRevokeClient)}
-        onClose={() => setConfirmRevokeClient(null)}
-        titleId="remote-revoke-title"
-        descriptionId="remote-revoke-body"
-        role="alertdialog"
-        isBusy={isBusy}
-        className="max-w-md"
-      >
-        <h3 id="remote-revoke-title" className="m-0 font-monoDisplay text-xl font-black text-navy">{t("settings.remote.clients.confirmRevokeTitle")}</h3>
-        <p id="remote-revoke-body" className="text-sm text-slatecopy leading-relaxed m-0">
-          {confirmRevokeClient && t("settings.remote.clients.confirmRevokeBody").replace("{name}", confirmRevokeClient.name)}
-        </p>
-        <div className="flex justify-end gap-3 mt-2">
-          <Button variant="secondary" size="compact" onClick={() => setConfirmRevokeClient(null)}>
-            {t("settings.remote.warning.cancel")}
-          </Button>
-          <Button variant="danger" size="compact" disabled={isBusy} onClick={() => void handleConfirmRevoke()}>
-            {t("settings.remote.clients.revoke")}
-          </Button>
-        </div>
-      </AccessibleDialog>
-    </div>
-  );
-}
-
-function getLanTopologyIssueLabel(issue: LanTopologyIssue, t: (key: string, values?: Record<string, string | number>) => string): string {
-  if (issue.code === "self_reference") return t("settings.lan.topologySelfReference");
-  return t("settings.lan.topologyMissingReverse", { reverse: oppositeLanEdge(issue.edge), neighbor: issue.neighbor, host: issue.host });
-}
-
-function oppositeLanEdge(edge: LanTopologyIssue["edge"]): LanTopologyIssue["edge"] {
-  if (edge === "left") return "right";
-  if (edge === "right") return "left";
-  if (edge === "up") return "down";
-  return "up";
-}
-
-function LanStatusMetric({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" }) {
-  const pillClass = tone === "ok" ? "pill pill-green" : tone === "warn" ? "pill pill-orange" : "pill pill-blue";
-  return (
-    <div className="lan-status-metric">
-      <span>{label}</span>
-      <strong className={pillClass}>{value}</strong>
-    </div>
-  );
-}
 const pluginFilterLabelKeys: Record<PluginFilter, string> = {
   all: "plugins.filter.all",
   local: "plugins.filter.local",
@@ -3629,7 +2781,7 @@ function PluginsView() {
       setError("");
       const result = await api.pickPluginConfigSound(pluginId);
       if (!result.ok) { setSnapshot(result.snapshot); setError(result.error); return; }
-      if (!result.sound.id) { setSnapshot(result.snapshot); return; }
+      if (!("sound" in result)) { setSnapshot(result.snapshot); return; }
       updateDraft(key, result.sound);
       setMessage(t("plugins.toast.soundImported"));
     } catch (err) { setError(String((err as Error)?.message ?? err)); }
@@ -3855,8 +3007,6 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
   const { t } = useI18n();
   const [initialTarget] = useState<ControlCenterRouteTarget>(() => initialControlCenterRoute());
   const [currentRoute, setCurrentRoute] = useState<Route>(initialTarget.route);
-  const [assistantTab, setAssistantTab] = useState<"providers" | undefined>(initialTarget.assistantTab);
-  const [remoteTokenHandoff, setRemoteTokenHandoff] = useState<RemoteTokenHandoffState>(null);
   const [state, setState] = useState<StateSnapshot | null>(null);
   const [petsLoading, setPetsLoading] = useState(true);
   const [petSettings, setPetSettings] = useState<SettingsState | null>(null);
@@ -3897,13 +3047,11 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
 
   function navigateToRoute(route: Route): void {
     setCurrentRoute(route);
-    setAssistantTab(undefined);
   }
 
   useEffect(() => api.onRouteChange((target) => {
     if (isControlCenterRouteTarget(target)) {
       setCurrentRoute(target.route);
-      setAssistantTab(target.route === "assistant" ? target.assistantTab : undefined);
       if (target.route === "pets" && target.petId) {
         // A pet link must open even if the current search or filter hides it.
         setFilter("all");
@@ -4301,9 +3449,9 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
       {currentRoute === "dashboard" ? (
         <DashboardView onNavigate={navigateToRoute} />
       ) : currentRoute === "assistant" ? (
-        <AssistantView initialTab={assistantTab ?? "chat"} />
+        <AssistantView />
       ) : currentRoute === "settings" ? (
-        <SettingsView onAppearanceThemeChange={onAppearanceThemeChange} onTokenHandoff={(result, endpoint) => setRemoteTokenHandoff({ result, endpoint })} />
+        <SettingsView onAppearanceThemeChange={onAppearanceThemeChange} />
       ) : currentRoute === "plugins" ? (
         <PluginsView />
       ) : currentRoute === "integrations" ? (
@@ -4705,10 +3853,6 @@ function ControlCenter({ onAppearanceThemeChange }: { onAppearanceThemeChange: (
       )}
       <WhatsNewHost api={api} onSettled={handleWhatsNewSettled} />
       <AnnouncementsHost api={api} whatsNewSettled={whatsNewSettled} />
-      <RemoteTokenHandoffModal
-        handoff={remoteTokenHandoff}
-        onDismiss={() => setRemoteTokenHandoff(null)}
-      />
     </main>
   );
 }

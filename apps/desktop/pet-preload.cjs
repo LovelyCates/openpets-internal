@@ -357,7 +357,7 @@ function applyTokenRateDisplay() {
   const stage = document.querySelector(".stage");
   if (!stage) return;
   let badge = stage.querySelector("[data-opencode-token-rate]");
-  if (latestTokenRateDisplay === null) {
+  if (latestTokenRateDisplay === null || stage.dataset.tokenRateEnabled === "false") {
     badge?.remove();
     stage.classList.remove("has-token-dock");
     return;

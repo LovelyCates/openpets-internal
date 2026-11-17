@@ -27,7 +27,7 @@ import {
 import { getAppStateSnapshot } from "./app-state.js";
 import { defaultPetSprite } from "@open-pets/pet-format/animation";
 import { defaultPetWindowSize, type Point, type WindowSize } from "./display.js";
-import { getManagerCheckInService, type ManagerCheckInPetSnapshot } from "./manager-check-in-service.js";
+import { getManagerCheckInPetSnapshot, getManagerCheckInService, type ManagerCheckInPetSnapshot } from "./manager-check-in-service.js";
 import { interruptPetActivity } from "./pet-activities.js";
 
 let defaultPetWindowRef: BrowserWindow | null = null;
@@ -357,12 +357,12 @@ export function installDefaultPetChatIpcHandlers(): void {
   });
 
   handleChat("openpets:default-pet-check-in-get-snapshot", () => {
-    return getManagerCheckInService().getPetSnapshot();
+    return getManagerCheckInPetSnapshot();
   });
 
   handleChat("openpets:default-pet-check-in-open", () => {
     openDefaultPetCheckIn();
-    return getManagerCheckInService().getPetSnapshot();
+    return getManagerCheckInPetSnapshot();
   });
 
   handleChat("openpets:default-pet-check-in-close", () => {
@@ -542,13 +542,7 @@ function sendManagerCheckInSnapshot(window: BrowserWindow, snapshot: ManagerChec
 }
 
 function sendInitialManagerCheckInState(window: BrowserWindow): void {
-  try {
-    sendManagerCheckInSnapshot(window, getManagerCheckInService().getPetSnapshot());
-  } catch {
-    // The manager service is initialized before normal pet creation. A
-    // replacement window during early startup can still bind before it is
-    // available; the renderer's initial invoke will retry in that case.
-  }
+  sendManagerCheckInSnapshot(window, getManagerCheckInPetSnapshot());
 }
 
 function sendPanelState(window: BrowserWindow): void {

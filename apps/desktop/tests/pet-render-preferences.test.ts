@@ -19,6 +19,7 @@ const initialPreferences: PetRenderPreferences = {
   bubbleDurationScale: 1,
   bubbleTheme: "system",
   waitingAnimationDurationMs: 1010,
+  showOpenCodeTokenRate: true,
   reactionAnimationOverrides: { testing: "waiting" },
   showChatButton: false,
   showTalkButton: false,
@@ -72,6 +73,7 @@ register(mock(`
 `), import.meta.url);
 
 const { createDefaultPetRenderContent } = await import("../src/pet-window-render.js");
+const { openCodeTokenRateStore } = await import("../src/opencode-token-rate.js");
 after(async () => {
   delete testGlobal.__petRenderPreferencesTest;
   await rm(directory, { recursive: true, force: true });
@@ -100,4 +102,38 @@ test("a render keeps one preference revision across asynchronous manifest IO", a
   assert.equal(next.bodyHtml.includes("data-openpets-companion-launcher"), true);
   assert.equal(next.renderedPetId, "snapshot-cat");
   assert.equal(next.codexSpriteVersion, 1);
+});
+
+test("hiding the token dock releases its layout while preserving live and average readings", async () => {
+  const target = { kind: "default" } as const;
+  host.manifestGate = Promise.resolve();
+  host.preferences = { ...initialPreferences };
+  openCodeTokenRateStore.update("visibility-test", undefined, target, {
+    tokensPerSecond: 48,
+    averageTokensPerSecond: 35,
+    source: "estimated",
+  });
+  try {
+    const shown = await createDefaultPetRenderContent(false, null, null);
+    assert.ok(shown.bodyHtml.includes("data-opencode-token-rate"));
+    assert.ok(shown.bodyHtml.includes("48.0 tk/s"));
+    host.preferences = { ...initialPreferences, showOpenCodeTokenRate: false };
+    const hidden = await createDefaultPetRenderContent(false, null, null);
+    assert.equal(hidden.bodyHtml.includes("data-opencode-token-rate"), false);
+    assert.ok(hidden.gazeSpriteBottomInset < shown.gazeSpriteBottomInset);
+
+    openCodeTokenRateStore.update("visibility-test", undefined, target, {
+      tokensPerSecond: 56,
+      averageTokensPerSecond: 39,
+      source: "estimated",
+    });
+    assert.equal(openCodeTokenRateStore.read(target)?.tokensPerSecond, 56);
+    host.preferences = { ...initialPreferences, showOpenCodeTokenRate: true };
+    const restored = await createDefaultPetRenderContent(false, null, null);
+    assert.ok(restored.bodyHtml.includes("56.0 tk/s"));
+    assert.ok(restored.bodyHtml.includes("39.0 tk/s"));
+    assert.equal(restored.gazeSpriteBottomInset, shown.gazeSpriteBottomInset);
+  } finally {
+    openCodeTokenRateStore.clearAll();
+  }
 });

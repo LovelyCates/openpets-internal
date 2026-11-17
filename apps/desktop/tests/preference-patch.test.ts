@@ -202,6 +202,11 @@ for (const { key, errMsg } of booleanKeys) {
   assert.throws(() => validatePreferencePatch({ petButtonsSize: "huge" }), /Invalid pet buttons size value\./);
   assert.throws(() => validatePreferencePatch({ showChatButton: "yes" }), /Invalid chat button visibility value\./);
   assert.equal(validatePreferencePatch({ showTalkButton: false }).showTalkButton, false);
+  assert.equal(validatePreferencePatch({ showOpenCodeTokenRate: false }).showOpenCodeTokenRate, false);
+  assert.equal(validatePreferencePatch({ showOpenCodeTokenRate: true }).showOpenCodeTokenRate, true);
+  for (const value of ["true", 1, null, {}]) {
+    assert.throws(() => validatePreferencePatch({ showOpenCodeTokenRate: value }));
+  }
   console.log("validatePreferencePatch: assistant buttons & chat shortcut — PASS");
 }
 

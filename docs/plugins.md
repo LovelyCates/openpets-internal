@@ -434,6 +434,13 @@ session partition, navigation/window-open hardening, an SDK IPC **token**, a
 registration handshake at startup, config-listener cleanup, and teardown. The
 plugin's `index.js` runs here, isolated from the renderer and the main process.
 
+Bubble action, submit and dismiss callbacks share the bridge's asynchronous
+error and generation guard. Rejected handlers become plugin diagnostics; a
+reload or disable does not send a late dismiss callback into a disposed renderer.
+Pet-menu command failures propagate to the caller, so a failed command form
+stays open and can display its validation error. Canceling a configuration sound
+picker is a successful no-change result, not an imported sound or an error.
+
 `plugin-sdk-bridge.ts` is the gate between the sandbox and the host. It
 validates routes, builds the per-plugin context, enforces permissions + quotas,
 and delegates to focused namespace modules (`plugin-sdk-audio`, `plugin-sdk-network`, `-bus`,
@@ -618,6 +625,13 @@ each state.
 2. **Develop**: write against the SDK ([Plugin SDK v3](/sdk)); hot-load via dev mode.
 3. **Test**: `test.js` uses `@open-pets/plugin-sdk/testing` to fake time/events
    and assert descriptor-level effects - no Electron. See [Plugin SDK v3](/sdk).
+   The desktop `bundled-plugin-interactions.test.ts` also runs all bundled
+   entries through both shipped preloads, the Control Center IPC handlers and
+   the production SDK dispatcher/bridge. It exercises enable/disable, config
+   saves, canceled sound picks, marketplace details and currently visible/dynamic
+   commands with isolated storage and recorded host effects. This complements
+   plugin harness tests; it does not prove native rendering, OS notification
+   delivery, audio playback or every possible timer/input state.
 4. **Validate**: `openpets plugin validate <dir>` checks manifest, permissions,
    SDK compatibility, config field types, network hosts, asset formats/size
    caps, entry files, and HTML panels. (`packages/cli/src/plugin-validate.ts`.)

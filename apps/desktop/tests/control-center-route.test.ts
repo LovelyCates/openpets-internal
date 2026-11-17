@@ -10,9 +10,10 @@ assert.deepEqual(resolveDevControlCenterRoute("teams", false), {
 assert.equal(normalizeControlCenterRoute("teams"), "dashboard");
 assert.deepEqual(normalizeControlCenterRouteTarget({ route: "teams" }), { route: "dashboard" });
 assert.deepEqual(resolveDevControlCenterRoute("providers", false), {
-  kind: "target",
-  target: { route: "assistant", assistantTab: "providers" },
+  kind: "invalid",
+  rawValue: "providers",
 });
+assert.deepEqual(normalizeControlCenterRouteTarget({ route: "assistant", assistantTab: "providers" }), { route: "assistant" });
 assert.deepEqual(resolveDevControlCenterRoute("", false), {
   kind: "invalid",
   rawValue: "",

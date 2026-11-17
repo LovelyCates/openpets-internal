@@ -115,7 +115,7 @@ function syncDockVisibilityForInternalUi(): void {
 }
 
 function getSettingsStateSnapshot(): {
-  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "appearanceTheme" | "petScale" | "hudScale" | "bubbleScale" | "bubbleDurationScale" | "bubbleTheme" | "waitingAnimationDurationMs" | "idleCursorGazeEnabled" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "favoritePetIds" | "pinnedPets" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "petBounciness" | "petFloorFriction" | "personality" | "voiceAssistantShortcut" | "chatShortcut" | "petToggleShortcut" | "showChatButton" | "showTalkButton" | "petButtonsPosition" | "petButtonsSize">;
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "appearanceTheme" | "petScale" | "hudScale" | "bubbleScale" | "bubbleDurationScale" | "bubbleTheme" | "waitingAnimationDurationMs" | "idleCursorGazeEnabled" | "showOpenCodeTokenRate" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "favoritePetIds" | "pinnedPets" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "petBounciness" | "petFloorFriction" | "personality" | "voiceAssistantShortcut" | "chatShortcut" | "petToggleShortcut" | "showChatButton" | "showTalkButton" | "petButtonsPosition" | "petButtonsSize">;
   petScaleOptions: typeof petScaleOptions;
   hudScaleOptions: typeof hudScaleOptions;
   bubbleScaleOptions: typeof bubbleScaleOptions;
@@ -140,6 +140,7 @@ function getSettingsStateSnapshot(): {
       bubbleTheme: state.preferences.bubbleTheme,
       waitingAnimationDurationMs: state.preferences.waitingAnimationDurationMs,
       idleCursorGazeEnabled: state.preferences.idleCursorGazeEnabled,
+      showOpenCodeTokenRate: state.preferences.showOpenCodeTokenRate,
       reactionAnimationOverrides: state.preferences.reactionAnimationOverrides,
       petPoolOrder: state.preferences.petPoolOrder,
       petPoolEnabled: state.preferences.petPoolEnabled,
@@ -522,6 +523,7 @@ export function installInternalUiHandlers(): void {
     const previousBubbleTheme = getAppStateSnapshot().preferences.bubbleTheme;
     const previousWaitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
     const previousIdleCursorGazeEnabled = getAppStateSnapshot().preferences.idleCursorGazeEnabled;
+    const previousShowOpenCodeTokenRate = getAppStateSnapshot().preferences.showOpenCodeTokenRate;
     const previousOverrides = JSON.stringify(getAppStateSnapshot().preferences.reactionAnimationOverrides ?? {});
     const previousLocale = getActiveLocale();
     const previousPoolEnabled = getAppStateSnapshot().preferences.petPoolEnabled;
@@ -556,7 +558,8 @@ export function installInternalUiHandlers(): void {
       refreshDefaultPetContent();
       broadcastDashboardRefresh();
     }
-    if (state.preferences.petScale !== previousScale || state.preferences.hudScale !== previousHudScale || state.preferences.waitingAnimationDurationMs !== previousWaitingAnimationDurationMs || nextOverrides !== previousOverrides || petButtonPrefsChanged) {
+    const tokenDockPreferenceChanged = state.preferences.showOpenCodeTokenRate !== previousShowOpenCodeTokenRate;
+    if (state.preferences.petScale !== previousScale || state.preferences.hudScale !== previousHudScale || state.preferences.waitingAnimationDurationMs !== previousWaitingAnimationDurationMs || nextOverrides !== previousOverrides || petButtonPrefsChanged || tokenDockPreferenceChanged) {
       refreshDefaultPetContent();
       refreshAgentPetContent();
       refreshPinnedPetContent();
@@ -911,10 +914,9 @@ function flushPendingControlCenterRoute(window: BrowserWindow): void {
   sendControlCenterRoute(window, target);
 }
 
-function controlCenterRouteQuery(target: ControlCenterRouteTarget): { route: string; assistantTab?: string; petId?: string } {
+function controlCenterRouteQuery(target: ControlCenterRouteTarget): { route: string; petId?: string } {
   return {
     route: target.route,
-    ...(target.assistantTab ? { assistantTab: target.assistantTab } : {}),
     ...(target.petId ? { petId: target.petId } : {}),
   };
 }
@@ -922,7 +924,6 @@ function controlCenterRouteQuery(target: ControlCenterRouteTarget): { route: str
 function withControlCenterRoute(rawUrl: string, target: ControlCenterRouteTarget): string {
   const url = new URL(rawUrl);
   url.searchParams.set("route", target.route);
-  if (target.assistantTab) url.searchParams.set("assistantTab", target.assistantTab);
   if (target.petId) url.searchParams.set("petId", target.petId);
   return url.toString();
 }

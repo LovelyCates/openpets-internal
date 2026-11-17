@@ -78,7 +78,7 @@ export function createBuiltInPetRender(
     ? resolveCompanionDisplayName(preferences.petName, assetDisplayName)
     : assetDisplayName;
   const hasPinned = Boolean(pluginBubbles?.pinned);
-  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId, preferences);
   const hasTokenDock = Boolean(tokenRate);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
@@ -240,7 +240,7 @@ export async function createInstalledPetRender(
     const outfitId = resolveRenderedPetOutfit(petId, motion.metadata.wardrobe);
     const { geometry } = motion.metadata;
     const hasPinned = Boolean(pluginBubbles?.pinned);
-    const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+    const tokenRate = getOpenCodeTokenRateForPet(petRole, petId, preferences);
     const hasTokenDock = Boolean(tokenRate);
     const hudScale = preferences.hudScale as HudScaleValue;
     const voiceActive = petRole === "default" && display?.suppressReactionMessage === true;
@@ -272,7 +272,7 @@ export async function createInstalledPetRender(
 
   const imageUrl = pathToFileURL(spritesheetPath).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
-  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId);
+  const tokenRate = getOpenCodeTokenRateForPet(petRole, petId, preferences);
   const hasTokenDock = Boolean(tokenRate);
   const isVoiceActive = petRole === "default" && display?.suppressReactionMessage === true;
   const canSubmitRecording = isVoiceActive && display?.canSubmitRecording === true;
@@ -387,7 +387,7 @@ export function createPetBodyMarkup(
     ? `<div class="openpets-pet-buttons">${chatButton}${talkButton}</div>`
     : "";
   const tokenRateBadge = createOpenCodeTokenRateMarkup(tokenRate);
-  return `<div class="stage${hasPinned ? " has-pinned" : ""}${tokenRateBadge ? " has-token-dock" : ""}${hasMessageOrBubble ? " has-bubble" : ""}" aria-label="${stageLabel}" data-pet-role="${petRole}">
+  return `<div class="stage${hasPinned ? " has-pinned" : ""}${tokenRateBadge ? " has-token-dock" : ""}${hasMessageOrBubble ? " has-bubble" : ""}" aria-label="${stageLabel}" data-pet-role="${petRole}" data-token-rate-enabled="${preferences.showOpenCodeTokenRate !== false}">
     ${pinnedBubble}
     ${tokenRateBadge}
     ${bubble}
@@ -400,7 +400,8 @@ export function createPetBodyMarkup(
   </div>`;
 }
 
-function getOpenCodeTokenRateForPet(petRole: "default" | "agent", petId: string): OpenCodeTokenRateDisplay | null {
+function getOpenCodeTokenRateForPet(petRole: "default" | "agent", petId: string, preferences: PetRenderPreferences): OpenCodeTokenRateDisplay | null {
+  if (preferences.showOpenCodeTokenRate === false) return null;
   return openCodeTokenRateStore.readDisplay(petRole === "default"
     ? { kind: "default" }
     : { kind: "explicit", petId });

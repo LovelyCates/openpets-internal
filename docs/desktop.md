@@ -60,6 +60,17 @@ replace installer signing or the isolated-network release checks.
 
 ## Process model
 
+The internal Control Center's Assistant page contains chat/talk preferences,
+personality and conversation history. Provider management has no tab or deep
+link. Settings contains General, reaction animations and plugin capability gates;
+remote-control and LAN pages, their connectivity group and remote pairing/token
+dialogs are not mounted. Opening Settings does not query LAN status. The existing
+host services and stored configuration remain owned by their background modules.
+
+Settings → General places **Token speed (tk/s / AVG)** directly below the HUD
+scale control. It controls the realtime/average speed display beneath the pet
+and defaults to on; session state and token sampling continue independently.
+
 Electron gives us a **main process** and multiple **renderer processes**. In
 OpenPets:
 
@@ -214,6 +225,12 @@ actions and is never synchronized to Teams. The service persists only the
 minimal private queue lifecycle needed for scheduled offers and retries; the pet
 projection exposes its current item and count, never a manager-visible pending
 or activity signal.
+
+Pet snapshot reads return an empty item/count while the service is not yet
+initialized or the internal build keeps Teams disabled. They do not construct
+or start the service. If it is initialized later, its existing subscription
+publishes the ready snapshot normally. Submission still requires the initialized
+service and its usual enrollment, schedule and explicit-action checks.
 
 Each submission is immutable, schedule/cycle-specific, and includes the prompt
 snapshot that was shown. The API derives the canonical cycle ID from schedule
@@ -678,18 +695,17 @@ Pairing creates a named client and a high-entropy token. The plaintext token is
 returned only by the local pairing/rotation API; persistence stores only its
 SHA-256 verifier plus client metadata and activity timestamps. The main-process
 IPC interface (`openpets:remote-*`) supports Control Center management: configuration,
-pairing, listing, rotation, and revocation. Control Center (Settings → Remote)
-provides a dedicated UI with listener configuration, explicit IPv4 bind validation,
-a prominent unencrypted TCP transport warning with explicit acknowledgement before
-enabling, paired client listing with scope badges, pairing with `say` unchecked by default,
-a one-time token handoff panel with environment/CLI setup guidance (`OPENPETS_REMOTE_ENDPOINT="tcp://<address>:<port>"` derived from active listener state), and confirmation
-modals for token rotation and client revocation.
+pairing, listing, rotation, and revocation. This Internal edition hides the
+remote-management page and its pairing/token dialogs. The existing management
+contract retains listener configuration, explicit IPv4 bind validation, private
+transport acknowledgement, scoped client records, one-time token return and
+rotation/revocation. Stored configuration and host security boundaries are
+unchanged by hiding the page.
 
 Remote requests can only read a sanitized status snapshot, react to the default pet,
 or say a short validated message with the `say` scope. Leases, installation, discovery,
 files, media, paths, prompts, tool output, and arbitrary pet targets are not part of the
-remote capability. Explanatory copy in Control Center highlights these default-pet-only
-and no-files/media constraints. LAN ownership is initialized before the remote service
+remote capability. LAN ownership is initialized before the remote service
 singleton and Control Center handlers; the persisted listener starts only after the normal
 UI/local-IPC startup steps. While LAN ownership is unknown or belongs to another host,
 remote reactions and speech return `shown: false` instead of waking or forwarding the

@@ -4,7 +4,7 @@ import net from "node:net";
 import { app, Notification, shell, systemPreferences, type BrowserWindow } from "electron";
 
 import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, getAgentPetWindow, refreshAgentPetContent, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
-import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
+import { getAppStateSnapshot, isOpenCodeTokenRateDisplayEnabled, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, getDefaultPetWindowForPlugins, isDefaultPetVisible, refreshDefaultPetContent } from "./default-pet-controller.js";
 import { LeaseManager } from "./lease-manager.js";
@@ -58,7 +58,7 @@ openCodeTokenRateStore.subscribe((target) => {
     t("pet.tokenRate.lastOutput"),
     t("pet.tokenRate.live"),
   );
-  const hasTokenDock = display !== null;
+  const hasTokenDock = isOpenCodeTokenRateDisplayEnabled() && display !== null;
   const hadTokenDock = tokenDockVisibility.get(window) ?? false;
   tokenDockVisibility.set(window, hasTokenDock);
   if (hadTokenDock !== hasTokenDock) {
