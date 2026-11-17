@@ -31,6 +31,11 @@ DMG/ZIP files with checksums. Use `--dir` to stop after the `.app`. The upstream
 `release:desktop` command targets the public release infrastructure and is not
 the internal edition's distribution entry point.
 
+The internal edition's paired Windows/macOS GitHub distribution is documented
+in `internal/GITHUB-RELEASE.md`. Its dedicated Windows workflow builds and
+validates an NSIS artifact; publication compares actual shared package payloads
+with the Mac build at the same commit before uploading both to one Release.
+
 ## Root command surface
 
 All from the repo root unless noted (full list in root `package.json`):

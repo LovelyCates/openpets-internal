@@ -1,5 +1,10 @@
 # Windows 内网构建与发布
 
+本仓库通过 GitHub 联网构建、分发同版本 Win/Mac 安装包的流程见
+[GITHUB-RELEASE.md](GITHUB-RELEASE.md)。专用 `internal-windows-release.yml`
+工作流在原生 Windows runner 上构建并验证 NSIS，生成未签名安装包和构建
+记录；它不替代下述企业离线供应链、网络隔离或企业签名门槛。
+
 ## 当前状态
 
 此流程是构建门槛设计，不是已验证的离线构建记录。`Test-WindowsBuild.ps1` 当前仅执行只读预检；通过预检也不能代替网络隔离、依赖审计、实际构建和运行时出站验证。构建机应由防火墙或 CI 网络策略限制到经过批准的内网镜像，不能依赖应用变量阻止任意依赖脚本访问公网。

@@ -1,0 +1,142 @@
+name: Build Internal Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Exact source commit or tag shared with the macOS build"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Preserve repository bytes on Windows
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pinned pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+
+      - name: Prepare verified Windows resource tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:ELECTRON_BUILDER_CACHE = Join-Path $env:RUNNER_TEMP 'electron-builder-cache'
+          "ELECTRON_BUILDER_CACHE=$env:ELECTRON_BUILDER_CACHE" >> $env:GITHUB_ENV
+          $archive = Join-Path $env:RUNNER_TEMP 'winCodeSign-2.6.0.7z'
+          Invoke-WebRequest -Uri 'https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z' -OutFile $archive
+          $sevenZip = node -e "console.log(require('./apps/desktop/node_modules/7zip-bin').path7za)"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not locate the locked 7zip executable.' }
+          ./internal/Prepare-WindowsCodeSignCache.ps1 -ArchivePath $archive -SevenZipPath $sevenZip
+          pnpm --filter @open-pets/desktop package:preflight
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging prerequisites failed.' }
+
+      - name: Build and check shared integration code
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @open-pets/desktop typecheck
+          pnpm --filter @open-pets/client check
+          pnpm --filter @open-pets/opencode check
+          pnpm --filter @open-pets/opencode build:v1
+          pnpm --filter @open-pets/opencode build:v2
+          git diff --exit-code -- packages/opencode/v1-package/index.js packages/opencode/v2-package/index.js
+          pnpm --filter @open-pets/desktop build
+          pnpm --filter @open-pets/desktop test:build
+
+      # These targeted gates cover the release behavior. The unrelated full
+      # desktop suite has a recorded closed-cloud Assistant assertion failure;
+      # this workflow does not claim that suite passed or relax its policy.
+      - name: Check shared pet and import behavior
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:OPENPETS_DESKTOP_ROOT = Join-Path $env:GITHUB_WORKSPACE 'apps/desktop'
+          $tests = @(
+            'pet-body-classic-cadence', 'pet-drag-feedback', 'pet-body-state',
+            'pet-content-stage', 'pet-window-motion', 'opencode-token-rate',
+            'pet-library-state', 'preference-patch', 'pet-local-codex-origin',
+            'control-center-pet-management-ipc', 'app-state-installed-pets',
+            'pet-render-preferences', 'local-ipc-request-handler'
+          )
+          foreach ($name in $tests) {
+            node "apps/desktop/.test-dist/tests/$name.test.js"
+            if ($LASTEXITCODE -ne 0) { throw "Release behavior check failed: $name" }
+          }
+
+      - name: Package Windows x64 application
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/desktop/scripts/clean-package-output.cjs
+          pnpm --dir apps/desktop exec electron-builder --win dir --x64 --publish never
+          node apps/desktop/dist/check-packaging-contract.js --output --output-dir apps/desktop/dist-electron/win-unpacked --platform win32 --arch x64
+          node internal/validate-windows-runtime.mjs apps/desktop/dist-electron/win-unpacked
+          pnpm --dir apps/desktop exec electron-builder --win nsis --x64 --prepackaged dist-electron/win-unpacked --publish never
+
+      - name: Extract and validate the actual NSIS payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./apps/desktop/package.json').version"
+          $installer = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/dist-electron/OpenPets-Internal-$version-win-x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Expected NSIS installer was not produced.' }
+          $sevenZip = node -e "console.log(require('./apps/desktop/node_modules/7zip-bin').path7za)"
+          $extracted = Join-Path $env:RUNNER_TEMP 'openpets-nsis-extracted'
+          & $sevenZip x $installer "-o$extracted" -y
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the NSIS installer.' }
+          $archives = @(Get-ChildItem -Path $extracted -Recurse -Filter 'app-64.7z')
+          if ($archives.Count -ne 1) { throw 'Expected exactly one x64 app archive in NSIS.' }
+          $app = Join-Path $env:RUNNER_TEMP 'openpets-nsis-app'
+          & $sevenZip x $archives[0].FullName "-o$app" -y
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the NSIS app payload.' }
+          node apps/desktop/dist/check-packaging-contract.js --output --output-dir $app --platform win32 --arch x64
+          if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its packaging contract.' }
+          node internal/validate-windows-runtime.mjs $app
+          if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its native runtime smoke.' }
+          node internal/record-release-payload.mjs --resources-dir (Join-Path $app 'resources') --platform win32 --arch x64 --output apps/desktop/dist-electron/BUILD-METADATA.windows-x64.json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not record the verified payload metadata.' }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([System.IO.Path]::GetFileName($installer))" | Set-Content -Encoding utf8NoBOM apps/desktop/dist-electron/SHA256SUMS.windows-x64.txt
+          "version=$version" >> $env:GITHUB_ENV
+          "source_sha=$(git rev-parse HEAD)" >> $env:GITHUB_ENV
+          "Windows x64 NSIS payload and native runtime validated; version $version; source $(git rev-parse HEAD). Installer is unsigned." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload verified installer and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: openpets-internal-windows-x64-${{ env.version }}-${{ env.source_sha }}
+          path: |
+            apps/desktop/dist-electron/OpenPets-Internal-${{ env.version }}-win-x64-setup.exe
+            apps/desktop/dist-electron/SHA256SUMS.windows-x64.txt
+            apps/desktop/dist-electron/BUILD-METADATA.windows-x64.json
+          if-no-files-found: error
+          retention-days: 14
