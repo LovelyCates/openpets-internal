@@ -43,6 +43,7 @@ OpenCode 1.x 与 2.x 使用不同插件入口，详见 `packages/opencode/V1_COM
 - `build-macos.mjs`：本机构建、验证并生成内部 macOS `.app`、DMG、ZIP 和校验和，不执行公开发布。
 - `validate-macos-runtime.mjs`：验证打包后 macOS 窗口 helper 的架构/执行位，并在打包 Electron 的 Node 模式下加载运行时和验证 Sharp 图像处理。
 - `validate-windows-runtime.mjs`：在原生 Windows x64 下验证打包 PE，使用打包 Electron 加载窗口原生 addon 并验证 Sharp 编解码，不枚举用户窗口。
+- `validate-windows-pet-rendering.mjs`：仅在全新 GitHub 托管 Windows runner 上启动最终 NSIS 的真实 GUI；在独占空 profile 内验证内置 V2 和经本机 IPC 导入的合成 V1 空闲动作。失败也保留宠物窗口截图、CSS 时钟和分离采样的 rAF 观测；不将其声明为用户显卡/DWM 或双端全量实机验收。
 - `record-release-payload.mjs`：读取两端实际打包的公共运行代码、插件和资源摘要，记录源码提交、锁文件及子模块；用于同版本 Release 的载荷一致性核对。
 - `validate-pet-catalog.mjs`：离线复用真实 ZIP、metadata 和桌面资产校验；V1 WebP 额外逐页完整解码，记录页数与时序。按整包及校验实现哈希恢复，输出逐项结果、失败清单和可导入 manifest，不修改素材或应用状态。
 - `import-pet-catalog.mjs`：消费离线 validator 的完整通过清单，再核验 ZIP 整包哈希和大小，通过运行中应用的本地 IPC 串行导入。既有 ID（包括自定义和损坏条目）跳过；逐项写入 checkpoint 与结果报告，结束后重新列库核对，不直接写应用 state、不创建 lease、不修改默认或固定宠物。用法：`node internal/import-pet-catalog.mjs --ready-manifest ABS --zip-dir ABS --report-dir ABS [--limit N]`；报告目录须独立于 validator 输出，重跑同一命令按应用当前已安装 ID 恢复。`--limit` 仅核对样本范围是否完成，同时保留全目录缺失 ID。客户端遵循 `OPENPETS_DISCOVERY_FILE`；未设置时本分支 macOS/Windows 默认连接 Internal profile，执行前应确保目标应用与 discovery 匹配。

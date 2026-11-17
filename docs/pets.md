@@ -155,6 +155,17 @@ movement, plugin body overrides, pause, reduced motion, native activity playback
 artwork replacement and window teardown stop them immediately. V2 gaze and
 Motion idle behavior retain their existing paths. Declared automatic activities
 still require opt-in and keep their separate 2–4 minute opportunity cadence.
+Native coordinate noise below the existing three-pixel movement threshold does
+not restart the quiet delay or suspend gaze. Continuous slow travel still
+accumulates toward that threshold; 180 milliseconds without movement reanchors
+the next travel measurement.
+Drag recovery also cancels the matching renderer pointer transaction. This
+clears its local movement feedback so resumed windows can admit quiet gestures
+and finish their three-cycle busy budget even if a mouse-up was lost. Each drag
+has its own token; delayed movement, release or cancellation from an older drag
+cannot clear a newer one. Normal releases do not echo a cancellation to the renderer.
+These tokens and the cancellation channel belong to private pet-window IPC;
+they do not add a public local-API method.
 
 An idle V1 pet also gives one short jumping gesture when the pointer first
 enters its visible artwork. The initial entry uses the existing alpha hit test;
@@ -332,6 +343,12 @@ click-through and impossible to grab. A cursor-probe watchdog in
 `pet-window-interaction.ts` re-arms forwarding from the main process
 (`screen.getCursorScreenPoint()`), which keeps working even when forwarding is
 dead. The platform predicates live in `mouse-forwarding.ts`.
+
+Display/power recovery, renderer navigation or failure, and window hide/close
+cancel an interrupted drag through the same host-owned release path. It clears
+the movement blocker and activity/gaze drag ownership and discards pointer
+velocity, so a delayed mouse-up cannot launch a stale throw. Repeated recovery
+without an active drag does not restart the quiet-idle opportunity.
 
 Right-clicking any pet offers a **Size** submenu with the same global scale
 choices as Settings. The current size is checked; selecting another size saves

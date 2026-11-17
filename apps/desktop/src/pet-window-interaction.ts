@@ -69,6 +69,9 @@ export function installPetWindowInteraction(
     readonly height: number;
     readonly interruptedMotion: boolean;
   } | null = null;
+  // Native Wayland dragging owns activity/gaze state without a manual move record.
+  let dragOwnersActive = false;
+  let activeDragToken: string | null = null;
   const velocityTracker = createVelocityTracker();
   let rendererReady = false;
   let listenersRemoved = false;
@@ -78,10 +81,37 @@ export function installPetWindowInteraction(
   const webContents = window.webContents;
   const canForwardMouseEvents = platformCanForwardMouseEvents(process.platform);
 
+  const clearDragState = (cancelRenderer: boolean): void => {
+    const hadDrag = dragOwnersActive || dragging !== null || petWindowDragging.get(window) === true;
+    const cancelledToken = activeDragToken;
+    dragging = null;
+    dragOwnersActive = false;
+    activeDragToken = null;
+    petWindowDragging.set(window, false);
+    velocityTracker.reset();
+    if (hadDrag) {
+      setPetActivityDragging(window, false);
+      setPetGazeDragging(window, false);
+    }
+    if (cancelRenderer && cancelledToken && !webContents.isDestroyed()) {
+      try {
+        webContents.send("openpets:pet-drag-cancel", cancelledToken);
+      } catch (error) {
+        // A crashed or navigating renderer can lose its main frame before
+        // WebContents is destroyed. Host ownership has already been released.
+        debug("pet.window", "drag cancellation renderer unavailable", {
+          windowId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  };
+  const cancelDragState = (): void => clearDragState(true);
+
   const scheduleMouseInteropRecovery = (reason: string): void => {
     if (window.isDestroyed()) return;
 
-    dragging = null;
+    cancelDragState();
     rendererReady = false;
     lastInteractive = false;
     clearRearmTimers();
@@ -275,9 +305,13 @@ export function installPetWindowInteraction(
   };
 
   const handleDragStart = (event: IpcMainEvent, point: unknown): void => {
-    if (!isFromWindow(event) || !isScreenPoint(point) || window.isDestroyed()) return;
+    if (!isFromWindow(event) || !isDragPoint(point) || window.isDestroyed()) return;
+    if (activeDragToken === point.dragToken) return;
 
+    cancelDragState();
+    activeDragToken = point.dragToken;
     const interruptedMotion = motionCancelMoveForDrag(window);
+    dragOwnersActive = true;
     setPetActivityDragging(window, true);
     setPetGazeDragging(window, true);
     suspendPetGazeForMovement(window);
@@ -308,7 +342,7 @@ export function installPetWindowInteraction(
   };
 
   const handleDragMove = (event: IpcMainEvent, point: unknown): void => {
-    if (!isFromWindow(event) || !dragging || !isScreenPoint(point) || window.isDestroyed()) return;
+    if (!isFromWindow(event) || !dragging || !isDragPoint(point) || point.dragToken !== activeDragToken || window.isDestroyed()) return;
 
     suspendPetGazeForMovement(window);
     if (useWaylandNativeDrag) {
@@ -322,23 +356,21 @@ export function installPetWindowInteraction(
     velocityTracker.addSample(Date.now(), nextX, nextY);
   };
 
-  const handleDragEnd = (event: IpcMainEvent): void => {
-    if (!isFromWindow(event)) return;
+  const handleDragEnd = (event: IpcMainEvent, token: unknown): void => {
+    if (!isFromWindow(event) || typeof token !== "string" || token !== activeDragToken) return;
 
-    setPetActivityDragging(window, false);
-    setPetGazeDragging(window, false);
+    const releasedDrag = dragging;
+    const wasDragging = releasedDrag !== null;
+    const throwVelocity = releasedDrag
+      ? resolveDragThrowVelocity(velocityTracker.release(Date.now()), releasedDrag.interruptedMotion)
+      : null;
+    clearDragState(false);
     suspendPetGazeForMovement(window);
     if (useWaylandNativeDrag) {
       debug("pet.window", "manual drag end ignored on Wayland native drag", { windowId });
       return;
     }
 
-    const releasedDrag = dragging;
-    const wasDragging = releasedDrag !== null;
-    dragging = null;
-    petWindowDragging.set(window, false);
-    const throwVelocity = resolveDragThrowVelocity(velocityTracker.release(Date.now()), releasedDrag?.interruptedMotion ?? false);
-    velocityTracker.reset();
     if (releasedDrag && !releasedDrag.interruptedMotion && throwVelocity && !window.isDestroyed()) {
       startPetThrow(window, { width: releasedDrag.width, height: releasedDrag.height }, throwVelocity, getThrowPhysics());
     } else if (releasedDrag?.interruptedMotion && throwVelocity) {
@@ -415,8 +447,7 @@ export function installPetWindowInteraction(
   };
 
   const resetForNavigation = (): void => {
-    dragging = null;
-    petWindowDragging.set(window, false);
+    cancelDragState();
     rendererReady = false;
     lastInteractive = false;
     resetPetGazeWindow(window);
@@ -426,8 +457,7 @@ export function installPetWindowInteraction(
   };
 
   const rearmAfterLoad = (): void => {
-    dragging = null;
-    petWindowDragging.set(window, false);
+    cancelDragState();
     lastInteractive = false;
     debug("pet.window", "load rearm passthrough", { windowId });
     rearmPassthroughAfterLoad();
@@ -438,7 +468,7 @@ export function installPetWindowInteraction(
   };
 
   const handleLoadFailure = (): void => {
-    dragging = null;
+    cancelDragState();
     lastInteractive = false;
     resetPetGazeWindow(window);
     debug("pet.window", "load failure rearm passthrough", { windowId });
@@ -448,6 +478,7 @@ export function installPetWindowInteraction(
   const removeListeners = (): void => {
     if (listenersRemoved) return;
     listenersRemoved = true;
+    cancelDragState();
 
     ipcMain.off("openpets:pet-ready", handleReady);
     ipcMain.off("openpets:pet-hit-test", handleHitTest);
@@ -470,7 +501,9 @@ export function installPetWindowInteraction(
       webContents.off("did-finish-load", rearmAfterLoad);
       webContents.off("dom-ready", handleDomReady);
       webContents.off("did-fail-load", handleLoadFailure);
+      webContents.off("render-process-gone", resetForNavigation);
     }
+    window.off("hide", cancelDragState);
   };
 
   petMouseInteropRecovery.set(window, scheduleMouseInteropRecovery);
@@ -491,6 +524,8 @@ export function installPetWindowInteraction(
   webContents.on("did-finish-load", rearmAfterLoad);
   webContents.on("dom-ready", handleDomReady);
   webContents.on("did-fail-load", handleLoadFailure);
+  webContents.on("render-process-gone", resetForNavigation);
+  window.on("hide", cancelDragState);
   window.once("closed", removeListeners);
 }
 
@@ -503,4 +538,10 @@ function isScreenPoint(value: unknown): value is { readonly screenX: number; rea
     && value !== null
     && typeof (value as { readonly screenX?: unknown }).screenX === "number"
     && typeof (value as { readonly screenY?: unknown }).screenY === "number";
+}
+
+function isDragPoint(value: unknown): value is { readonly screenX: number; readonly screenY: number; readonly dragToken: string } {
+  return isRecord(value)
+    && typeof value.dragToken === "string" && value.dragToken.length > 0 && value.dragToken.length <= 128
+    && isScreenPoint(value);
 }

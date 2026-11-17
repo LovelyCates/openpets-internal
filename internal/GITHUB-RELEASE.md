@@ -14,7 +14,38 @@ Windows 使用 `.github/workflows/internal-windows-release.yml` 手动构建。
 该工作流仅拥有源码读取权限，生成 NSIS 安装包及校验和、验证报告和构建
 记录，不自行创建或发布 Release。构建包括冻结锁文件安装、共享行为检查、
 V1/V2 单文件插件重建、目标平台打包合同、打包 Electron 的原生模块冒烟，
-以及从最终 NSIS 提取后的应用载荷复核。
+以及从最终 NSIS 提取后的应用载荷复核和真实 GUI 播放门槛。
+
+`validate-windows-pet-rendering.mjs` 在临时 GitHub 托管 Windows runner 上直接
+启动最终 NSIS 中的 `openpets-internal.exe`，不使用 Electron Node 模式或测试
+窗口替身。由于产品使用固定 Internal profile，验证器要求 Windows 原生
+AppData 下该目录完全不存在；它独占创建空目录，结束后只按本次随机所有权
+标记删除自己的目录，拒绝本地工作站、持久 runner 和任何既有 profile。
+CDP 只绑定并核实为该进程的 `127.0.0.1` 监听器，不增加生产 IPC。
+
+门槛先验收内置 V2 的资源解码、实际 CSS 动画时钟及自然到达两个原定待机帧后
+的可见像素变化；帧位和时长从实际包的 CSS 读取，不强制动画时钟、不依赖抓到
+短暂眨眼。然后通过真实
+本机 IPC 导入公开合成的 V1 atlas、获取独立 lease。heartbeat 只续租，不发送
+busy 状态；等待至多 35 秒，要求 V1 空闲手势出现、动画时钟继续推进，并在
+分阶段宠物窗口截图中观察到像素变化。报告同时保留系统实际 reduced-motion
+值及必要时仅用于该次验证的媒体模拟值；不修改 Windows 辅助功能设置。
+`openpets-windows-native-rendering-<run-id>` 附件即使失败也保留 JSON、有限
+启动日志及宠物窗口 PNG，不截取桌面或用户数据。rAF 采样和截图阶段分开，
+不把截图促成的绘制当作无干扰帧率测量。
+
+工作流还启用 `--with-public-yukino`：只向临时目录下载公开 catalog 的原始
+Yukino ZIP，要求固定 1,139,788 字节和 SHA-256
+`0021e18df93dbb4afd2215c03ef3c2a81d60fcde9340662907e816da6f441e1e`。
+不提交或读取用户已安装素材。通过真实 ZIP IPC 导入后，单独观察六个 idle
+列及 quiet 手势，便于和用户认可的同一素材比较。公开源超时、大小或哈希
+改变时，该补充场景明确记为未验证，合成场景仍独立判定；源校验通过后的
+产品播放失败则阻止发布，不能以下载失败或合成场景通过替代 Yukino 验收。
+
+该检查证明托管 Windows 中实际产品窗口能播放，不能证明用户显卡、DPI、
+DWM 屏幕呈现或安装快捷方式已验收，也不能替代同宠物跨平台实机比较。
+当前用户认可的 Mac 参考为 `4.1.0-internal.12` / Electron 42，Windows 后续
+版本使用的 Electron 45 必须单独记录；不要把 Mac 13 的载荷摘要当作该参考。
 
 工作流分别检出待发布的应用提交和该次工作流提交中的摘要工具。后者位于
 忽略的 `.local/release-tools`，以 `--source-root` 指向应用源码，避免发布工具

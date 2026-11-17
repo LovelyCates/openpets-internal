@@ -74,6 +74,7 @@ interface Render {
   readonly cacheKey: string;
   readonly petScale: number;
   readonly paused: boolean;
+  readonly codexSpriteVersion: 1 | 2;
 }
 
 interface Runtime {
@@ -96,7 +97,7 @@ const runtime = await import(runtimeModule) as Runtime;
 const window = new Window();
 const render: Render = {
   renderedPetId: "cat", renderedOutfitId: "default", activities: state.activities,
-  cacheKey: "same-base-atlas", petScale: 1, paused: false,
+  cacheKey: "same-base-atlas", petScale: 1, paused: false, codexSpriteVersion: 1,
 };
 const settle = async () => {
   for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
@@ -112,8 +113,20 @@ try {
   runtime.startPetActivities();
   mock.timers.tick(250);
 
-  // The Resources HUD refreshes its noninteractive body every ten seconds. Idle still reaches its opportunity.
-  for (let refresh = 0; refresh < 12; refresh += 1) {
+  // Frequent token/HUD refreshes preserve the original quiet-gesture budget.
+  for (let refresh = 0; refresh < 160; refresh += 1) {
+    runtime.preparePetActivityRender(window, false);
+    runtime.updatePetActivityRender(window, { ...render });
+    mock.timers.tick(250);
+  }
+  const quietGestures = window.webContents.sent.filter((message) => {
+    return message.channel === "openpets:pet-activity"
+      && message.payload.kind === "classic-idle" && message.payload.action === "play";
+  });
+  assert.equal(quietGestures.length, 2);
+
+  // The slower Resources HUD also leaves the native activity opportunity intact.
+  for (let refresh = 0; refresh < 8; refresh += 1) {
     runtime.preparePetActivityRender(window, false);
     runtime.updatePetActivityRender(window, { ...render });
     mock.timers.tick(10_000);

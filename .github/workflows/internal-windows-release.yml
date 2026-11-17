@@ -81,6 +81,7 @@ jobs:
           git diff --exit-code -- packages/opencode/v1-package/index.js packages/opencode/v2-package/index.js
           pnpm --filter @open-pets/desktop build
           pnpm --filter @open-pets/desktop test:build
+          node --test internal/validate-windows-pet-rendering.test.mjs
 
       # Run the shared release and security regressions on the native Windows host.
       # Transport/encryption fixtures stay isolated; production policy is unchanged.
@@ -91,7 +92,8 @@ jobs:
           $env:OPENPETS_DESKTOP_ROOT = Join-Path $env:GITHUB_WORKSPACE 'apps/desktop'
           $tests = @(
             'pet-body-classic-cadence', 'pet-drag-feedback', 'pet-body-state',
-            'pet-content-stage', 'pet-window-motion', 'opencode-token-rate',
+            'pet-content-stage', 'pet-window-motion', 'pet-window-interaction-recovery',
+            'pet-activities-runtime', 'opencode-token-rate',
             'pet-library-state', 'preference-patch', 'pet-local-codex-origin',
             'control-center-pet-management-ipc', 'app-state-installed-pets',
             'pet-render-preferences', 'local-ipc-request-handler',
@@ -139,13 +141,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its packaging contract.' }
           node internal/validate-windows-runtime.mjs $app
           if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its native runtime smoke.' }
+          # Start the real packaged GUI, without Node mode or a test carrier.
+          # The validator refuses any existing profile and persistent runner.
+          node internal/validate-windows-pet-rendering.mjs $app --output (Join-Path $env:RUNNER_TEMP 'openpets-native-rendering') --with-public-yukino
+          if ($LASTEXITCODE -ne 0) { throw 'The actual NSIS payload failed its native V1/V2 rendering gate.' }
+          $renderReport = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'openpets-native-rendering/WINDOWS-PET-RENDERING.json') -Raw | ConvertFrom-Json
+          "Supplementary SHA-pinned public Yukino native rendering: $($renderReport.publicYukino.status)." >> $env:GITHUB_STEP_SUMMARY
+          if ($renderReport.publicYukino.status -ne 'passed') { Write-Warning 'Public Yukino source was unavailable or changed; its playback is not verified by this run. Required synthetic V1/V2 checks passed.' }
           node .local/release-tools/internal/record-release-payload.mjs --source-root $env:GITHUB_WORKSPACE --resources-dir (Join-Path $app 'resources') --platform win32 --arch x64 --output apps/desktop/dist-electron/BUILD-METADATA.windows-x64.json
           if ($LASTEXITCODE -ne 0) { throw 'Could not record the verified payload metadata.' }
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([System.IO.Path]::GetFileName($installer))" | Set-Content -Encoding utf8NoBOM apps/desktop/dist-electron/SHA256SUMS.windows-x64.txt
           "version=$version" >> $env:GITHUB_ENV
           "source_sha=$(git rev-parse HEAD)" >> $env:GITHUB_ENV
-          "Windows x64 NSIS payload and native runtime validated; version $version; source $(git rev-parse HEAD). Installer is unsigned." >> $env:GITHUB_STEP_SUMMARY
+          "Windows x64 NSIS payload, native runtime and actual packaged V1/V2 idle rendering validated; version $version; source $(git rev-parse HEAD). Hosted renderer evidence is not a user GPU or DWM smoothness measurement. Installer is unsigned." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Preserve actual Windows pet rendering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openpets-windows-native-rendering-${{ github.run_id }}
+          path: ${{ runner.temp }}/openpets-native-rendering/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload verified installer and provenance
         uses: actions/upload-artifact@v4

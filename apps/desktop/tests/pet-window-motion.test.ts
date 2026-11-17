@@ -3,9 +3,10 @@ import { EventEmitter } from "node:events";
 import { it } from "node:test";
 
 import type { PetMotionState } from "@open-pets/pet-format/animation";
+import { PetActivityService } from "../src/pet-activity-service.js";
 import { installPetWindowMotionPublisher } from "../src/pet-window-motion.js";
 
-function fixture() {
+function fixture(onMove: () => void = () => {}) {
   const contents = new EventEmitter();
   class Window extends EventEmitter {
     x = 0;
@@ -30,7 +31,10 @@ function fixture() {
   const states: PetMotionState[] = [];
   let movements = 0;
   const cleanup = installPetWindowMotionPublisher(window, {
-    onMove: () => { movements += 1; },
+    onMove: () => {
+      movements += 1;
+      onMove();
+    },
     onMotion: (state) => { states.push(state); },
   });
   return { window, contents, states, cleanup, get movements() { return movements; } };
@@ -95,6 +99,55 @@ it("does not combine tiny movements separated by a rest into a new run", (contex
   pet.window.moveTo(3, 0);
   assert.deepEqual(pet.states, []);
   pet.window.moveTo(5, 0);
+  assert.deepEqual(pet.states, ["run-right"]);
+});
+
+it("preserves quiet gestures through native pixel jitter but interrupts them for actual travel", (context) => {
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000_000 });
+  let gestures = 0;
+  let cancellations = 0;
+  const service = new PetActivityService({
+    now: Date.now,
+    random: () => 0,
+    enabledIds: () => [],
+    onFailure: () => {},
+  });
+  const pet = fixture(() => service.cancel(1));
+  context.after(() => {
+    pet.cleanup();
+    service.stop();
+  });
+  service.register({
+    id: 1,
+    petId: "quiet-cat",
+    outfitId: "default",
+    revision: "1",
+    failureRevision: "1",
+    activities: [],
+    availabilityReason: () => null,
+    play: () => {},
+    stop: () => {},
+    classicIdle: {
+      durationMs: 1_680,
+      play: () => { gestures += 1; },
+      stop: () => { cancellations += 1; },
+    },
+  });
+  service.tick();
+
+  for (let second = 1; second <= 40; second += 1) {
+    pet.window.moveTo(0, second % 2);
+    context.mock.timers.tick(1_000);
+    service.tick();
+  }
+  assert.equal(gestures, 2, "geometry noise must not keep restarting the quiet delay");
+  assert.deepEqual(pet.states, [], "pixel jitter does not represent visible travel");
+
+  context.mock.timers.tick(5_000);
+  service.tick();
+  assert.equal(gestures, 3);
+  pet.window.moveTo(3, 0);
+  assert.equal(cancellations, 1, "actual travel immediately cancels the current gesture");
   assert.deepEqual(pet.states, ["run-right"]);
 });
 

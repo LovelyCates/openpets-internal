@@ -69,6 +69,7 @@ function installPetBodyState(window: BrowserWindow): void {
   const contents = window.webContents;
   const windowId = window.id;
   let ready = false;
+  let reportedReducedMotion: boolean | null = null;
   const state = createPetBodyState((snapshot) => {
     if (ready && !window.isDestroyed() && !contents.isDestroyed()) contents.send(petBodyChannels.state, snapshot);
   }, (appearance, outcome) => {
@@ -110,6 +111,14 @@ function installPetBodyState(window: BrowserWindow): void {
   const onPreference = (event: IpcMainEvent, payload: unknown) => {
     const reducedMotion = readPetMotionPreference(payload, ready && event.sender === contents, state.isCurrentEpoch);
     if (reducedMotion !== null) {
+      if (reportedReducedMotion !== reducedMotion) {
+        reportedReducedMotion = reducedMotion;
+        info("pet.window", "system animation preference", {
+          windowId,
+          reducedMotion,
+          source: "prefers-reduced-motion",
+        });
+      }
       setPetActivityReducedMotion(window, reducedMotion);
       setPetGazeReducedMotion(window, reducedMotion);
     }
@@ -127,6 +136,7 @@ function installPetBodyState(window: BrowserWindow): void {
     }
   };
   const onNavigation = () => {
+    reportedReducedMotion = null;
     setPetActivityReducedMotion(window, null);
     setPetGazeReducedMotion(window, null);
     if (!ready) return;

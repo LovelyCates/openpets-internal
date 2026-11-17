@@ -2614,19 +2614,29 @@ const installMouseInterop = () => {
   if (usesNativePetDrag()) installLayerShellContextMenu();
 
   const { createPetDragFeedback } = require("./src/pet-drag-feedback.cjs");
-  const dragFeedback = createPetDragFeedback();
+  const dragFeedback = createPetDragFeedback({
+    onDirectionChange: (direction) => bodyCoordinator.setDragDirection(direction),
+  });
+  ipcRenderer.on("openpets:pet-drag-cancel", (_event, token) => {
+    if (!dragFeedback.cancel(token)) return;
+    dragging = false;
+    bodyCoordinator.setClassicHover(false);
+    setInteractiveHit(false, "drag-cancel");
+  });
   window.addEventListener("blur", () => {
     bodyCoordinator.setClassicHover(false);
-    bodyCoordinator.setDragDirection(null);
+    const token = dragFeedback.token;
     dragFeedback.stop();
-    if (dragging) ipcRenderer.send("openpets:pet-drag-end");
+    if (dragging) ipcRenderer.send("openpets:pet-drag-end", token);
     dragging = false;
   });
 
   document.addEventListener("mousemove", (event) => {
     updateInteractiveHit(event);
-    if (dragging) bodyCoordinator.setDragDirection(dragFeedback.move(event.screenX, event.screenY));
-    if (dragging && !usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-move", { screenX: event.screenX, screenY: event.screenY });
+    if (dragging) dragFeedback.move(event.screenX, event.screenY);
+    if (dragging && !usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-move", {
+      screenX: event.screenX, screenY: event.screenY, dragToken: dragFeedback.token,
+    });
   }, { passive: true });
 
   document.addEventListener("mousedown", (event) => {
@@ -2636,26 +2646,27 @@ const installMouseInterop = () => {
     if (event.button !== 0 || !interactive || !(target instanceof Element)) return;
     if (isInteractivePanelOrBubble(target)) return;
     if (!target.closest(".pet-hitbox, .pet-shell")) return;
-    dragFeedback.start(event.screenX, event.screenY);
+    const dragToken = globalThis.crypto.randomUUID();
+    dragFeedback.start(event.screenX, event.screenY, dragToken);
     if (usesNativePetDrag()) {
       dragging = true;
-      ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY });
+      ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY, dragToken });
       return;
     }
     event.preventDefault();
     dragging = true;
     setInteractiveHit(true);
-    ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY });
+    ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY, dragToken });
   });
 
   document.addEventListener("mouseup", (event) => {
     if (!dragging) return;
     dragging = false;
-    bodyCoordinator.setDragDirection(null);
+    const token = dragFeedback.token;
     if (dragFeedback.stop(event.screenX, event.screenY)) {
       suppressClickUntil = Date.now() + 300;
     }
-    ipcRenderer.send("openpets:pet-drag-end");
+    ipcRenderer.send("openpets:pet-drag-end", token);
   });
 
   document.addEventListener("mouseleave", () => {

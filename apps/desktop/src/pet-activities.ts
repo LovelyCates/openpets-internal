@@ -200,6 +200,12 @@ export function updatePetActivityRender(window: BrowserWindow, render: PetConten
   entry.body = null;
   if (hadMotionBody) service.remove(entry.windowId);
   if (!hadMotionBody && previous?.renderedPetId === render.renderedPetId && previous.renderedOutfitId === render.renderedOutfitId && !previous.motion) return;
+  info("pet.activities", "classic carrier registered", {
+    windowId: window.id,
+    petId: render.renderedPetId,
+    spriteVersion: render.codexSpriteVersion,
+    v1GestureScheduler: render.codexSpriteVersion === 1,
+  });
   const revision = `classic:${installationRevisions.get(render.renderedPetId) ?? 0}`;
   const animations = render.activities.flatMap((activity) => {
     const animation = resolvePetActivityAnimation(activity, render.renderedOutfitId);

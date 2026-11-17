@@ -1048,6 +1048,14 @@ before console and file output in `userData/logs/openpets.log`. Renderer diagnos
 should be routed here so failures are visible in the log file, not only DevTools
 (see the logging guidance in `AGENTS.md`).
 
+Startup diagnostics record the application, Electron and Chromium versions and
+graphics capability status. Pet-window diagnostics record an accepted system
+reduced-motion value and the selected Classic sprite version when its carrier
+changes. Unchanged motion preferences and HUD refreshes do not produce repeated
+entries. These fields distinguish runtime/settings differences; they are not
+proof of native frame pacing or desktop compositor performance. They include no
+credentials, private text or raw installation paths.
+
 Talk diagnostics make the one-shot path readable in production logs: session start;
 capture requested/acquired/finished, cancelled, or failed; STT requested/succeeded,
 cancelled, or failed; brain turn requested/completed, cancelled, or failed; speech

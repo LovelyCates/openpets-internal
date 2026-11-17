@@ -104,6 +104,48 @@ dist checks. The dist-check step wipes `dist/` and rebuilds the full app
   - `check-zed-desktop.ts` - verifies desktop Zed path resolution, preview
     shape, targeted writes, and removal preservation.
 
+## Native Windows packaged pet rendering
+
+The Internal Windows workflow runs `internal/validate-windows-pet-rendering.mjs`
+against the application extracted from the final NSIS installer. This starts the
+actual packaged product GUI; the separate `validate-windows-runtime.mjs` only
+checks native module loading in Electron Node mode and does not prove playback.
+The GUI validator refuses non-Windows, self-hosted runners and any existing
+Internal profile. It owns a new empty profile on the ephemeral hosted runner,
+verifies its discovery PID, permits DevTools only on that process's IPv4
+loopback listener, and removes only the profile bearing its own random marker.
+Production entry points and IPC policy are unchanged.
+
+The Builtin V2 gate requires a decoded atlas, a visible nonblank sprite capture,
+an advancing CSS animation clock and different visible pixels in two naturally
+reached authored idle holds. These holds are read from the packaged CSS; the gate
+does not force its clock or depend on capturing the brief blink. A generated, distinguishable V1 atlas is
+then installed through the packaged local IPC client and shown using an explicit
+lease. Lease heartbeats do not change the reaction. Within 35 seconds of quiet
+observation, the V1 idle gesture must appear, its CSS clock must advance and
+staged sprite captures must differ. Resource dimensions, document visibility,
+focus, DPI, actual reduced-motion preference and any test-only no-preference
+media override are recorded. Neither an authored long frame hold nor a CSS
+animation object alone counts as a rendering failure or success.
+
+The workflow retains the JSON report, bounded product log and pet-only PNGs on
+failure as well as success. rAF callback intervals are sampled separately from
+screenshots: they describe renderer scheduling, not DWM presentation or the
+user's GPU. Native hosted rendering evidence supplements the package digests;
+it does not establish complete Windows/macOS GUI equivalence. The Mac reference
+reported in this gate is the separately user-approved Internal 12 / Electron 42
+application, not a concurrently executed Mac build. Run
+`node --test internal/validate-windows-pet-rendering.test.mjs` for portable input
+and observation regressions; those tests do not emulate a Windows GUI pass.
+
+`--with-public-yukino` adds the public reference matching that Mac pet. The tool
+downloads only a fixed URL into its own temporary fixture directory and verifies
+the pinned ZIP byte count and SHA-256 before real ZIP IPC installation. It records
+six authored idle positions and a quiet gesture separately. A failed or changed
+public download marks this supplementary scenario unverified without replacing
+the required synthetic gate; a playback failure after source verification fails
+the native gate. Neither the artwork nor any user-installed pet is committed.
+
 ## Teams desktop behavior tests
 
 Teams behavior tests cover exact enrollment-link decoding, strict Team Pack

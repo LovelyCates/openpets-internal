@@ -51,11 +51,13 @@ export function installPetWindowMotionPublisher(window: PetMotionWindow, callbac
     if (x === lastX && y === lastY) return;
     lastX = x;
     lastY = y;
-    callbacks.onMove();
 
     const deltaX = x - anchorX;
     const deltaY = y - anchorY;
     if (Math.abs(deltaX) >= 3 || Math.abs(deltaY) >= 3) {
+      // Native geometry can jitter below the locomotion threshold. Only actual
+      // travel should interrupt quiet activities or suspend cursor glances.
+      callbacks.onMove();
       // Preserve the last horizontal facing for vertical travel; the existing
       // sprite and Motion contracts expose left/right locomotion only.
       if (Math.abs(deltaX) >= 3) direction = deltaX > 0 ? "run-right" : "run-left";

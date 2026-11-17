@@ -198,6 +198,8 @@ if (!gotSingleInstanceLock) {
       arch: process.arch,
       packaged: app.isPackaged,
       pid: process.pid,
+      electronVersion: process.versions.electron ?? null,
+      chromiumVersion: process.versions.chrome ?? null,
       requestedOzonePlatform,
       effectiveOzonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null,
       backendPolicy: layerShellBackend
@@ -208,6 +210,16 @@ if (!gotSingleInstanceLock) {
             ? "x11-default"
             : "platform-default",
     });
+    try {
+      info("app", "graphics capabilities", {
+        hardwareAccelerationEnabled: app.isHardwareAccelerationEnabled(),
+        features: app.getGPUFeatureStatus(),
+      });
+    } catch (error) {
+      warn("app", "graphics diagnostics unavailable", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+    }
     if (isLinux && allowWayland) {
       const effectiveOzone = app.commandLine.getSwitchValue("ozone-platform") || "(auto/system)";
       warn("app", "native Wayland mode active — pet positioning, gravity, walkabout, and drag are unsupported under native Wayland; remove OPENPETS_ALLOW_WAYLAND=1 to restore full functionality", { effectiveOzone });
