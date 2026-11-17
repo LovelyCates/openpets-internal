@@ -110,8 +110,12 @@ jobs:
           $installer = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/dist-electron/OpenPets-Internal-$version-win-x64-setup.exe"
           if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Expected NSIS installer was not produced.' }
           $sevenZip = node -e "console.log(require('./apps/desktop/node_modules/7zip-bin').path7za)"
+          # The locked compact 7za binary does not decode the NSIS shell; it
+          # otherwise scans ahead and opens the embedded app archive directly.
+          # Use the runner's full 7-Zip for the shell, forcing its NSIS decoder.
+          $nsisSevenZip = (Get-Command 7z.exe -CommandType Application -ErrorAction Stop).Source
           $extracted = Join-Path $env:RUNNER_TEMP 'openpets-nsis-extracted'
-          & $sevenZip x $installer "-o$extracted" -y
+          & $nsisSevenZip x -tNsis $installer "-o$extracted" -y
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract the NSIS installer.' }
           $archives = @(Get-ChildItem -Path $extracted -Recurse -Filter 'app-64.7z')
           if ($archives.Count -ne 1) { throw 'Expected exactly one x64 app archive in NSIS.' }
