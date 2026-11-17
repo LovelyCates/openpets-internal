@@ -329,6 +329,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `team-api-client.ts`: Teams enrollment, Team Pack, and Manager Check-ins API adapter; validates fixed feelings and bounded submissions, while the pet card enforces its 500-character note limit and client-generated IDs provide idempotent immutable retries
 - `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui, voice, provider), bounded serialized live rotation and pending writes, shutdown flush, private POSIX files, credential redaction
 - `bundled-plugins.ts`: Canonical official plugin IDs shared by plugin seeding and packaged-output validation
+- `check-packaging-contract.ts`: Source/output release gates, including declared Sharp entry resolution confined to the packaged dependencies and target-native validation.
 - `packaging-contract.ts`: Packaged bundled-plugin manifest/asset/locale and unpacked integration-runtime contract helpers, including the OpenCode package-root V2 `setup` export smoke
 - `packaging-output-contract.ts`: Pure packaged-output tree validation that rejects unowned app collateral and sensitive files without rejecting ordinary dependency paths
 - `appimage-payload.ts`: Pure ELF64 parser that locates the Type-2 AppImage SquashFS payload immediately after its section-header table without executing the Linux artifact

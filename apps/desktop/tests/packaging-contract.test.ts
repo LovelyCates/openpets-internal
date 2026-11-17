@@ -14,6 +14,8 @@ const repoRoot = join(desktopDir, "../..");
 const sourcePluginsDir = join(repoRoot, "plugins", "official");
 const desktopPackageJson = JSON.parse(readFileSync(join(desktopDir, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
 const runtimePackageNames = getRequiredUnpackedRuntimePackageNames(desktopPackageJson);
+const sharpVersion = (JSON.parse(readFileSync(join(desktopDir, "node_modules", "sharp", "package.json"), "utf8")) as { version: string }).version;
+const sharpNativeName = `sharp-linux-x64-${sharpVersion}.node`;
 
 const fixtureRoot = join(desktopDir, ".test-packaging-fixture");
 rmSync(fixtureRoot, { recursive: true, force: true });
@@ -24,7 +26,8 @@ const fixtureAppContents = join(fixtureRoot, "app.asar.unpacked");
 mkdirSync(join(fixtureResources, "plugins", "official"), { recursive: true });
 mkdirSync(join(fixtureAppContents, "node_modules"), { recursive: true });
 mkdirSync(join(fixtureAppContents, "node_modules", "@img", "sharp-linux-x64", "lib"), { recursive: true });
-writeFileSync(join(fixtureAppContents, "node_modules", "@img", "sharp-linux-x64", "lib", "sharp-linux-x64.node"), "native fixture\n");
+writeFileSync(join(fixtureAppContents, "node_modules", "@img", "sharp-linux-x64", "lib", sharpNativeName), "native fixture\n");
+writeFileSync(join(fixtureAppContents, "node_modules", "@img", "sharp-linux-x64", "package.json"), JSON.stringify({ name: "@img/sharp-linux-x64", version: sharpVersion }));
 
 for (const id of bundledOfficialPluginIds) {
   cpSync(join(sourcePluginsDir, id), join(fixtureResources, "plugins", "official", id), { recursive: true });
@@ -71,7 +74,7 @@ for (const format of ["deb", "rpm"] as const) {
     cpSync(join(fixtureRoot, "app.asar.unpacked"), join(defectRoot, "resources", "app.asar.unpacked"), { recursive: true });
     cpSync(join(stagedFixtureRoot, "payload-marker.bin"), join(defectRoot, "resources", "payload-marker.bin"));
     if (defect === "plugin") rmSync(join(defectRoot, "resources", "plugins", "official", "openpets.system-resources"), { recursive: true, force: true });
-    if (defect === "sharp") rmSync(join(defectRoot, "resources", "app.asar.unpacked", "node_modules", "@img", "sharp-linux-x64", "lib", "sharp-linux-x64.node"), { force: true });
+    if (defect === "sharp") rmSync(join(defectRoot, "resources", "app.asar.unpacked", "node_modules", "@img", "sharp-linux-x64", "lib", sharpNativeName), { force: true });
     const artifact = join(stagedFixtureRoot, `OpenPets-3.5.0-linux-amd64.${format}`);
     if (format === "deb") buildDebFixture(defectRoot, artifact);
     else buildRpmFixture(defectRoot, artifact);

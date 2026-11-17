@@ -24,7 +24,11 @@ export function getTargetSharpPackageName(target: PackagingTarget): string {
 
 export function assertTargetSharpNative(appContents: string, target: PackagingTarget): void {
   const packageName = getTargetSharpPackageName(target);
-  const nativePath = join(appContents, "node_modules", "@img", packageName, "lib", `${packageName}.node`);
+  const packageDir = join(appContents, "node_modules", "@img", packageName);
+  const manifest = readManifest(join(packageDir, "package.json"), `packaged target Sharp manifest is missing: ${packageName}`);
+  assert.equal(manifest.name, `@img/${packageName}`, "packaged Sharp target identity is invalid.");
+  assert.ok(typeof manifest.version === "string" && /^\d+\.\d+\.\d+$/.test(manifest.version), "packaged Sharp target version is invalid.");
+  const nativePath = join(packageDir, "lib", `${packageName}-${manifest.version}.node`);
   assertNonEmptyFile(nativePath, `packaged target Sharp native runtime is missing: ${target.platform}/${target.arch} (${packageName})`);
 }
 

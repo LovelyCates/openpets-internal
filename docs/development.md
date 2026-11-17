@@ -24,6 +24,9 @@ overrides update Vercel routing path-to-regexp within 6.x and the typography
 selector parser within 6.x. The Scarf install-time telemetry script is explicitly
 disabled. Regenerate the lockfile
 and run integration, native runtime and package checks when changing these pins.
+The package output check resolves Sharp through its declared package export,
+requires that entry to remain inside packaged dependencies, then validates the
+target native binary using its manifest identity/version; it does not assume the pre-0.35 source directory layout.
 
 - **ESM + TypeScript everywhere**: every package is `"type": "module"` with dual
   type exports; internal links use `workspace:*`.

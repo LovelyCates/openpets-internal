@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 import { listPackage } from "@electron/asar";
 
@@ -129,7 +130,11 @@ function checkPackageOutput(outputDir: string, target: PackagingTarget): void {
   assert.ok(existsSync(join(appContents, "node_modules", "buffer-crc32", "index.js")), "packaged yauzl transitive dependency buffer-crc32 is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "pend", "index.js")), "packaged yauzl transitive dependency pend is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "jsonc-parser", "lib", "umd", "main.js")), "packaged Zed/Devin JSONC runtime dependency is missing.");
-  assert.ok(existsSync(join(appContents, "node_modules", "sharp", "lib", "index.js")), "packaged sharp runtime is missing.");
+  const requirePackaged = createRequire(join(appContents, "package.json"));
+  const sharpEntry = requirePackaged.resolve("sharp");
+  const dependenciesRoot = `${join(appContents, "node_modules")}${sep}`;
+  assert.ok(sharpEntry.startsWith(dependenciesRoot), "Sharp must resolve inside the packaged dependencies.");
+  assertRegularNonSymlink(sharpEntry);
   assertTargetSharpNative(appContents, target);
   assertRegularNonSymlink(join(appContents, "node_modules", "@open-pets", "mcp", "dist", "index.js"));
   assertRegularNonSymlink(join(appContents, "node_modules", "@open-pets", "cli", "dist", "index.js"));
