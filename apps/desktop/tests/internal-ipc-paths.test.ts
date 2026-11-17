@@ -8,6 +8,7 @@ import { getDiscoveryFilePath, getIpcEndpointConfig } from "../src/local-ipc-pat
 // desktop's IPC token or expose a network listener.
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 assert.ok(platformDescriptor);
+const nativePlatform = process.platform;
 const previous = {
   bind: process.env.OPENPETS_IPC_BIND,
   endpoint: process.env.OPENPETS_IPC_ENDPOINT,
@@ -21,17 +22,25 @@ try {
 
   for (const platform of ["darwin", "win32"] as const) {
     Object.defineProperty(process, "platform", { value: platform });
-    const config = getIpcEndpointConfig();
-    assert.deepEqual(config.bindEndpoint, { kind: "path", path: config.advertisedEndpoint });
     assert.notEqual(getDiscoveryFilePath(), process.env.OPENPETS_DISCOVERY_FILE);
+    // Named-pipe selection is pure on every host. Creating the Unix runtime
+    // directory needs real POSIX ownership/modes, which platform spoofing
+    // cannot give a Windows filesystem. Keep that behavior on POSIX hosts.
+    if (platform === "win32" || nativePlatform !== "win32") {
+      const config = getIpcEndpointConfig();
+      assert.deepEqual(config.bindEndpoint, { kind: "path", path: config.advertisedEndpoint });
+      if (platform === "win32") {
+        assert.match(config.advertisedEndpoint, /^\\\\\.\\pipe\\openpets-[a-f0-9]{16}-\d+$/u);
+      } else {
+        assert.match(config.advertisedEndpoint, /^\/tmp\/openpets-[^/]+\/openpets-\d+\.sock$/u);
+      }
+    }
     if (platform === "win32") {
-      assert.match(config.advertisedEndpoint, /^\\\\\.\\pipe\\openpets-[a-f0-9]{16}-\d+$/u);
       assert.equal(getDiscoveryFilePath(), join(
         process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
         "OpenPets Internal", "runtime", "ipc.json",
       ));
     } else {
-      assert.match(config.advertisedEndpoint, /^\/tmp\/openpets-[^/]+\/openpets-\d+\.sock$/u);
       assert.equal(getDiscoveryFilePath(), join(
         homedir(), "Library", "Application Support", "OpenPets Internal", "runtime", "ipc.json",
       ));
