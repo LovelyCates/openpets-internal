@@ -71,7 +71,7 @@ remain accepted. Public types and `parsePetListResult()` stay exported by
 
 ### discovery.ts
 
-Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFile()`, `validateDiscovery()`, `validateEndpoint()`, platform-specific path logic, XDG security checks.
+Discovery file handling. `getDiscoveryFilePath()`, `readDiscoveryFile()`, `validateDiscovery()`, `validateEndpoint()`, platform-specific path logic, XDG security checks.
 
 **Platform Paths:**
 - macOS internal edition: `~/Library/Application Support/OpenPets Internal/runtime/ipc.json`
@@ -92,8 +92,10 @@ Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFil
 
 **Security:**
 - XDG_RUNTIME_DIR permission checks (0o700, ownership)
-- File size limits (16KB)
-- Symlink rejection
+- Descriptor-based snapshot reading capped at 16 KiB even if the file grows; changed identity, size, timestamps, or permissions reject the snapshot
+- File and immediate runtime-directory symlink rejection; Windows UNC/device discovery overrides reject before filesystem access
+- POSIX current-user ownership, private token-file permissions, and no group/other writable runtime directory; defaults 0600/0700 remain valid
+- Windows uses descriptor identity and lstat symlink/junction checks; Node mode/UID metadata does not attest native ACLs
 - Platform mismatch detection
 
 ### smoke.ts

@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ import {
 const dir = mkdtempSync(join(tmpdir(), "openpets-provider-presets-"));
 
 try {
-  initializePluginPlatformSettings(dir);
+  initializePluginPlatformSettings(dir, { encryption: testPrivateStorageEncryption });
 
   // Adapter defaults are the typed source of truth for new provider drafts.
   assert.equal(providerCatalog["minimax-tts"].defaultModel, "speech-2.8-turbo");

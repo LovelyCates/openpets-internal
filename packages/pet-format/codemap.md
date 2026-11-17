@@ -8,7 +8,7 @@ Defines reaction names, sprite layouts, animations, metadata, wardrobe and activ
 
 ## Design
 
-The root aggregates the browser-safe `reactions`, `sprite-layout`, and `animation` exports. Metadata, Motion contracts and package dispatch, wardrobe, activities, and catalog have separate host-neutral subpaths; Node filesystem, archive, and package/atlas-validation policy have separate Node subpaths. Image policy receives a decoder from the host: the desktop Sharp adapter is `apps/desktop/src/pet-atlas-validation.ts`.
+The root aggregates the browser-safe `reactions`, `sprite-layout`, and `animation` exports. Metadata, Motion contracts and package dispatch, wardrobe, activities, and catalog have separate host-neutral subpaths; Node filesystem, archive, and package/atlas-validation policy have separate Node subpaths. Pure RIFF/WebP header inspection gates all WebP inputs before a host decoder sees them. Image policy receives a decoder from the host: the desktop Sharp adapter is `apps/desktop/src/pet-atlas-validation.ts`. V1 and V2 atlases fully decode; V1 bases preserve bounded original animation (64 images, 768 MiB decoded RGBA ceiling).
 
 ## Flow
 

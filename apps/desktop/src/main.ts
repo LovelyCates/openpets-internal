@@ -1,4 +1,4 @@
-import { app, dialog, globalShortcut, powerMonitor, protocol, screen, session, type Display } from "electron";
+import { app, dialog, globalShortcut, powerMonitor, protocol, safeStorage, screen, session, type Display } from "electron";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
@@ -51,7 +51,7 @@ import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
 import { reclampPinnedPetWindows, syncPinnedPets } from "./pinned-pet-controller.js";
 import { PetDisplayCoordinator } from "./pet-display-coordinator.js";
 import { prepareCaptureSessionBeforeReady, resolveCaptureSessionDir, startCaptureSession } from "./capture-session.js";
-import { readOzonePlatformSwitch } from "./startup-backend-policy.js";
+import { configurePrivateStorageBackend, readOzonePlatformSwitch } from "./startup-backend-policy.js";
 import { removePetActivitiesForPet, resetPetActivitiesForPet, startPetActivities, stopPetActivities, suspendPetActivities } from "./pet-activities.js";
 import { markOutfitRefresh, suspendPetBodies } from "./pet-window.js";
 import { setPetWardrobeChangeHandler } from "./pet-wardrobe.js";
@@ -73,10 +73,8 @@ let pendingPetInstallLink: PetInstallLinkParseResult | null = null;
 const petInstallLinkMaxZipBytes = 25 * 1024 * 1024;
 let petDisplayCoordinator: PetDisplayCoordinator<Display> | null = null;
 
-// OpenPets stores plugin secrets via Electron safeStorage, which requires a
-// real encryption backend. On Linux use the keyring so safeStorage can
-// encrypt; on macOS/Windows keep Chromium from prompting for Keychain during
-// startup/profile initialization.
+// Private settings, history and plugin credentials require the real OS store.
+// macOS/Windows keep the native Keychain/DPAPI defaults, including OS prompts.
 //
 // gnome-libsecret is Electron's OSCrypt backend written against real GNOME
 // Keyring; on KDE, KWallet's secret-service-compat layer implements the same
@@ -85,13 +83,7 @@ let petDisplayCoordinator: PetDisplayCoordinator<Display> | null = null;
 // safeStorage.isEncryptionAvailable() returns false and plugin secret saves
 // fail with "Secret storage encryption is unavailable on this system." Use
 // the kwallet backend on KDE sessions instead.
-app.commandLine.appendSwitch("use-mock-keychain");
-if (process.platform === "linux") {
-  const isKde = (process.env.XDG_CURRENT_DESKTOP ?? "").toLowerCase().includes("kde");
-  app.commandLine.appendSwitch("password-store", isKde ? "kwallet6" : "gnome-libsecret");
-} else {
-  app.commandLine.appendSwitch("password-store", "basic");
-}
+configurePrivateStorageBackend(app.commandLine, process.platform, process.env.XDG_CURRENT_DESKTOP);
 
 // Chromium's native window occlusion tracker treats every window on a display
 // as occluded while a fullscreen app is active there and stops painting it.
@@ -333,7 +325,10 @@ if (!gotSingleInstanceLock) {
     const roots = thirdPartyPluginsEnabled ? parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_ROOTS) : [];
     const paths = thirdPartyPluginsEnabled ? parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS) : [];
     const devPluginMode = roots.length > 0 || paths.length > 0;
-    initializePluginPlatformSettings(app.getPath("userData"));
+    initializePluginPlatformSettings(app.getPath("userData"), {
+      encryption: safeStorage,
+      onDiagnostic: (message) => warn("app", message),
+    });
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"));
     let devPluginWatcher: ReturnType<typeof startDevPluginWatcher> | undefined;
     const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, !publicNetworkEnabled || process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, undefined, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
@@ -431,6 +426,7 @@ if (!gotSingleInstanceLock) {
         providerOperations: pluginCapabilities.providerService,
         conversationArchive: openLocalPetAssistantConversationArchive({
           userDataPath: app.getPath("userData"),
+          encryption: safeStorage,
           onDiagnostic: (message, fields) => warn("app", message, fields),
         }),
       });

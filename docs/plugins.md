@@ -261,11 +261,30 @@ Profiles use an exhaustive adapter-specific shape. Text adapters carry their
 normal model; an `openai-realtime` profile carries both its normal text model
 and its separate realtime model; network TTS adapters carry a persisted voice;
 system TTS has no network configuration. Profiles may also carry a validated
-endpoint, auth placement/strategy, and bounded static headers. Secret values
+endpoint, auth placement/strategy, and bounded static headers. Canonical credentials
 are stored only through `PluginSecretsStore`; the opaque secret reference is a
 host-owned implementation detail. Static header names and credential presence
 are safe to expose, but header values, credential values, and secret references
 never appear in Control Center snapshots.
+The existing settings owner encrypts the complete provider document, including
+extra header values and quarantined profiles, with OS-backed Electron `safeStorage`.
+Legacy plaintext migration replaces the original only after encryption and an atomic
+private-file write succeed. Missing encryption, wrong keys, invalid documents or
+failed migration writes preserve the existing file and block configuration changes
+with a visible provider storage status. No plaintext fallback or backup is written.
+The host uses native Keychain/DPAPI defaults on macOS/Windows rather than a mock
+keychain. Old credentials that cannot be decrypted are unavailable, even when
+ciphertext exists, and require keychain access or explicit re-entry. The existing
+credential owner OS-encrypts the complete original ciphertext document as opaque
+`credential-recovery` data before a replacement write. New recovery files cannot
+expose historical weak-key ciphertext, while unreadable active entries remain
+unchanged until explicit re-entry. Invalid credential files block writes instead
+of becoming empty stores. Neither
+recovery mechanism decodes historical mock keys or writes plaintext credentials.
+
+The Electron host awaits native clipboard reads and writes before completing the
+existing SDK operations; reads keep their 64 KiB text limit and native errors
+propagate through the same permission-checked bridge on Windows and macOS.
 
 The Control Center uses one host-owned configuration transaction for profile
 fields, an optional credential value, and role activation. Credential changes

@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ const dir = mkdtempSync(join(tmpdir(), "openpets-provider-credential-delete-"));
 
 async function main(): Promise<void> {
   try {
-    initializePluginPlatformSettings(dir);
+    initializePluginPlatformSettings(dir, { encryption: testPrivateStorageEncryption });
     createProviderProfile({ id: "shared-a", label: "Shared A", adapter: "openai-compatible-text", model: "a", baseUrl: "https://provider.example/v1", secretRef: "shared" });
     createProviderProfile({ id: "shared-b", label: "Shared B", adapter: "openai-compatible-text", model: "b", baseUrl: "https://provider.example/v1", secretRef: "shared" });
     createProviderProfile({ id: "unshared", label: "Unshared", adapter: "openai-compatible-text", model: "unshared", baseUrl: "https://provider.example/v1", secretRef: "unshared" });

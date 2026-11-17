@@ -51,6 +51,10 @@ test("Motion install and restart retain healthy state, while damaged assets are 
     const state = await import("../src/app-state.js");
     const { installPetFromFolderWithResult } = await import("../src/pet-installation.js");
     release = state.releaseStartupInstallLock;
+    const reloadState = (): void => {
+      release();
+      state.initializeAppState();
+    };
     state.initializeAppState();
     const folder = join(root, "source");
     await mkdir(join(folder, "clips"), { recursive: true });
@@ -71,21 +75,21 @@ test("Motion install and restart retain healthy state, while damaged assets are 
     await installPetFromFolderWithResult(folder);
     const pet = () => state.getAppStateSnapshot().pets.installed.find((entry) => entry.id === "motion");
     assert.notEqual(pet()?.broken, true);
-    release();
-    state.initializeAppState();
+    reloadState();
     assert.notEqual(pet()?.broken, true);
 
     const installedClip = join(userData, "pets", "motion", "clips", "idle.webp");
     await unlink(installedClip);
-    state.updatePreferences({});
+    // Startup checks disk health; preference-only updates retain normalized rows.
+    reloadState();
     assert.equal(pet()?.broken, true);
     assert.match(pet()?.brokenReason ?? "", /Motion clip idle is missing/);
     await writeFile(installedClip, Buffer.alloc(0));
-    state.updatePreferences({});
+    reloadState();
     assert.match(pet()?.brokenReason ?? "", /Motion clip idle is invalid/);
     await writeFile(installedClip, bytes);
     await writeFile(join(userData, "pets", "motion", "pet.json"), JSON.stringify({ ...manifest, version: 99 }));
-    state.updatePreferences({});
+    reloadState();
     assert.equal(pet()?.broken, true);
     assert.match(pet()?.brokenReason ?? "", /Motion/);
     await installPetFromFolderWithResult(folder);
@@ -94,12 +98,17 @@ test("Motion install and restart retain healthy state, while damaged assets are 
     // Existing Classic health checks continue to reject missing atlases.
     const classicDir = join(userData, "pets", "classic");
     await mkdir(classicDir, { recursive: true });
-    await writeFile(join(classicDir, "pet.json"), JSON.stringify({ id: "classic", spritesheetPath: "spritesheet.webp" }));
-    await writeFile(join(classicDir, "spritesheet.webp"), Buffer.from("existing Classic atlas"));
+    await writeFile(join(classicDir, "pet.json"), JSON.stringify({
+      id: "classic", displayName: "Classic", description: "Health fixture", spritesheetPath: "spritesheet.webp",
+    }));
+    const classicAtlas = await sharp({
+      create: { width: 1536, height: 1872, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    }).webp().toBuffer();
+    await writeFile(join(classicDir, "spritesheet.webp"), classicAtlas);
     state.upsertPetState({ id: "classic", displayName: "Classic" });
     assert.notEqual(state.getAppStateSnapshot().pets.installed.find((entry) => entry.id === "classic")?.broken, true);
     await unlink(join(classicDir, "spritesheet.webp"));
-    state.updatePreferences({});
+    reloadState();
     assert.equal(state.getAppStateSnapshot().pets.installed.find((entry) => entry.id === "classic")?.broken, true);
   } finally {
     release();

@@ -36,6 +36,12 @@ const electronMock = `data:text/javascript,${encodeURIComponent(`
   export const shell = { openPath: async () => "" };
   export default { app, net, powerMonitor, screen, shell };
 `)}`;
+// This suite exercises its in-memory catalog ZIP response. Production keeps the
+// internal build's network block; only this isolated transport fixture opts in.
+const networkPolicyMock = `data:text/javascript,${encodeURIComponent(`
+  export const publicNetworkEnabled = true;
+  export const publicNetworkDisabledMessage = "Public network disabled in fixture.";
+`)}`;
 const petPathsMock = `data:text/javascript,${encodeURIComponent(`
   import { join, resolve, sep } from "node:path";
   export function getPetsRoot() { return ${JSON.stringify(petsRoot)}; }
@@ -58,6 +64,9 @@ const petPathsMock = `data:text/javascript,${encodeURIComponent(`
 register(`data:text/javascript,${encodeURIComponent(`
   export async function resolve(specifier, context, nextResolve) {
     if (specifier === "electron") return { url: ${JSON.stringify(electronMock)}, shortCircuit: true };
+    if (specifier === "./internal-network-policy.js" && (context.parentURL.endsWith("/pet-installation.js") || context.parentURL.endsWith("/pet-installation.ts"))) {
+      return { url: ${JSON.stringify(networkPolicyMock)}, shortCircuit: true };
+    }
     if (specifier === "./pet-paths.js" && (context.parentURL.includes("/apps/desktop/.test-dist/src/") || context.parentURL.includes("/apps/desktop/src/"))) {
       return { url: ${JSON.stringify(petPathsMock)}, shortCircuit: true };
     }
@@ -300,12 +309,12 @@ try {
     assert.equal(existsSync(join(petsRoot, "bad-wardrobe")), false, `${label}: a rejected package never promotes assets`);
   }
 
-  // Legacy V1 base atlases are not decoded, but a V1 outfit is new content: an
-  // undecodable outfit would render a blank pet, so it is rejected at install.
+  // Every V1 atlas is decoded before installation, including optional outfits.
   const v1Folder = join(testRoot, "v1-wardrobe");
   mkdirSync(join(v1Folder, "outfits"), { recursive: true });
   writeFileSync(join(v1Folder, "pet.json"), JSON.stringify({ ...metadata("v1-wardrobe"), spriteVersionNumber: undefined, wardrobe: { outfits: [{ id: "pajamas", displayName: "Pajamas", spritesheetPath: "outfits/pajamas.webp" }] } }));
-  writeFileSync(join(v1Folder, "spritesheet.webp"), Buffer.from("legacy v1 bytes are not decoded"));
+  const v1Base = await sharp({ create: { width: 1536, height: 1872, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).webp().toBuffer();
+  writeFileSync(join(v1Folder, "spritesheet.webp"), v1Base);
   writeFileSync(join(v1Folder, "outfits", "pajamas.webp"), Buffer.from("not a webp"));
   await assert.rejects(() => installPetFromFolderWithResult(v1Folder), /Outfit spritesheet/, "an undecodable V1 outfit is rejected");
   assert.equal(existsSync(join(petsRoot, "v1-wardrobe")), false);

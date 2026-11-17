@@ -13,15 +13,16 @@ import {
   validatePetActivitySpritesheet,
   validatePetAtlases,
 } from "../dist/node/atlas-validation.js";
+import { webpHeader } from "./webp-fixtures.mjs";
 
 const activity = { id: "dance", displayName: "Dance", outfitId: "default", spritesheetPath: "activities/dance.webp", frameCount: 4, fps: 4 };
-const bytes = Buffer.from("image");
+const bytes = webpHeader(1536, 1872);
 
 function decoder(metadata, { failDecode = false, pixels } = {}) {
   return {
-    open() {
+    open(bytes) {
       return {
-        async metadata() { return metadata; },
+        async metadata() { return typeof metadata === "function" ? metadata(bytes) : metadata; },
         async decode() { if (failDecode) throw new Error("corrupt"); },
         async decodeWithAlpha() {
           if (failDecode) throw new Error("corrupt");
@@ -44,21 +45,49 @@ test("metadata validates optional package data and wardrobe resolution keeps fir
   assert.throws(() => validateCodexPetMetadata({ ...metadata, activities: [activity, activity] }, "pet"));
 });
 
-test("legacy base skips decoding but V1 outfits and V2 bases require full image decoding", async () => {
+test("V1 bases, outfits and V2 bases all require full image decoding", async () => {
   const invalid = decoder({ format: "webp", width: 1536, height: 1872 }, { failDecode: true });
-  await validateCodexPetSpritesheet(bytes, { spritesheetPath: "spritesheet.webp" }, invalid);
+  await assert.rejects(validateCodexPetSpritesheet(bytes, { spritesheetPath: "spritesheet.webp" }, invalid), /fully decodable/);
   await assert.rejects(validateCodexPetOutfitSpritesheet(bytes, {}, "spritesheet.webp", invalid), /fully decodable/);
   const v2 = { spritesheetPath: "spritesheet.webp", spriteVersionNumber: 2 };
   const facts = { format: "webp", width: 1536, height: 2288, hasAlpha: true, pages: 1 };
-  await validateCodexPetSpritesheet(bytes, v2, decoder(facts));
+  const v2Bytes = webpHeader(1536, 2288);
+  await validateCodexPetSpritesheet(v2Bytes, v2, decoder(facts));
   for (const bad of [{ hasAlpha: false }, { pages: 2 }, { width: 1 }, { format: "png" }]) {
-    await assert.rejects(validateCodexPetSpritesheet(bytes, v2, decoder({ ...facts, ...bad })));
+    await assert.rejects(validateCodexPetSpritesheet(v2Bytes, v2, decoder({ ...facts, ...bad })));
   }
-  await assert.rejects(validateCodexPetSpritesheet(bytes, v2, decoder(facts, { failDecode: true })));
+  await assert.rejects(validateCodexPetSpritesheet(v2Bytes, v2, decoder(facts, { failDecode: true })));
+});
+
+test("WebP format and header limits reject foreign, oversized or malformed input before a native decoder", async () => {
+  let opened = 0;
+  const nativeDecoder = { open() { opened++; throw new Error("foreign image reached decoder"); } };
+  const selection = { spritesheetPath: "spritesheet.webp" };
+  const malformedChunk = Buffer.from(bytes);
+  malformedChunk.writeUInt32LE(0xffffffff, 16);
+  const mismatchedFrame = webpHeader(1536, 1872, { pages: 2 });
+  mismatchedFrame.writeUInt32LE(1536 + (1872 - 1) * 16384, 77);
+  for (const invalid of [Buffer.from("not an image"), Buffer.from("II*\0renamed TIFF"), Buffer.from('<svg width="1536" height="1872"/>'),
+    webpHeader(16384, 16384), webpHeader(1536, 1872, { pages: 65 }), bytes.subarray(0, bytes.length - 1), malformedChunk, mismatchedFrame]) {
+    await assert.rejects(validateCodexPetSpritesheet(invalid, selection, nativeDecoder));
+    await assert.rejects(validatePetActivitySpritesheet(invalid, activity, nativeDecoder));
+  }
+  assert.equal(opened, 0, "rejected input must never enter a native image loader");
+});
+
+test("published multi-page V1 atlases remain supported within the decoded size ceiling", async () => {
+  for (const pages of [1, 14, 18, 59, 64]) {
+    const facts = { format: "webp", width: 1536, height: 1872 * pages, pageHeight: 1872, pages };
+    const input = webpHeader(1536, 1872, { pages });
+    await validateCodexPetSpritesheet(input, { spritesheetPath: "spritesheet.webp" }, decoder(facts));
+    if (pages > 1) await assert.rejects(validateCodexPetOutfitSpritesheet(input, {}, "spritesheet.webp", decoder(facts)));
+    await assert.rejects(validateCodexPetSpritesheet(input, { spritesheetPath: "spritesheet.webp" }, decoder({ ...facts, pages: pages + 1 })));
+  }
 });
 
 test("activity rejects animated, empty and opaque frames after full decode", async () => {
   const width = 192 * activity.frameCount;
+  const bytes = webpHeader(width, 208);
   const facts = { format: "webp", width, height: 208, hasAlpha: true };
   const pixels = new Uint8Array(width * 208 * 4);
   for (let frame = 0; frame < activity.frameCount; frame++) {
@@ -130,19 +159,22 @@ test("installation validates and copies every declared activity representation",
   const width = 192 * 4;
   const pixels = new Uint8Array(width * 208 * 4);
   for (let frame = 0; frame < 4; frame++) for (let i = 0; i < 200; i++) pixels[((Math.floor(i / 192) * width) + frame * 192 + i % 192) * 4 + 3] = 255;
-  const imageDecoder = decoder({ format: "webp", width, height: 208, hasAlpha: true }, { pixels });
+  const activityBytes = webpHeader(width, 208);
+  const imageDecoder = decoder((input) => input.equals(bytes)
+    ? { format: "webp", width: 1536, height: 1872 }
+    : { format: "webp", width, height: 208, hasAlpha: true }, { pixels });
   try {
     await mkdir(source); await mkdir(target); await mkdir(join(source, "activities"));
     await writeFile(join(source, "pet.json"), "{}");
     await writeFile(join(source, "spritesheet.webp"), bytes);
-    await writeFile(join(source, activity.spritesheetPath), bytes);
-    await writeFile(join(source, variant.spritesheetPath), bytes);
+    await writeFile(join(source, activity.spritesheetPath), activityBytes);
+    await writeFile(join(source, variant.spritesheetPath), activityBytes);
     await validatePetAtlases(source, metadata, 1024, imageDecoder, { exactPackage: true, copyTo: target });
-    assert.deepEqual(await readFile(join(target, variant.spritesheetPath)), bytes);
+    assert.deepEqual(await readFile(join(target, variant.spritesheetPath)), activityBytes);
     await assert.rejects(validatePetAtlases(source, { ...metadata, activities: [{ ...activity, outfitVariants: [{ ...variant, frameCount: 5 }] }] }, 1024, imageDecoder));
     await rm(join(source, variant.spritesheetPath));
     await assert.rejects(validatePetAtlases(source, metadata, 1024, imageDecoder));
-    await writeFile(join(source, variant.spritesheetPath), bytes);
+    await writeFile(join(source, variant.spritesheetPath), activityBytes);
     await writeFile(join(source, "activities", "extra.webp"), bytes);
     await assert.rejects(validatePetAtlases(source, metadata, 1024, imageDecoder));
     await rm(join(source, "activities", "extra.webp"));
@@ -164,8 +196,10 @@ test("all representations share the activity byte budget", async () => {
     await mkdir(join(root, "activities"));
     await writeFile(join(root, "pet.json"), "{}");
     await writeFile(join(root, "spritesheet.webp"), bytes);
-    for (const animation of [activity, ...variants]) await writeFile(join(root, animation.spritesheetPath), Buffer.alloc(2 * 1024 * 1024));
-    await assert.rejects(validatePetAtlases(root, metadata, 1024, decoder({ format: "webp", width, height: 208, hasAlpha: true }, { pixels })), /total size limit/);
+    for (const animation of [activity, ...variants]) await writeFile(join(root, animation.spritesheetPath), webpHeader(width, 208, { trailingBytes: 2 * 1024 * 1024 - 34 }));
+    await assert.rejects(validatePetAtlases(root, metadata, 1024, decoder((input) => input.equals(bytes)
+      ? { format: "webp", width: 1536, height: 1872 }
+      : { format: "webp", width, height: 208, hasAlpha: true }, { pixels })), /total size limit/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

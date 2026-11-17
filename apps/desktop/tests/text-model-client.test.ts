@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ const secrets = { get: async () => "test-key" } as unknown as PluginSecretsStore
 let calls: Array<{ input: string; init?: RequestInit }> = [];
 
 try {
-  initializePluginPlatformSettings(userDataPath);
+  initializePluginPlatformSettings(userDataPath, { encryption: testPrivateStorageEncryption });
   configureProvider({ id: "text-test", label: "Text test", adapter: "openai-compatible-text", model: "test-model", baseUrl: "https://provider.test/v1", secretRef: "text-test" }, "text");
 
   const openAi = new TextModelClient(secrets, { allowNetworkInTests: true, fetchImpl: async (input, init) => {

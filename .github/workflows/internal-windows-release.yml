@@ -74,6 +74,7 @@ jobs:
           set -euo pipefail
           pnpm --filter @open-pets/desktop typecheck
           pnpm --filter @open-pets/client check
+          pnpm --filter @open-pets/pet-format test
           pnpm --filter @open-pets/opencode check
           pnpm --filter @open-pets/opencode build:v1
           pnpm --filter @open-pets/opencode build:v2
@@ -81,9 +82,8 @@ jobs:
           pnpm --filter @open-pets/desktop build
           pnpm --filter @open-pets/desktop test:build
 
-      # These targeted gates cover the release behavior. The unrelated full
-      # desktop suite has a recorded closed-cloud Assistant assertion failure;
-      # this workflow does not claim that suite passed or relax its policy.
+      # Run the shared release and security regressions on the native Windows host.
+      # Transport/encryption fixtures stay isolated; production policy is unchanged.
       - name: Check shared pet and import behavior
         shell: pwsh
         run: |
@@ -94,7 +94,11 @@ jobs:
             'pet-content-stage', 'pet-window-motion', 'opencode-token-rate',
             'pet-library-state', 'preference-patch', 'pet-local-codex-origin',
             'control-center-pet-management-ipc', 'app-state-installed-pets',
-            'pet-render-preferences', 'local-ipc-request-handler'
+            'pet-render-preferences', 'local-ipc-request-handler',
+            'logger-storage', 'logger-redaction', 'private-storage', 'plugin-host-clipboard',
+            'startup-backend-policy',
+            'internal-ipc-paths', 'internal-network-policy', 'codex-pets',
+            'codex-local-previews', 'pet-motion-package-validation', 'pet-install-transaction'
           )
           foreach ($name in $tests) {
             node "apps/desktop/.test-dist/tests/$name.test.js"

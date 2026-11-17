@@ -133,9 +133,34 @@ async function runImageContracts(): Promise<void> {
   const secondV2Frame = await sharp({ create: { width: 1536, height: 2288, channels: 4, background: { r: 1, g: 0, b: 0, alpha: 0.5 } } }).webp().toBuffer();
   const animatedWebp = await sharp([validV2Atlas, secondV2Frame], { join: { animated: true } }).webp({ delay: [100, 100], loop: 0 }).toBuffer();
   await assert.rejects(() => validateCodexPetSpritesheet(animatedWebp, v2), /exactly one image/);
-  await assert.rejects(() => validateCodexPetSpritesheet(Buffer.from("not an image"), v2), /metadata is invalid/);
-  await validateCodexPetSpritesheet(Buffer.from("not an image"), valid);
-  console.log("Codex pet validation and V2 layout contracts passed.");
+  await assert.rejects(() => validateCodexPetSpritesheet(Buffer.from("not an image"), v2), /must be WebP/);
+  const v1Atlas = await createAtlas(1536, 1872, "webp");
+  await validateCodexPetSpritesheet(v1Atlas, valid);
+  const secondV1Frame = await sharp({ create: { width: 1536, height: 1872, channels: 4, background: { r: 1, g: 0, b: 0, alpha: 0.5 } } }).webp().toBuffer();
+  const animatedV1 = await sharp([v1Atlas, secondV1Frame], { join: { animated: true } }).webp({ delay: [100, 100], loop: 0 }).toBuffer();
+  await validateCodexPetSpritesheet(animatedV1, valid);
+  for (const input of [
+    Buffer.from("not an image"),
+    Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872"><rect width="1536" height="1872"/></svg>'),
+    await sharp(v1Atlas).tiff().toBuffer(),
+    await createAtlas(1536, 1872, "png"),
+  ]) {
+    await assert.rejects(() => validateCodexPetSpritesheet(input, valid), /must be WebP/);
+  }
+  await assert.rejects(() => createAtlas(1536, 2080, "webp").then((atlas) => validateCodexPetSpritesheet(atlas, valid)), /exactly 1536x1872/);
+  const damagedV1 = Buffer.from(v1Atlas);
+  for (let offset = 12; offset < damagedV1.length;) {
+    const type = damagedV1.toString("ascii", offset, offset + 4);
+    const size = damagedV1.readUInt32LE(offset + 4);
+    if (type === "VP8 " || type === "VP8L") {
+      const headerBytes = type === "VP8 " ? 10 : 5;
+      damagedV1.fill(0, offset + 8 + headerBytes, offset + 8 + size);
+    }
+    offset += 8 + size + size % 2;
+  }
+  assert.equal((await sharp(damagedV1).metadata()).width, 1536, "header-only inspection cannot establish that the image decodes");
+  await assert.rejects(() => validateCodexPetSpritesheet(damagedV1, valid), /fully decodable/);
+  console.log("Codex pet validation and V1/V2 layout contracts passed.");
 }
 
 runImageContracts().catch((error: unknown) => {

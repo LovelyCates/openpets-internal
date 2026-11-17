@@ -50,6 +50,36 @@ function makeDeps(overrides: Partial<LocalIpcRequestHandlerDeps> = {}): LocalIpc
   };
 }
 
+// A "local" media/import request must not cause an SMB lookup or open a
+// Windows device. Use injected stat so this regression never contacts a share.
+{
+  const unsafePaths = [
+    "//example.invalid/share/pet.png",
+    "\\\\example.invalid\\share\\pet.png",
+    "/\\example.invalid/share/pet.png",
+    "\\/example.invalid/share/pet.png",
+    "\\\\?\\UNC\\example.invalid\\share\\pet.png",
+    "\\\\?\\C:\\pet.png",
+    "\\\\.\\pipe\\pet.png",
+    "\\??\\UNC\\example.invalid\\share\\pet.png",
+    "\\Device\\Mup\\example.invalid\\share\\pet.png",
+  ];
+  for (const path of unsafePaths) {
+    let filesystemCalls = 0;
+    const overrides = {
+      stat: async () => {
+        filesystemCalls += 1;
+        return { size: 1, isDirectory: () => false, isFile: () => true };
+      },
+    };
+    assert.equal((await handle(request("pet.showMedia", { path }), overrides)).ok, false);
+    for (const kind of ["zip", "folder"]) {
+      assert.equal((await handle(request("pets.install-local", { path, kind }), overrides)).ok, false);
+    }
+    assert.equal(filesystemCalls, 0, "network/device paths must be rejected before filesystem access");
+  }
+}
+
 {
   const received: unknown[] = [];
   const response = await handle(request("pet.tokenRate", {

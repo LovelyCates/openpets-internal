@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { closeAllAgentPets } from "./agent-pet-controller.js";
 import { destroyDefaultPet } from "./default-pet-controller.js";
-import { info, warn } from "./logger.js";
+import { flushLogs, info, warn } from "./logger.js";
 import { cleanupAllMotionSnapshots } from "./pet-motion-snapshot.js";
 import { stopLocalIpcServer } from "./local-ipc.js";
 import { stopRemoteControlService } from "./remote-control-service.js";
@@ -97,6 +97,7 @@ export function installAppLifecycle(options: AppLifecycleOptions = {}): void {
       await cleanupAllMotionSnapshots().catch((error: unknown) => {
         warn("pet.window", "motion snapshot cleanup failed", { error: String(error) });
       });
+      await flushLogs();
       cleanupFinished = true;
       app.quit();
     })();

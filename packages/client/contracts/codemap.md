@@ -36,9 +36,10 @@ of invalid origin/metadata associations before a request reaches the socket.
 
 ### client-protocol.contract.ts
 
-Runtime protocol validation (79 lines). Imports from `../src/` and asserts:
+Runtime protocol validation. Imports from `../src/` and asserts:
 
 - **Discovery validation**: Protocol, version, endpoint, token, platform validation
+- **Discovery filesystem boundary**: Private disposable file succeeds, atomic replacement remains readable, oversized/empty/nonregular files and file/runtime-directory symlinks reject; POSIX public token modes and group-writable directories reject; Windows UNC/device overrides reject on every host
 - **Endpoint parsing**: Unix sockets, Windows named pipes, TCP endpoints
 - **TCP private IP validation**: Loopback (127.x), private ranges (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x)
 - **Cross-platform discovery**: Windows desktop → WSL client via private IPs

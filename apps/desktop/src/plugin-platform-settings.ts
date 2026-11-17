@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { decryptPrivateDocument, encryptPrivateDocument, requirePrivateStorageEncryption, type PrivateStorageEncryption } from "./private-storage-encryption.js";
 import {
   defaultProviderAuth,
   providerCatalog,
@@ -124,21 +126,40 @@ export const defaultPluginPlatformSettings: PluginPlatformSettings = {
 const settingsFileName = "openpets-plugin-platform.json";
 let settingsPath: string | null = null;
 let cached: PluginPlatformSettings = defaultPluginPlatformSettings;
+let settingsEncryption: PrivateStorageEncryption | undefined;
+let storageFailure: string | undefined;
+let persistSettingsDocument: (path: string, contents: string) => void = persistSettingsFile;
 
-export function initializePluginPlatformSettings(userDataPath: string): PluginPlatformSettings {
+export function initializePluginPlatformSettings(userDataPath: string, options: {
+  readonly encryption?: PrivateStorageEncryption;
+  readonly onDiagnostic?: (message: string) => void;
+  /** Test seam for an atomic persistence failure. Receives ciphertext only. */
+  readonly persist?: (path: string, contents: string) => void;
+} = {}): PluginPlatformSettings {
   const path = join(userDataPath, settingsFileName);
   settingsPath = path;
+  settingsEncryption = options.encryption;
+  storageFailure = undefined;
+  persistSettingsDocument = options.persist ?? persistSettingsFile;
+  cached = defaultPluginPlatformSettings;
   try {
-    cached = readSettingsFile(path);
-    if (existsSync(path)) {
-      const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      if (!isRecord(raw) || raw.version !== PROVIDER_SETTINGS_VERSION) writeSettingsFile(path, cached);
+    requirePrivateStorageEncryption(settingsEncryption);
+    if (!existsSync(path)) return cached;
+    const document = decryptPrivateDocument(readFileSync(path, "utf8"), "provider-settings", settingsEncryption);
+    const raw: unknown = JSON.parse(document.value);
+    if (!isRecord(raw) || raw.version !== undefined && raw.version !== PROVIDER_SETTINGS_VERSION) {
+      throw new Error("Provider settings have an invalid or unsupported version. Existing data has been preserved; repair or restore the file before restarting OpenPets.");
     }
+    const value = normalizeSettings(raw);
+    // Replace legacy plaintext only after encryption and the atomic write succeed.
+    // Keep quarantined profiles inside the same encrypted document as headers.
+    if (document.legacy) writeSettingsFile(path, value);
+    cached = value;
   } catch (error) {
-    // A damaged document is moved aside before future saves. The original is
-    // therefore recoverable and can never be silently overwritten.
-    if (existsSync(path)) renameSync(path, `${path}.corrupt`);
-    cached = defaultPluginPlatformSettings;
+    cached = { ...defaultPluginPlatformSettings, allowPluginAudio: false, allowPluginVoice: false };
+    storageFailure = error instanceof SyntaxError ? "Provider settings are invalid. Existing data has been preserved; repair or restore the file before restarting OpenPets."
+      : error instanceof Error ? error.message : "Provider encrypted storage is unavailable. Existing data has been preserved.";
+    options.onDiagnostic?.(storageFailure);
   }
   return cached;
 }
@@ -147,9 +168,7 @@ export function getPluginPlatformSettings(): PluginPlatformSettings { return cac
 
 export function updatePluginPlatformSettings(patch: ProviderGatesPatch): PluginPlatformSettings {
   const value = normalizeSettings({ ...cached, ...patch, quietHours: { ...cached.quietHours, ...(patch.quietHours ?? {}) } });
-  cached = value;
-  if (settingsPath) writeSettingsFile(settingsPath, cached);
-  return cached;
+  return persist(value);
 }
 
 export function validateProviderGatesPatch(value: unknown): ProviderGatesPatch {
@@ -410,6 +429,7 @@ export function validateProviderAuth(value: unknown, adapter: ProviderAdapter, s
 }
 
 export function profileStatus(settings: PluginPlatformSettings, role: ProviderRole, hasCredential: (profile: ProviderProfile) => boolean): ProviderStatus {
+  if (settings === cached && storageFailure) return { role, state: "invalid", code: "provider.storage.unavailable", message: storageFailure };
   const id = settings.selections[role];
   if (!id) return { role, state: "disabled", code: "provider.role.disabled", message: `No ${role} provider profile is selected.` };
   const profile = settings.profiles[id];
@@ -429,17 +449,24 @@ function getNormalizedProfileSummaries(settings: PluginPlatformSettings, hasCred
   });
 }
 
-export function buildProviderControlCenterSnapshot(settings: PluginPlatformSettings, hasCredential: (profile: ProviderProfile) => boolean): ProviderControlCenterSnapshot {
+export function buildProviderControlCenterSnapshot(settings: PluginPlatformSettings, hasCredential: (profile: ProviderProfile) => boolean, credentialUnavailable: (profile: ProviderProfile) => boolean = () => false): ProviderControlCenterSnapshot {
   const statuses = Object.fromEntries(([
     ["text", profileStatus(settings, "text", hasCredential)],
     ["stt", profileStatus(settings, "stt", hasCredential)],
     ["tts", profileStatus(settings, "tts", hasCredential)],
     ["realtime", realtimeStatus(settings, hasCredential)],
   ] as const)) as ProviderControlCenterSnapshot["statuses"];
-  return { gates: { allowPluginAudio: settings.allowPluginAudio, allowDynamicSpeech: settings.allowDynamicSpeech, allowPluginVoice: settings.allowPluginVoice, allowMicrophone: settings.allowMicrophone, quietHours: settings.quietHours }, profiles: getNormalizedProfileSummaries(settings, hasCredential), selections: settings.selections, statuses, presets: providerPresets };
+  const readableStatuses = Object.fromEntries(Object.entries(statuses).map(([role, status]) => {
+    const profile = status.profileId ? settings.profiles[status.profileId] : undefined;
+    return [role, status.state === "missing-secret" && profile && credentialUnavailable(profile)
+      ? { ...status, code: "provider.credential.unavailable", message: "The saved credential cannot be unlocked with the current OS keychain. Existing encrypted data is preserved. Unlock the keychain or re-enter the credential in this profile." }
+      : status];
+  })) as ProviderControlCenterSnapshot["statuses"];
+  return { gates: { allowPluginAudio: settings.allowPluginAudio, allowDynamicSpeech: settings.allowDynamicSpeech, allowPluginVoice: settings.allowPluginVoice, allowMicrophone: settings.allowMicrophone, quietHours: settings.quietHours }, profiles: getNormalizedProfileSummaries(settings, hasCredential), selections: settings.selections, statuses: readableStatuses, presets: providerPresets };
 }
 
 export function realtimeStatus(settings: PluginPlatformSettings, hasCredential: (profile: ProviderProfile) => boolean): ProviderStatus {
+  if (settings === cached && storageFailure) return { role: "realtime", state: "invalid", code: "provider.storage.unavailable", message: storageFailure };
   const id = settings.selections.text;
   if (!id) return { role: "realtime", state: "disabled", code: "provider.realtime.disabled", message: "Realtime is unavailable because no text profile is selected." };
   const profile = settings.profiles[id];
@@ -560,13 +587,27 @@ function profileIsReadyForRole(profile: ProviderProfile, role: ProviderRole): bo
   return profile.adapter === "system-tts" || (profile.adapter === "minimax-tts" || profile.adapter === "elevenlabs-tts" || profile.adapter === "openai-compatible-speech") && profile.voice.length > 0;
 }
 
-function persist(settings: PluginPlatformSettings): PluginPlatformSettings { if (settingsPath) writeSettingsFile(settingsPath, settings); cached = settings; return settings; }
-function readSettingsFile(path: string): PluginPlatformSettings {
-  if (!existsSync(path)) return defaultPluginPlatformSettings;
-  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  return normalizeSettings(raw);
+function persist(settings: PluginPlatformSettings): PluginPlatformSettings {
+  if (storageFailure) throw new Error(storageFailure);
+  if (settingsPath) writeSettingsFile(settingsPath, settings);
+  cached = settings;
+  return settings;
 }
-function writeSettingsFile(path: string, settings: PluginPlatformSettings): void { mkdirSync(dirname(path), { recursive: true }); const tmp = `${path}.${process.pid}.tmp`; writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, "utf8"); renameSync(tmp, path); }
+function writeSettingsFile(path: string, settings: PluginPlatformSettings): void {
+  const contents = encryptPrivateDocument(JSON.stringify(settings), "provider-settings", settingsEncryption);
+  persistSettingsDocument(path, contents);
+}
+
+function persistSettingsFile(path: string, contents: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(temporaryPath, path);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+}
 function isRecord(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function boundedString(value: unknown, label: string, maxBytes: number, allowEmpty = false): string { if (typeof value !== "string" || (!allowEmpty && value.trim() === "") || Buffer.byteLength(value, "utf8") > maxBytes || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid.`); return value.trim(); }
 function assertProfileId(value: unknown): asserts value is string { if (typeof value !== "string" || !PROVIDER_PROFILE_ID.test(value)) throw new Error("Provider profile id is invalid."); }

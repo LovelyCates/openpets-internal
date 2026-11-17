@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -5,7 +6,7 @@ import { tmpdir } from "node:os";
 
 import { PluginAiGateway, VOICE_REALTIME_MAX_SDP_BYTES } from "../src/plugin-ai-gateway.js";
 import { initializePluginPlatformSettings, createProviderProfile, selectProviderProfile } from "../src/plugin-platform-settings.js";
-import type { HostProviderOperations, ProviderOperationSnapshot } from "../src/provider-service.js";
+import { HostProviderService, type HostProviderOperations, type ProviderOperationSnapshot } from "../src/provider-service.js";
 import type { PluginSecretsStore } from "../src/plugin-secrets.js";
 
 const userDataPath = mkdtempSync(join(tmpdir(), "openpets-provider-gateway-"));
@@ -14,7 +15,7 @@ const calls: Array<{ input: string; init?: RequestInit }> = [];
 const secrets = { get: async (_owner: string, key: string) => key.includes("local") ? undefined : "test-key" } as unknown as PluginSecretsStore;
 
 try {
-  initializePluginPlatformSettings(userDataPath);
+  initializePluginPlatformSettings(userDataPath, { encryption: testPrivateStorageEncryption });
   createProviderProfile({ id: "minimax-text", label: "MiniMax", adapter: "openai-compatible-text", model: "MiniMax-M3", baseUrl: "https://api.minimax.io/v1", secretRef: "minimax" });
   createProviderProfile({ id: "minimax-voice", label: "MiniMax voice", adapter: "minimax-tts", model: "speech-2.8-turbo", voice: "custom-minimax", baseUrl: "https://api.minimax.io/v1", secretRef: "minimax" });
   createProviderProfile({ id: "whisper-stt", label: "Whisper", adapter: "openai-compatible-transcription", model: "whisper-1", baseUrl: "https://stt.test/v1", secretRef: "whisper" });
@@ -28,7 +29,7 @@ try {
     if (String(input).includes("audio/transcriptions")) return new Response(JSON.stringify({ text: "heard" }), { status: 200 });
     return new Response(JSON.stringify({ choices: [{ message: { content: "hello" } }] }), { status: 200 });
   };
-  const gateway = new PluginAiGateway(secrets);
+  const gateway = new PluginAiGateway(new HostProviderService(secrets, { allowNetworkInTests: true }));
   assert.equal((await gateway.complete({ messages: [{ role: "user", content: "hi" }] })).text, "hello");
   assert.equal(calls[0]?.input, "https://api.minimax.io/v1/chat/completions");
   assert.equal(new Headers(calls[0]?.init?.headers).get("authorization"), "Bearer test-key");

@@ -10,6 +10,7 @@ import { resolveWornOutfitId, validatePetWardrobe } from "../dist/wardrobe.js";
 import { motionMaxClipBytes } from "../dist/motion.js";
 import { validatePetPackageAssets } from "../dist/node/package-validation.js";
 import { validateZipEntryName } from "../dist/node/paths.js";
+import { webpHeader } from "./webp-fixtures.mjs";
 
 function fixture() {
   return {
@@ -161,9 +162,17 @@ test("Motion activity duration checks verified intro, main and outro with per-cl
   try {
     await mkdir(join(root, "clips"));
     await writeFile(join(root, "pet.json"), "{}");
-    for (const [name, clip] of Object.entries(value.clips)) await writeFile(join(root, clip.file), name);
+    const clipNames = new Map();
+    for (const [name, clip] of Object.entries(value.clips)) {
+      const bytes = webpHeader(10, 12, { pages: 2, tag: name });
+      await writeFile(join(root, clip.file), bytes);
+      clipNames.set(bytes.toString("hex"), name);
+    }
     const durations = { idle: 100, intro: 400, coat: 1000, outro: 300 };
-    const imageDecoder = { open: (bytes) => decoder({ delay: [durations[bytes.toString()] / 2, durations[bytes.toString()] / 2] }).open() };
+    const imageDecoder = { open: (bytes) => {
+      const duration = durations[clipNames.get(bytes.toString("hex"))];
+      return decoder({ delay: [duration / 2, duration / 2] }).open();
+    } };
     const result = await validatePetPackageAssets(root, pet, imageDecoder, { exactPackage: true });
     assert.equal(calculateMotionActivityDurationMs(pet.metadata.animations.trick, pet.metadata.clips, result.verifiedClips), 1500);
     durations.coat = 500;
@@ -191,13 +200,13 @@ test("Classic wardrobe identity and creator schedules retain existing behavior",
   assert.throws(() => validatePetWardrobe({ outfits: wardrobe.outfits, schedule: [{ outfit: "missing", when: { days: ["mon"] } }] }));
 });
 
-test("Classic asset dispatch preserves existing V1 atlas behavior", async () => {
+test("Classic asset dispatch validates and preserves V1 atlases", async () => {
   const dir = await mkdtemp(join(tmpdir(), "classic-package-"));
   try {
     await writeFile(join(dir, "pet.json"), "{}");
-    await writeFile(join(dir, "spritesheet.webp"), "atlas");
+    await writeFile(join(dir, "spritesheet.webp"), webpHeader(1536, 1872));
     const pet = validatePetPackageMetadata({ id: "cat", displayName: "Cat", description: "Pet", spritesheetPath: "spritesheet.webp" }, "cat");
-    const result = await validatePetPackageAssets(dir, pet, decoder(), { exactPackage: true });
+    const result = await validatePetPackageAssets(dir, pet, decoder({ width: 1536, height: 1872, pages: 1 }), { exactPackage: true });
     assert.deepEqual(result.package, pet);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -210,11 +219,12 @@ test("Motion validation decodes and copies native timing, rejecting corrupt or u
     await mkdir(source); await mkdir(copy); await mkdir(join(source, "clips"));
     await writeFile(join(source, "pet.json"), JSON.stringify(fixture()));
     const clip = join(source, "clips/idle.webp");
-    await writeFile(clip, "fixture");
+    const clipBytes = webpHeader(10, 12, { pages: 2 });
+    await writeFile(clip, clipBytes);
     const pet = validatePetPackageMetadata(fixture(), "cat");
     const result = await validatePetPackageAssets(source, pet, decoder(), { exactPackage: true, copyTo: copy });
     assert.deepEqual(result.verifiedClips.idle, { frameDurationsMs: [40, 60], durationMs: 100 });
-    assert.equal(await readFile(join(copy, "clips/idle.webp"), "utf8"), "fixture");
+    assert.deepEqual(await readFile(join(copy, "clips/idle.webp")), clipBytes);
     for (const invalid of [{ delay: [40, 0] }, { delay: [40] }, { pages: 3 }, { pageHeight: 11 }, { hasAlpha: false }]) {
       await assert.rejects(validatePetPackageAssets(source, pet, decoder(invalid)));
     }
@@ -222,7 +232,7 @@ test("Motion validation decodes and copies native timing, rejecting corrupt or u
     await writeFile(join(source, "clips/extra.webp"), "extra");
     await assert.rejects(validatePetPackageAssets(source, pet, decoder()));
     await rm(join(source, "clips/extra.webp"));
-    await truncate(clip, 33 * 1024 * 1024);
+    await writeFile(clip, webpHeader(10, 12, { pages: 2, trailingBytes: 33 * 1024 * 1024 }));
     await validatePetPackageAssets(source, pet, decoder());
     await truncate(clip, motionMaxClipBytes + 1);
     await assert.rejects(validatePetPackageAssets(source, pet, decoder()));
@@ -237,4 +247,19 @@ test("Motion ZIP allowlist is opt-in and enforces safe paths", () => {
   for (const name of ["clips/../idle.webp", "clips/UPPER.webp", "outfits/idle.webp", "clips/nested/idle.webp"]) {
     assert.throws(() => validateZipEntryName(name, "motion"));
   }
+});
+
+test("Motion rejects foreign formats and excess canvas allocations before native image loading", async () => {
+  const root = await mkdtemp(join(tmpdir(), "motion-format-"));
+  let opened = 0;
+  const nativeDecoder = { open() { opened++; throw new Error("foreign image reached decoder"); } };
+  try {
+    await mkdir(join(root, "clips"));
+    const pet = validatePetPackageMetadata(fixture(), "cat");
+    for (const bytes of [Buffer.from("II*\0renamed TIFF"), Buffer.from("<svg/>"), webpHeader(16384, 16384, { pages: 2 })]) {
+      await writeFile(join(root, "clips/idle.webp"), bytes);
+      await assert.rejects(validatePetPackageAssets(root, pet, nativeDecoder));
+    }
+    assert.equal(opened, 0, "rejected formats and dimensions cannot enter native decoders");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

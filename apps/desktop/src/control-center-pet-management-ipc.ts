@@ -3,6 +3,7 @@ import { codexV2SpriteLayout } from "@open-pets/pet-format/sprite-layout";
 import type { InstalledPetPresentation } from "./installed-pet-layout.js";
 import type { LocalPetInstallOptions } from "./pet-installation.js";
 import { t } from "./i18n/index.js";
+import { assertLocalFilesystemPath } from "./local-file-path.js";
 
 const petPresentationConcurrency = 8;
 
@@ -298,6 +299,7 @@ export function installControlCenterPetManagementIpcHandlers({
     if (result.canceled || !result.filePaths[0]) return getPetsStateSnapshot(getAppStateSnapshot, readInstalledPetPresentation);
     const selectedPath = result.filePaths[0];
     try {
+      assertLocalFilesystemPath(selectedPath);
       const selectedStats = await stat(selectedPath);
       const isDirectory = selectedStats.isDirectory();
       if (isDirectory !== (importKind === "folder")) throw new Error(t("pets.importDialog.typeMismatch"));

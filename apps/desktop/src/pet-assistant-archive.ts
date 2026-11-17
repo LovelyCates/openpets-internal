@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { decryptPrivateDocument, encryptPrivateDocument, requirePrivateStorageEncryption, type PrivateStorageEncryption } from "./private-storage-encryption.js";
 
 export const PET_ASSISTANT_CONVERSATION_ID = "openpets-control-center-current";
 export const PET_ASSISTANT_ARCHIVE_FILE_NAME = "openpets-conversation-history.json";
@@ -30,6 +31,7 @@ export type PetAssistantConversationArchiveOptions = {
   readonly userDataPath?: string;
   readonly archivePath?: string;
   readonly now?: () => number;
+  readonly encryption?: PrivateStorageEncryption;
   readonly onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
   /** Test seam for simulating an atomic persistence failure. */
   readonly persist?: (path: string, contents: string) => void;
@@ -62,8 +64,8 @@ type ArchiveFile = {
 export class LocalPetAssistantConversationArchive implements PetAssistantConversationArchive {
   readonly path: string;
   readonly #now: () => number;
-  readonly #onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
   readonly #persist: (path: string, contents: string) => void;
+  readonly #encryption: PrivateStorageEncryption;
   #messages: readonly PetAssistantArchivedMessage[] = [];
 
   constructor(options: PetAssistantConversationArchiveOptions) {
@@ -72,27 +74,21 @@ export class LocalPetAssistantConversationArchive implements PetAssistantConvers
     }
     this.path = options.archivePath ?? join(options.userDataPath!, PET_ASSISTANT_ARCHIVE_FILE_NAME);
     this.#now = options.now ?? Date.now;
-    this.#onDiagnostic = options.onDiagnostic;
     this.#persist = options.persist ?? persistArchiveFile;
+    this.#encryption = requirePrivateStorageEncryption(options.encryption);
 
-    const loaded = readArchiveFile(this.path);
+    const loaded = readArchiveFile(this.path, this.#encryption);
     if (loaded.corrupt) {
-      const quarantinePath = quarantineArchive(this.path);
-      this.#onDiagnostic?.("Pet Assistant conversation archive was invalid; replaced with an empty archive.", {
-        path: this.path,
-        ...(quarantinePath ? { quarantinePath } : {}),
-      });
-      this.#persistMessages([]);
-      this.#messages = [];
-      return;
+      throw new Error("Pet Assistant conversation archive is invalid. Existing messages have been preserved; repair or restore the file before restarting OpenPets.");
     }
 
     const retained = retainMessages(loaded.messages, this.#now());
-    if (loaded.missing || !sameMessages(loaded.messages, retained)) this.#persistMessages(retained);
+    if (loaded.missing || loaded.legacy || !sameMessages(loaded.messages, retained)) this.#persistMessages(retained);
     this.#messages = retained;
   }
 
   list(now = this.#now()): readonly PetAssistantArchivedMessage[] {
+    requirePrivateStorageEncryption(this.#encryption);
     const retained = retainMessages(this.#messages, now);
     if (!sameMessages(this.#messages, retained)) {
       this.#persistMessages(retained);
@@ -136,29 +132,34 @@ export class LocalPetAssistantConversationArchive implements PetAssistantConvers
   }
 
   #persistMessages(messages: readonly PetAssistantArchivedMessage[]): void {
-    this.#persist(this.path, `${serializeMessages(messages)}\n`);
+    this.#persist(this.path, encryptPrivateDocument(serializeMessages(messages), "assistant-history", this.#encryption));
   }
 }
 
 function persistArchiveFile(path: string, contents: string): void {
   const directory = dirname(path);
-  mkdirSync(directory, { recursive: true });
-  const tempPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(tempPath, contents, "utf8");
-  renameSync(tempPath, path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const tempPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tempPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(tempPath, path);
+  } finally {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+  }
 }
 
-function readArchiveFile(path: string): { readonly messages: readonly PetAssistantArchivedMessage[]; readonly missing: boolean; readonly corrupt: boolean } {
-  if (!existsSync(path)) return { messages: [], missing: true, corrupt: false };
+function readArchiveFile(path: string, encryption: PrivateStorageEncryption): { readonly messages: readonly PetAssistantArchivedMessage[]; readonly missing: boolean; readonly corrupt: boolean; readonly legacy: boolean } {
+  if (!existsSync(path)) return { messages: [], missing: true, corrupt: false, legacy: false };
+  const document = decryptPrivateDocument(readFileSync(path, "utf8"), "assistant-history", encryption);
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.messages)) return { messages: [], missing: false, corrupt: true };
+    const parsed = JSON.parse(document.value) as unknown;
+    if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.messages)) return { messages: [], missing: false, corrupt: true, legacy: document.legacy };
     const ids = new Set<string>();
     const messages = parsed.messages.map((value) => normalizeMessage(value, ids));
-    if (messages.some((message) => message === null)) return { messages: [], missing: false, corrupt: true };
-    return { messages: messages as PetAssistantArchivedMessage[], missing: false, corrupt: false };
+    if (messages.some((message) => message === null)) return { messages: [], missing: false, corrupt: true, legacy: document.legacy };
+    return { messages: messages as PetAssistantArchivedMessage[], missing: false, corrupt: false, legacy: document.legacy };
   } catch {
-    return { messages: [], missing: false, corrupt: true };
+    return { messages: [], missing: false, corrupt: true, legacy: document.legacy };
   }
 }
 
@@ -208,20 +209,6 @@ function byteLength(value: string): number { return Buffer.byteLength(value, "ut
 
 function sameMessages(left: readonly PetAssistantArchivedMessage[], right: readonly PetAssistantArchivedMessage[]): boolean {
   return left.length === right.length && left.every((message, index) => message.id === right[index]?.id);
-}
-
-function quarantineArchive(path: string): string | undefined {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const quarantinePath = `${path}.corrupt-${Date.now()}-${process.pid}${attempt === 0 ? "" : `-${attempt}`}`;
-    try {
-      renameSync(path, quarantinePath);
-      return quarantinePath;
-    } catch {
-      // The replacement write below still restores a valid empty archive when
-      // another process removes or changes the corrupt file first.
-    }
-  }
-  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

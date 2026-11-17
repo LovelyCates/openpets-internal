@@ -1,5 +1,6 @@
+import { readPrivateTestDocument, testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -20,7 +21,7 @@ try {
     selections: { text: "realtime", tts: "eleven" },
   }), "utf8");
 
-  const settings = initializePluginPlatformSettings(directory);
+  const settings = initializePluginPlatformSettings(directory, { encryption: testPrivateStorageEncryption });
   assert.equal(settings.profiles.eleven?.voice, "od84OdVweqzO3t6kKlWT");
   assert.equal(settings.profiles.minimax?.voice, "English_expressive_narrator");
   assert.equal(settings.profiles.compatible?.voice, "alloy");
@@ -29,7 +30,7 @@ try {
   assert.equal(settings.profiles.realtime?.model, "");
   assert.equal(settings.profiles.realtime?.adapter === "openai-realtime" ? settings.profiles.realtime.realtimeModel : undefined, "gpt-realtime-2.1");
   assert.ok(settings.quarantinedProfiles.corrupt, "invalid persisted profiles remain recoverable in quarantine");
-  assert.equal(JSON.parse(readFileSync(join(directory, "openpets-plugin-platform.json"), "utf8")).version, 1);
+  assert.equal(JSON.parse(readPrivateTestDocument(join(directory, "openpets-plugin-platform.json"), "provider-settings")).version, 1);
   assert.throws(() => createProviderProfile({ id: "corrupt", label: "Replacement", adapter: "system-tts", model: "" }), /quarantined/);
 
   selectProviderProfile("tts", "eleven");

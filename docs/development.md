@@ -11,7 +11,20 @@ their own doc, [Testing and validation](/testing-and-validation).
 ## Layout & toolchain
 
 - **Monorepo**: pnpm workspaces (`pnpm-workspace.yaml`) over `apps/*` and
-  `packages/*`. Package manager pinned to `pnpm@11.x`; Node `>=20`.
+  `packages/*`. Package manager pinned to `pnpm@11.x`; Node `22.22.2+`, `24.15.0+` or `26+` (release CI uses Node 24).
+
+The internal desktop pins Electron 45.3.3, Sharp 0.35.5, get-windows 10.0.0 and
+Undici 7.30.2. Workspace peer auto-installation is disabled: OpenClaw and Pi are
+external integration hosts, supplied by their own applications, and are not
+bundled inside the desktop merely to satisfy optional peers. The existing
+companion packages and host setup behavior remain available. Security overrides
+move affected modern glob/minimatch ranges to 14.0.6/11.0.9; their current named
+APIs remain compatible with the dependency consumers. Two documentation-only
+overrides update Vercel routing path-to-regexp within 6.x and the typography
+selector parser within 6.x. The Scarf install-time telemetry script is explicitly
+disabled. Regenerate the lockfile
+and run integration, native runtime and package checks when changing these pins.
+
 - **ESM + TypeScript everywhere**: every package is `"type": "module"` with dual
   type exports; internal links use `workspace:*`.
 - **`web/` uses Bun + Nuxt** and is a separate toolchain - its commands run from

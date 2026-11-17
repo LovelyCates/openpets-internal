@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -33,7 +34,7 @@ function stalledResponseBody(onStart: () => void, onCancel: () => void): Readabl
 
 async function main(): Promise<void> {
 try {
-  initializePluginPlatformSettings(dir);
+  initializePluginPlatformSettings(dir, { encryption: testPrivateStorageEncryption });
   createProviderProfile({ id: "text", label: "Text", adapter: "openai-compatible-text", model: "model", baseUrl: "https://provider.example/v1", secretRef: "text" });
   createProviderProfile({ id: "stt", label: "STT", adapter: "openai-compatible-transcription", model: "whisper", baseUrl: "https://provider.example/v1", secretRef: "stt" });
   createProviderProfile({ id: "elevenlabs-stt", label: "ElevenLabs Scribe", adapter: "elevenlabs-transcription", model: "scribe_v2", baseUrl: "https://api.elevenlabs.io/v1", secretRef: "elevenlabs-stt" });

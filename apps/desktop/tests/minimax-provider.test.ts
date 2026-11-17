@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ const directory = mkdtempSync(join(tmpdir(), "openpets-minimax-provider-"));
 const secrets = { get: async () => "test-key" } as unknown as PluginSecretsStore;
 let captures = 0;
 try {
-  initializePluginPlatformSettings(directory);
+  initializePluginPlatformSettings(directory, { encryption: testPrivateStorageEncryption });
   const preset = providerPresets.find((item) => item.id === "minimax-chat");
   assert.equal(preset?.model, "MiniMax-M3.1-Flash");
 
@@ -26,7 +27,7 @@ try {
         createProviderProfile({ id, label: "MiniMax", adapter, model, baseUrl, secretRef: "minimax" });
         selectProviderProfile("text", id);
         // Reopening persisted profiles must not replace explicit model selections.
-        initializePluginPlatformSettings(directory);
+        initializePluginPlatformSettings(directory, { encryption: testPrivateStorageEncryption });
         assert.equal(getPluginPlatformSettings().profiles[id]?.model, model);
         const provider = new HostProviderService(secrets, { allowNetworkInTests: true, fetchImpl: async (input, init) => {
           captures += 1;

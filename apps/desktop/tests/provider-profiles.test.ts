@@ -1,5 +1,6 @@
+import { readPrivateTestDocument, testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -7,7 +8,7 @@ import { buildProviderControlCenterSnapshot, createProviderProfile, deleteProvid
 
 const dir = mkdtempSync(join(tmpdir(), "openpets-provider-profiles-"));
 try {
-  initializePluginPlatformSettings(dir);
+  initializePluginPlatformSettings(dir, { encryption: testPrivateStorageEncryption });
   const presetModes = Object.fromEntries(providerPresets.map((preset) => [preset.id, preset.credentialMode]));
    assert.deepEqual(presetModes, { openrouter: "required", openai: "required", anthropic: "required", ollama: "none", "lm-studio": "none", vllm: "none", "minimax-chat": "required", whisper: "required", "elevenlabs-scribe": "required", elevenlabs: "required", "system-tts": "none" });
   createProviderProfile({ id: "text-local", label: "Local text", adapter: "openai-compatible-text", model: "llama", baseUrl: "http://127.0.0.1:11434/v1", headers: [{ name: "X-Client", value: "openpets" }] });
@@ -16,7 +17,7 @@ try {
   assert.equal(getPluginPlatformSettings().profiles["system-voice"]?.voice, "Samantha", "an installed system voice persists with its profile");
   selectProviderProfile("text", "text-local"); selectProviderProfile("stt", "stt-cloud"); selectProviderProfile("tts", "system-voice");
   assert.deepEqual(getPluginPlatformSettings().selections, { text: "text-local", stt: "stt-cloud", tts: "system-voice" });
-  const persisted = JSON.parse(readFileSync(join(dir, "openpets-plugin-platform.json"), "utf8")) as Record<string, unknown>;
+  const persisted = JSON.parse(readPrivateTestDocument(join(dir, "openpets-plugin-platform.json"), "provider-settings")) as Record<string, unknown>;
   assert.equal("ai" in persisted, false, "legacy single-provider settings must not be persisted or read");
   const snapshot = buildProviderControlCenterSnapshot(getPluginPlatformSettings(), () => false);
   assert.deepEqual(Object.keys(snapshot.selections), ["text", "stt", "tts"]);
@@ -128,7 +129,7 @@ try {
   }, failingCredentials), /credential write failed/);
   assert.deepEqual(getPluginPlatformSettings(), beforeAtomic);
   assert.equal(credentials.get("atomic-old"), "old-secret");
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, "openpets-plugin-platform.json"), "utf8")), JSON.parse(JSON.stringify(beforeAtomic)));
+  assert.deepEqual(JSON.parse(readPrivateTestDocument(join(dir, "openpets-plugin-platform.json"), "provider-settings")), JSON.parse(JSON.stringify(beforeAtomic)));
 
   // Editing an active text profile to System Voice clears the incompatible role durably,
   // even when the renderer sends no role directives.
@@ -146,7 +147,7 @@ try {
     delete: async () => undefined,
   });
   assert.equal(getPluginPlatformSettings().selections.text, null);
-  const reloaded = initializePluginPlatformSettings(dir);
+  const reloaded = initializePluginPlatformSettings(dir, { encryption: testPrivateStorageEncryption });
   assert.equal(reloaded.selections.text, null, "incompatible role selections must not survive reload");
   assert.equal(reloaded.profiles["role-switch"]?.adapter, "system-tts");
 } finally { rmSync(dir, { recursive: true, force: true }); }

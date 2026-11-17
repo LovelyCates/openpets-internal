@@ -308,7 +308,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 
 **Core**:
 - `bootstrap.ts`: Package-entry pre-main backend bootstrap; uses `startup-backend-policy.ts` and starts a normalized replacement with Node `child_process.spawn` when needed, waits up to 15 seconds for a bounded ready/failure IPC handoff, supervises unpackaged replacements with signal/exit propagation, and detaches packaged replacements
-- `startup-backend-policy.ts`: Pure platform/argv/environment policy for normal X11, Wayland opt-out, and native layer-shell startup selection
+- `startup-backend-policy.ts`: Platform/argv/environment policy for X11, Wayland opt-out, native layer-shell startup, and real OS private-storage backend selection without mock/basic keychain flags
 - `main.ts`: Application bootstrap after backend selection, single-instance lock, JavaScript plugin host construction, and dev-only Control Center route opening
 - `lifecycle.ts`: App event handlers (quit, window-all-closed, second-instance, open-url routing of Teams enrollment and pet install links) with logging; stops plugin service, IPC, and pet windows on quit
 - `state.ts`: Simple shell pause state
@@ -317,7 +317,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `app-state-core.ts`: Pet scale options, waiting-duration options/normalization, idle cursor-gaze default/normalization, onboarding normalization
 - `pet-assistant-host.ts` / `pet-assistant-service.ts`: Host-owned provider-neutral assistant lifecycle, per-turn prompt composition, terminal outcome reduction, and generation-pinned capability routing
 - `pet-assistant-memory.ts`: Electron-/filesystem-free completed-turn memory owner with bounded active context, archive deduplication/context selection, canonical terminal-text appends, and archive list/delete/clear delegation
-- `pet-assistant-archive.ts`: Host-owned local terminal-text archive with atomic writes, retention/quarantine, and bounded prompt-window support
+- `pet-assistant-archive.ts`: Host-owned OS-encrypted local terminal-text archive with private atomic writes, bounded retention/prompt windows, and lossless fail-closed legacy migration
+- `private-storage-encryption.ts`: Injected Electron safeStorage document codec for the existing settings/archive owners; purpose-bound envelopes and unavailable-keychain errors, without another credential store
 - `pet-assistant-history-ipc.ts`: Pure narrow history list/delete/clear handler helpers, including startup and identifier validation
 - `pet-assistant-conversation.ts`: Host-owned current-session presentation projection, stable typed-chat controller, cancellation seam, and normalized voice-transcript seam
 - `pet-assistant-personality.ts`: Pure personality defaults, bounds, patch validation, and safe deterministic serialization
@@ -326,7 +327,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `manager-check-in-service.ts`: Bundled weekly Manager Check-ins lifecycle; synchronizes organization settings/history, computes local-week due state, presents a history-free pet snapshot, owns explicit submission and idempotent retry behavior, and keeps pause state device-private
 - `manager-check-in-state.ts`: Atomic local Manager Check-ins state with bounded history, pending client-generated submission identity, local-week offer/submission markers, and scheduled-offer pause
 - `team-api-client.ts`: Teams enrollment, Team Pack, and Manager Check-ins API adapter; validates fixed feelings and bounded submissions, while the pet card enforces its 500-character note limit and client-generated IDs provide idempotent immutable retries
-- `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui, voice, provider), log rotation, redaction
+- `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui, voice, provider), bounded serialized live rotation and pending writes, shutdown flush, private POSIX files, credential redaction
 - `bundled-plugins.ts`: Canonical official plugin IDs shared by plugin seeding and packaged-output validation
 - `packaging-contract.ts`: Packaged bundled-plugin manifest/asset/locale and unpacked integration-runtime contract helpers, including the OpenCode package-root V2 `setup` export smoke
 - `packaging-output-contract.ts`: Pure packaged-output tree validation that rejects unowned app collateral and sensitive files without rejecting ordinary dependency paths
@@ -414,6 +415,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `local-ipc-pet-list.ts`: Stateless installed-metadata pagination bound to a SHA-256 revision; budgets the complete response envelope in UTF-8 under 16 KiB, preserves small unpaged results and explicitly rejects oversized entries or changed lists
 - `local-ipc-confinement.ts`: Electron-free module-lifetime coordination between explicit leases, terminal tracking, confinement state updates, and tracker cancellation
 - `local-ipc-protocol.ts`: Protocol constants, request/response types, validation functions
+- `local-file-path.ts`: Shared lexical guard for Windows UNC/mixed-separator and device namespaces, applied before filesystem access in IPC media/imports, native import selection, and folder/ZIP installers on all hosts. Mounted volumes and mapped drive letters remain OS-owned.
 - `local-ipc-paths.ts`: Platform-specific socket paths and discovery file locations
 
 **Capture (dev only)**:
@@ -432,7 +434,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `@open-pets/pet-format/activities` and `/wardrobe`: Pure activity metadata and wardrobe/schedule contracts shared with other hosts.
 - `pet-wardrobe.ts`: Wardrobe owner — render-time outfit resolution for every pet window role, minute-aligned schedule timer that re-renders pets whose scheduled outfit changed, Control Center wardrobe snapshot, and validated preference updates (always-wear choice, user schedule, reset)
 - `pet-window-refresh.ts`: Re-renders every window showing one pet id across default, agent, plugin, LAN, and pinned roles after a per-pet presentation change (flip, outfit), or every pet window after a global one (speech bubble size)
-- `codex-pets.ts`: Import from `~/.codex/pets/` with validation
+- `codex-pets.ts`: Import from `~/.codex/pets/` through shared full image validation, then generate strict first-frame thumbnails from the validated atlas geometry.
 - `codex-pets-core.ts`: Desktop gaze geometry, direction hysteresis, glance timing and Codex enumeration limits; metadata, layout, and atlas policy belong to `@open-pets/pet-format`.
 - `codex-pet-migration.ts`: Idempotent startup repair for legacy Codex V2 imports gated by canonical source, exact local atlas validation, and byte hash equality
 - `installed-pet-layout.ts`: Bounded installed-manifest reader shared by pet windows and Control Center sprite previews, preserving metadata such as gaze anchors; resolves and validates manifest-selected atlas bytes/MIME (base or one declared outfit) for image protocols
@@ -477,11 +479,11 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-oauth.ts`: Host-mediated OAuth/PKCE flow and token session lifecycle for plugins.
 - `plugin-panels.ts`: Sandboxed plugin panel BrowserWindow coordinator and message bridge.
 - `plugin-pet-registry.ts`: Registry for default and plugin-spawned pets, including lifecycle and SDK targeting.
-- `plugin-platform-settings.ts`: Global plugin-platform settings for audio, voice, speech, microphone, quiet hours, and independent provider profiles/selections; versioned migration/quarantine; host-owned atomic profile/credential/role saves and redacted-header add/replace/delete patches; no legacy `ai` object is read.
+- `plugin-platform-settings.ts`: Global plugin-platform settings for audio, voice, speech, microphone, quiet hours, and independent provider profiles/selections; OS-encrypted persistence including arbitrary headers/quarantined profiles, atomic legacy migration and blocked-storage status; host-owned atomic profile/credential/role saves and redacted-header add/replace/delete patches; no legacy `ai` object is read.
 - `provider-contract.ts`: Pure canonical provider adapter definitions, typed adapter-specific profiles (including native ElevenLabs Scribe STT), role support, credential policies, default auth, and preset catalog owned by the host and exposed through the renderer contract.
 - `provider-service.ts`: Host-owned provider operation boundary; resolves snapshots and credentials, constructs adapter URLs/headers/payloads, validates adapter responses, and emits bounded outbound/terminal diagnostics. Transcription preserves the generic OpenAI-compatible multipart route and uses the typed ElevenLabs `/speech-to-text` `model_id` route for Scribe.
 - `provider-transport.ts`: Provider-neutral fetch lease with redirect rejection, timeout/caller-abort composition, bounded body consumption, JSON/SSE decoding, sanitized HTTP error detail, and idempotent response cleanup.
-- `plugin-secrets.ts`: Plugin-scoped encrypted secret storage backed by Electron safe storage primitives.
+- `plugin-secrets.ts`: Existing plugin-scoped OS-encrypted credential owner; distinguishes unreadable ciphertext from usable keys, preserves private ciphertext recovery on explicit replacement, blocks malformed-store writes, and commits memory only after atomic persistence.
 - `plugin-toast.ts`: Host toast/notification routing for plugin UI events.
 - `plugin-user-sound-store.ts`: Plugin-scoped imported user sound registry that stores opaque sound refs instead of raw filesystem paths.
  - `plugin-voice.ts`: Voice/TTS and one-shot listen facade gated by settings and permissions; owns host cancellation hooks, shared operation reservations, and the private realtime conversation entry points.

@@ -88,7 +88,12 @@ profile, one STT profile, and one TTS profile. Realtime is derived from the
 selected text profile and is ready only for an explicit native
 `openai-realtime` profile with both models configured. Secret credential values
 are resolved only from `PluginSecretsStore`; optional static provider header
-values are persisted in local provider settings, while Control Center snapshots
+values are encrypted with OS-backed Electron `safeStorage` inside the existing
+provider settings document, including quarantined legacy profiles. Canonical
+credentials remain in `PluginSecretsStore`; this adds no credential store.
+Legacy plaintext settings are replaced atomically only after encryption succeeds;
+unavailable encryption, decryption, or migration writes preserve the original file
+and block settings writes with an actionable provider status. Control Center snapshots
 expose header names and credential presence only. TTS uses the persisted profile
 voice by default, with a request voice taking precedence. Generic
 OpenAI-compatible text covers cloud gateways and Ollama/LM Studio/vLLM, while
@@ -176,10 +181,14 @@ presentation state only and remains distinct from the host-owned local archive
 delivered by #149. The archive is atomic,
 local-only, and stores only terminal user/assistant text from the canonical
 shared voice/chat conversation. It retains at most 200 messages for 30 days and
-512 KiB total, with a 64 KiB per-entry cap and newest entries preserved. Corrupt
-or malformed data is quarantined when possible, replaced with an empty archive,
-and never partially trusted. If the archive cannot be opened or repaired, it is
-disabled for that session without blocking the Pet Assistant. A most-recent archive window of at most 24 entries
+512 KiB of plaintext total, with a 64 KiB per-entry cap and newest entries preserved.
+The file is encrypted using OS-backed Electron `safeStorage` and written atomically
+with private file permissions. Legacy plaintext history migrates only after an
+encrypted replacement is ready. Invalid data, unavailable encryption, wrong keys,
+and migration write failures preserve the original file and disable history for
+that session without blocking the Pet Assistant; history management displays the
+unavailability instead of presenting an empty, erasable archive. No plaintext fallback
+or plaintext recovery copy is created. A most-recent archive window of at most 24 entries
 and 128 KiB may be added to the next assistant prompt; tool definitions/results,
 provider payloads, and personality data never enter that archive window. Owner
 delete-one/delete-all operations are exposed only through a narrow main-process

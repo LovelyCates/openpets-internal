@@ -768,7 +768,15 @@ unchanged; only the desktop asset and runtime layout have been upgraded.
 OpenPets preserves the original Codex V1 package shape: an unmarked
 atlas with the nine standard `192×208` animation rows. An explicit numeric
 `"spriteVersionNumber": 1` is also accepted as V1 and normalized to an
-omitted marker internally. OpenPets imports V2 only
+omitted marker internally. V1 WebP must fully decode with the exact `1536×1872`
+canvas; published animated V1 artwork keeps its original bytes and is accepted
+up to 64 images within a 768 MiB decoded RGBA ceiling. Outfit WebP remains a
+single image. The shared image boundary checks RIFF/WebP headers, canvas and
+encoded frame dimensions before passing bytes to the native decoder, so renamed
+TIFF, PNG or SVG files cannot enter a WebP decode path. These checks apply to
+local Codex previews, folder/ZIP imports, activities and Motion clips on both
+Windows and macOS. Codex thumbnails decode only the first validated image.
+OpenPets imports V2 only
 when `pet.json` has `"spriteVersionNumber": 2` and its source asset is either
 a fully decodable, single-image, alpha-enabled WebP or a validated static SVG,
 with the exact `1536×2288` (`8×11`) grid. SVG V1 uses the exact `1536×1872`

@@ -283,8 +283,14 @@ export function installControlCenterProviderIpcHandlers({
     const capabilities = getProviderCapabilities();
     const settings = getPluginPlatformSettings();
     const credentialRefs = new Set<string>();
-    for (const profile of Object.values(settings.profiles)) if (profile.secretRef && await capabilities.secretsStore.has(hostSecretsOwner, providerSecretKey(profile.secretRef))) credentialRefs.add(profile.secretRef);
-    return buildProviderControlCenterSnapshot(settings, (profile) => Boolean(profile.secretRef && credentialRefs.has(profile.secretRef)));
+    const unavailableRefs = new Set<string>();
+    for (const profile of Object.values(settings.profiles)) {
+      if (!profile.secretRef) continue;
+      const status = await capabilities.secretsStore.getStatus(hostSecretsOwner, providerSecretKey(profile.secretRef));
+      if (status === "available") credentialRefs.add(profile.secretRef);
+      if (status === "unavailable") unavailableRefs.add(profile.secretRef);
+    }
+    return buildProviderControlCenterSnapshot(settings, (profile) => Boolean(profile.secretRef && credentialRefs.has(profile.secretRef)), (profile) => Boolean(profile.secretRef && unavailableRefs.has(profile.secretRef)));
   }
 
   function getProviderTestSession(senderId: number, value: unknown): { readonly senderId: number; readonly session: ProviderTranscriptionTestSession } {

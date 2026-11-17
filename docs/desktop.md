@@ -458,7 +458,8 @@ Initial and streamed conversation/Talk snapshots are applied by sequence/revisio
 ordering so a late initial IPC response cannot replace newer streamed state.
 Archive list/delete/clear operations remain host-owned Control Center IPC for Settings presentation
 and are never exposed to the pet carrier. The local-only atomic archive at
-`userData/openpets-conversation-history.json` remains the persistence/context seam.
+`userData/openpets-conversation-history.json` remains the persistence/context seam;
+the filename is retained for migration, but its contents are an OS-encrypted envelope.
 Normalized voice transcript events remain an
 integration seam for #147: their adapter must provide a process-lifetime
 monotonic sequence within the voice source; voice ordering is deliberately
@@ -473,6 +474,26 @@ Control Center. Existing static headers are redacted to names in snapshots and
 edited through host-applied `add`/`replace`/`delete` operations, so their values
 never need to cross into the renderer. The host commits profile, credential,
 and role changes atomically.
+The settings persistence owner encrypts the entire provider document with Electron
+`safeStorage`, including arbitrary extra headers and quarantined profiles. Existing
+plaintext configurations migrate atomically without dropping custom headers or making
+plaintext backups. A locked/unavailable keychain, undecryptable document, or failed
+migration leaves the original file intact and blocks settings writes with a visible
+provider status. Canonical credentials still use the existing `PluginSecretsStore`.
+Production startup uses the real macOS Keychain or Windows DPAPI defaults and
+selects a real keyring on Linux; it never forces Chromium's mock keychain or basic
+password store. Credentials written by an older mock-keychain build may be
+unreadable with the real OS key. The Control Center marks them unavailable and
+requests keychain access or explicit credential re-entry, rather than claiming
+they are ready. Reading never changes their ciphertext. Before an explicit
+replacement modifies a store containing unreadable credentials, the existing
+store owner wraps the exact original ciphertext document in real OS encryption
+with purpose `credential-recovery`, then saves a private
+`plugin-secrets.json.unreadable-*` recovery file. New recovery files therefore do
+not expose historical weak-key ciphertext. Unreadable entries in the active store
+remain unchanged until explicit replacement; they are not automatically decoded
+or upgraded. Malformed stores block writes and keep the original file intact.
+There is no automatic weak-key decoder or plaintext recovery path.
 
 The MiniMax chat preset starts new profiles with `MiniMax-M3.1-Flash`;
 `MiniMax-M3` is the alternate current model in the editable model field.
@@ -899,7 +920,7 @@ single host-owned `PetAssistantService`. `text-model-client.ts` uses a stable
 operation snapshot from `provider-service.ts` for the selected text profile;
 secret credential values are resolved from `PluginSecretsStore` and never enter
 settings or snapshots; optional static provider header values remain in the
-local provider-profile settings and snapshots expose only their names. The adapter never uses the
+OS-encrypted provider-profile settings and snapshots expose only their names. The adapter never uses the
 plugin `ctx.ai` gateway. Capability discovery and execution call the
 generation-pinned `PluginService` APIs; pre-invocation lifecycle rejection is
 unavailable, while a disable/reload after invocation is indeterminate.
@@ -936,9 +957,16 @@ communication-only and cannot grant capabilities, change permissions, or
 rewrite failed, rejected, unavailable, or indeterminate outcomes. When any
 such non-completed outcome exists, the terminal response is a deterministic
 host-generated status summary rather than model prose; all-completed turns
-preserve the model response. The archive is local-only and atomic, with 200
-messages/30 days/512 KiB retention and a 64 KiB per-entry cap; corrupt data is
-quarantined/replaced. A narrow Control Center bridge permits only listing,
+preserve the model response. The archive is local-only, OS-encrypted and atomic,
+with 200 messages/30 days/512 KiB plaintext retention and a 64 KiB per-entry cap.
+Both private document owners write files with `0600` permissions where supported.
+Legacy history is replaced only after encryption succeeds; unavailable encryption,
+decryption failure, invalid data or migration write failure preserves the original
+messages and disables history for that session. New turns remain usable in memory
+and are not saved to disk while history is unavailable. History management reports
+this status clearly; it never silently shows an empty archive or permits a misleading
+successful erase. No plaintext fallback or plaintext quarantine copy is created.
+A narrow Control Center bridge permits only listing,
 deleting one archived message, or clearing the archive; its local-history panel
 is separate from the active session and updates after a terminal turn or owner
 deletion. There is no semantic retrieval, summary, preference, network
@@ -1006,8 +1034,17 @@ and Dashboard; `update-version.ts` does version parsing/comparison.
 ### Logging
 
 `logger.ts` provides scoped, structured logging (scopes include `app`, `ipc`, `lease`,
-`pet.*`, `state`, `tray`, `ui`, `voice`, `provider`, and the dev-only `capture`) with log rotation (~2MB) and redaction of
-sensitive data, written to `userData/logs/openpets.log`. Renderer diagnostics
+`pet.*`, `state`, `tray`, `ui`, `voice`, `provider`, and the dev-only `capture`).
+The current file and two retained logs are each capped at 2 MiB, with serialized
+asynchronous rotation during a running session. Individual lines are capped at
+64 KiB, field values/recursive structures are bounded before formatting,
+and the pending write backlog at 2 MiB; excess burst entries are counted
+in a diagnostic after the queue drains. Shutdown flushes accepted entries.
+Existing oversized logs are reduced to their last 2 MiB at startup. POSIX log
+directories/files use 0700/0600; Windows relies on the profile ACL. Packaged apps
+default to info logging (development to debug), with the existing environment
+override. Sensitive field names, API keys and token-like text are redacted
+before console and file output in `userData/logs/openpets.log`. Renderer diagnostics
 should be routed here so failures are visible in the log file, not only DevTools
 (see the logging guidance in `AGENTS.md`).
 

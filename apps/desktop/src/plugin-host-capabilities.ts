@@ -305,10 +305,10 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
         await openExternalUrl(url);
       },
       async readClipboardText() {
-        return clipboard.readText().slice(0, 64 * 1024);
+        return (await clipboard.readText()).slice(0, 64 * 1024);
       },
       async writeClipboardText(text) {
-        clipboard.writeText(text);
+        await clipboard.writeText(text);
       },
     },
     settings: {

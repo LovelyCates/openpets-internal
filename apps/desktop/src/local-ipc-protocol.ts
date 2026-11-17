@@ -3,6 +3,7 @@ import { validatePetLibraryMetadata, type PetLibraryMetadata } from "@open-pets/
 export { allowedReactions, type OpenPetsReaction } from "@open-pets/pet-format/reactions";
 import { randomUUID } from "node:crypto";
 import { extname, isAbsolute } from "node:path";
+import { isNetworkOrDevicePath, localFilesystemPathMessage } from "./local-file-path.js";
 
 export const openPetsIpcProtocol = "openpets-ipc";
 export const openPetsIpcVersion = 1;
@@ -211,6 +212,9 @@ export function validateInstallLocalPath(value: unknown): string {
   }
   if (/[\x00-\x1F\x7F]/.test(trimmed)) {
     throw new IpcProtocolError("invalid_params", "Path contains invalid control characters.");
+  }
+  if (isNetworkOrDevicePath(trimmed)) {
+    throw new IpcProtocolError("invalid_params", localFilesystemPathMessage);
   }
   if (!isAbsolute(trimmed)) {
     throw new IpcProtocolError("invalid_params", "Path must be absolute.");

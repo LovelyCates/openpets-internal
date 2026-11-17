@@ -14,6 +14,6 @@
 - **opencode-status.ts**: Status classification (147 lines). `classifyOpenCodeMcpStatus()`, `classifyOpenCodeInstructionsStatus()`, `classifyOpenCodePluginStatus()`, managed MCP/plugin/instruction detection helpers, OpenPets-like entry detection.
 - **opencode-previews.ts**: Config entry builders (55 lines). `buildOpenCodeMcpEntry()`, `buildOpenCodePluginPreview()`, `buildOpenCodeInstructionPath()`, `formatOpenCodeMcpConfig()`, `validateOpenPetsPetArg()`.
 - **check-opencode-foundation.ts**: Contract validation (excluded from detailed documentation).
-- **check-opencode-plugin.ts**: Plugin contract validation (excluded from detailed documentation).
+- **check-opencode-plugin.ts**: Plugin contract validation, including wire requests through a private temporary discovery file (0600) and runtime directory, so real-client tests retain the production discovery security boundary.
 
 - **check-opencode-realtime.ts**: Behavioral regressions for immediate transitions, delayed IPC coalescing, failed-send retry, session isolation, bounded terminal outcomes, V1 error/idle/completion bursts, late and in-flight badge clears, same-session turn recovery, permission-reply restoration and obsolete-speech replacement even during ambient cooldown, parallel completion/error, V1 streams, and fake-clock quiet-task refresh/lease cleanup.

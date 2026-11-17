@@ -88,7 +88,8 @@ try {
   await mkdir(destination);
   const metadata = validateCodexPetMetadata({ ...codexV1Fixture, activities: [activity] }, "aiko");
   await writeFile(join(source, "pet.json"), JSON.stringify(metadata));
-  await writeFile(join(source, "spritesheet.webp"), "existing V1 base semantics");
+  const base = await sharp({ create: { width: 1536, height: 1872, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).webp().toBuffer();
+  await writeFile(join(source, "spritesheet.webp"), base);
   await writeFile(join(source, activity.spritesheetPath), strip);
   await validatePetAtlases(source, metadata, 100 * 1024 * 1024, { exactPackage: true, copyTo: destination });
   assert.deepEqual(await readFile(join(destination, activity.spritesheetPath)), strip, "candidate includes the activity bytes");

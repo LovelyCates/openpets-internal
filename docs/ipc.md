@@ -60,8 +60,13 @@ from public OpenPets installs. Both native desktop servers ignore the legacy
 override for controlled local integrations and tests, subject to the same native
 endpoint validation. A client:
 
-1. Reads and validates the discovery file (size, permissions, symlink checks;
-   on Linux, `XDG_RUNTIME_DIR` must be `0o700` and owned by the user).
+1. Reads a bounded, stable regular-file snapshot (at most 16 KiB); rejects
+   symlinks at the file or immediate runtime directory, and Windows network or
+   device namespaces before filesystem access. On POSIX the file and runtime
+   directory must belong to the current user, the token file must have no
+   group/other permissions, and the runtime directory must not be writable by
+   group/others. Default modes remain `0600` and `0700`. On Linux,
+   `XDG_RUNTIME_DIR` must also be `0700` and owned by the user.
 2. Parses + validates the endpoint (`parseIpcEndpoint` / `validateEndpoint`).
 3. Opens a connection and sends a request carrying the token.
 
@@ -327,6 +332,16 @@ Control Center provides UI management under **Settings → Remote**:
 
 - **Local token auth** on every local request; the token comes only from the
   permission-checked local discovery file.
+- **Local filesystem boundary.** IPC media, IPC imports, native import dialogs,
+  and the shared folder/ZIP installer reject Windows UNC, mixed-separator UNC,
+  and device namespaces before any file lookup, on both Windows and macOS.
+  Drive letters and OS-mounted volumes still follow the operating system's
+  mount/drive policy; lexical validation does not identify mapped network drives.
+- **Discovery snapshot checks.** Descriptor identity and metadata are checked
+  before and after a capped read, so a replaced or growing discovery file is
+  rejected. Windows uses lstat symlink/junction and descriptor identity checks;
+  Node's POSIX mode/UID checks cannot validate Windows ACLs. The private Windows
+  user-profile directory and named-pipe ACL remain operating-system boundaries.
 - **TCP is private-only.** IPv4 addresses only (no hostnames); allowed ranges are
   loopback `127.0.0.0/8`, private `10/8`, `172.16/12`, `192.168/16`, and
   link-local `169.254/16`. `0.0.0.0`, public IPs, and hostnames are rejected.

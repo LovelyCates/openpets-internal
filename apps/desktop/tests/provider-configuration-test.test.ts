@@ -1,10 +1,11 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerHooks } from "node:module";
 
 import type { ProviderProfile } from "../src/provider-contract.js";
-import { testProviderConfiguration, transcribeProviderConfigurationAudio } from "../src/provider-configuration-test.js";
 import {
   getPluginPlatformSettings,
   initializePluginPlatformSettings,
@@ -12,6 +13,22 @@ import {
 } from "../src/plugin-platform-settings.js";
 
 const originalFetch = globalThis.fetch;
+
+// This separate test process exercises mocked provider wire formats. Production
+// retains its real disabled policy; internal-network-policy.test runs separately.
+const policyUrl = new URL("../src/internal-network-policy.js", import.meta.url).href;
+const policyMock = registerHooks({
+  load(url, context, nextLoad) {
+    if (url !== policyUrl) return nextLoad(url, context);
+    return {
+      format: "module",
+      shortCircuit: true,
+      source: "export const publicNetworkEnabled = true; export const remoteNetworkEnabled = false; export const thirdPartyPluginsEnabled = false; export const nonOpenCodeIntegrationsEnabled = false; export const publicNetworkDisabledMessage = 'Test process only';",
+    };
+  },
+});
+const { testProviderConfiguration, transcribeProviderConfigurationAudio } = await import("../src/provider-configuration-test.js")
+  .finally(() => policyMock.deregister());
 
 async function main(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "openpets-provider-configuration-test-"));
@@ -144,7 +161,7 @@ async function main(): Promise<void> {
     }, undefined);
     assert.deepEqual(system, { kind: "system-tts" });
 
-    initializePluginPlatformSettings(directory);
+    initializePluginPlatformSettings(directory, { encryption: testPrivateStorageEncryption });
     const before = getPluginPlatformSettings();
     const draft = previewProviderConfiguration({
       isEditing: false,

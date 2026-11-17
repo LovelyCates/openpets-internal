@@ -88,6 +88,7 @@ for (const damage of ["missing", "invalid"] as const) {
   let deferCleanup = true;
   const service = new PluginService({
     userDataPath: f.userDataPath,
+    allowUnreviewedPluginsInTests: true,
     petApi: { speak() {}, react() {}, moveBy() {}, wander() {}, moveToHome() {} },
     seedBundledPlugins: false,
     pluginInstallRecoveryCleanup: async () => { if (deferCleanup) throw new Error("cleanup deferred"); },
@@ -167,7 +168,7 @@ if (process.platform !== "win32") {
   assert.equal(JSON.parse(readFileSync(join(f.target, "openpets.plugin.json"), "utf8")).version, "2.0.0");
   assert.equal(readdirSync(f.root).some((name) => name.startsWith(".openpets-transaction-")), true);
   const runtime = { async start() { assert.equal(f.store.getRecord(id)?.version, "2.0.0"); } };
-  const service = new PluginService({ userDataPath: f.userDataPath, stateStore: f.store, runtime: runtime as never, seedBundledPlugins: false });
+  const service = new PluginService({ userDataPath: f.userDataPath, stateStore: f.store, runtime: runtime as never, seedBundledPlugins: false, allowUnreviewedPluginsInTests: true });
   await service.start();
   assert.equal(readdirSync(f.root).some((name) => name.startsWith(".openpets-transaction-")), false);
   assert.equal(readdirSync(f.root).some((name) => name.startsWith(".openpets-backup-")), false);
@@ -190,7 +191,7 @@ for (const phase of ["prepared", "before-promotion", "after-promotion", "state-w
       assert.equal(JSON.parse(readFileSync(join(f.target, "openpets.plugin.json"), "utf8")).version, expected.version);
     },
   };
-  const service = new PluginService({ userDataPath: f.userDataPath, stateStore: f.store, runtime: runtime as never, seedBundledPlugins: false });
+  const service = new PluginService({ userDataPath: f.userDataPath, stateStore: f.store, runtime: runtime as never, seedBundledPlugins: false, allowUnreviewedPluginsInTests: true });
   await service.start();
   assert.equal(started, true);
 }
@@ -217,6 +218,7 @@ for (const committed of [true, false]) {
   };
   const service = new PluginService({
     userDataPath: f.userDataPath,
+    allowUnreviewedPluginsInTests: true,
     stateStore: f.store,
     runtime: runtime as never,
     seedBundledPlugins: false,
@@ -285,6 +287,7 @@ for (const committed of [true, false]) {
   const runtime = { async start() { starts += 1; assert.equal(f.store.getRecord(id), undefined); assert.equal(existsSync(f.target), false); } };
   const service = new PluginService({
     userDataPath: f.userDataPath,
+    allowUnreviewedPluginsInTests: true,
     stateStore: f.store,
     runtime: runtime as never,
     seedBundledPlugins: false,
@@ -310,6 +313,7 @@ for (const committed of [true, false]) {
   const runtime = { async start() {}, async reloadPlugin() { reloads += 1; } };
   const service = new PluginService({
     userDataPath: f.userDataPath,
+    allowUnreviewedPluginsInTests: true,
     stateStore: f.store,
     runtime: runtime as never,
     seedBundledPlugins: false,
@@ -347,6 +351,7 @@ for (const committed of [true, false]) {
   const runtime = { async start() {}, async reloadPlugin() { reloads += 1; } };
   const service = new PluginService({
     userDataPath: f.userDataPath,
+    allowUnreviewedPluginsInTests: true,
     stateStore: f.store,
     runtime: runtime as never,
     seedBundledPlugins: false,

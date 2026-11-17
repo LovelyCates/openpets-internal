@@ -168,6 +168,16 @@ function getHandler(harness: ReturnType<typeof createHarness>, channel: (typeof 
   return handler;
 }
 
+// Native pickers can return a Windows share too. Reject it before type probing,
+// for ordinary ZIP, explicit Codex ZIP, and folder imports alike.
+for (const importChoice of [0, 1, 2]) {
+  const harness = createHarness();
+  harness.setMessageResponse(importChoice);
+  harness.setOpenDialogResult({ canceled: false, filePaths: ["\\\\example.invalid\\share\\pet.zip"] });
+  await assert.rejects(async () => getHandler(harness, "openpets:install-local-pet")(event));
+  assert.equal(harness.calls.some(({ method }) => method === "stat" || method === "installPetFromZipFile" || method === "installPetFromFolder"), false);
+}
+
 assert.deepEqual([...createHarness().handlers.keys()], channels);
 
 {

@@ -1,3 +1,4 @@
+import { readPrivateTestDocument, testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -32,7 +33,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
   const root = temporaryDirectory();
   try {
     const diagnostics: string[] = [];
-    const archive = openLocalPetAssistantConversationArchive({
+    const archive = openLocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption,
       archivePath: join(root, "unavailable.json"),
       persist: () => { throw new Error("disk unavailable"); },
       onDiagnostic: (message) => diagnostics.push(message),
@@ -48,7 +49,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
 {
   const root = temporaryDirectory();
   try {
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "count.json"), now: () => 1_000_000 });
+    const archive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "count.json"), now: () => 1_000_000 });
     archive.append(Array.from({ length: LOCAL_CONVERSATION_ARCHIVE_MAX_MESSAGES + 5 }, (_, index) => ({
       turnId: `turn-${index}`,
       role: "user" as const,
@@ -59,13 +60,13 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
     assert.equal(byCount[0]?.text, "message-5");
     assert.equal(byCount.at(-1)?.text, `message-${LOCAL_CONVERSATION_ARCHIVE_MAX_MESSAGES + 4}`);
 
-    const byteArchive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "bytes.json"), now: () => 2_000_000 });
+    const byteArchive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "bytes.json"), now: () => 2_000_000 });
     byteArchive.append(Array.from({ length: 12 }, (_, index) => ({ turnId: `byte-${index}`, role: "user" as const, text: "x".repeat(60_000) })));
-    assert.ok(Buffer.byteLength(readFileSync(join(root, "bytes.json"), "utf8"), "utf8") <= LOCAL_CONVERSATION_ARCHIVE_MAX_BYTES);
+    assert.ok(Buffer.byteLength(readPrivateTestDocument(join(root, "bytes.json"), "assistant-history"), "utf8") <= LOCAL_CONVERSATION_ARCHIVE_MAX_BYTES);
     assert.equal(byteArchive.list().at(-1)?.turnId, "byte-11");
 
     const clock = { now: 3_000_000 };
-    const ageArchive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "age.json"), now: () => clock.now });
+    const ageArchive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "age.json"), now: () => clock.now });
     ageArchive.append([{ turnId: "old", role: "user", text: "old" }], clock.now);
     clock.now += LOCAL_CONVERSATION_ARCHIVE_MAX_AGE_MS + 1;
     assert.deepEqual(ageArchive.list(), []);
@@ -78,7 +79,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
 {
   const root = temporaryDirectory();
   try {
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "incomplete.json"), now: () => 5_500_000 });
+    const archive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "incomplete.json"), now: () => 5_500_000 });
     const failed = new PetAssistantService({ generate: () => { throw new Error("model unavailable"); } }, emptyRuntime, { conversationArchive: archive });
     const failedResult = await failed.startTurn(PET_ASSISTANT_CONVERSATION_ID, "unanswered question");
     assert.equal(failedResult.status, "failed");
@@ -123,18 +124,16 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
   }
 }
 
-// A corrupt archive is quarantined and replaced instead of being partially trusted.
+// Invalid history stays intact and unavailable; no plaintext quarantine or empty replacement is created.
 {
   const root = temporaryDirectory();
   try {
     const path = join(root, PET_ASSISTANT_ARCHIVE_FILE_NAME);
-    writeFileSync(path, "{not valid json", "utf8");
-    const diagnostics: string[] = [];
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: path, onDiagnostic: (message) => diagnostics.push(message) });
-    assert.deepEqual(archive.list(), []);
-    assert.equal(diagnostics.length, 1);
-    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")) as unknown, { version: 1, messages: [] });
-    assert.equal(readdirSync(root).some((name: string) => name.startsWith(`${PET_ASSISTANT_ARCHIVE_FILE_NAME}.corrupt-`)), true);
+    const original = "{not valid json";
+    writeFileSync(path, original, "utf8");
+    assert.throws(() => new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: path }));
+    assert.equal(readFileSync(path, "utf8"), original);
+    assert.deepEqual(readdirSync(root), [PET_ASSISTANT_ARCHIVE_FILE_NAME]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -145,9 +144,9 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
   const root = temporaryDirectory();
   try {
     const path = join(root, "write-failure.json");
-    const writable = new LocalPetAssistantConversationArchive({ archivePath: path, now: () => 3_500_000 });
+    const writable = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: path, now: () => 3_500_000 });
     writable.append([{ turnId: "durable", role: "user", text: "Still durable" }]);
-    const failing = new LocalPetAssistantConversationArchive({
+    const failing = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption,
       archivePath: path,
       now: () => 3_500_000,
       persist: () => { throw new Error("disk unavailable"); },
@@ -165,7 +164,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
 {
   const root = temporaryDirectory();
   try {
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "history.json"), now: () => 4_000_000 });
+    const archive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "history.json"), now: () => 4_000_000 });
     archive.append([
       { turnId: "prior", role: "user", text: "prior question" },
       { turnId: "prior", role: "assistant", text: "prior answer" },
@@ -207,7 +206,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
 {
   const root = temporaryDirectory();
   try {
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "prompt-limits.json"), now: () => 4_500_000 });
+    const archive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "prompt-limits.json"), now: () => 4_500_000 });
     archive.append(Array.from({ length: 26 }, (_, index) => ({ turnId: `old-turn-${index}`, role: "user" as const, text: `count-context-${index}` })));
     const requests: PetAssistantTextModelRequest[] = [];
     const service = new PetAssistantService({ generate: (request) => {
@@ -221,7 +220,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
     assert.equal(firstPrompt.messages.some((message) => messageContent(message) === "count-context-25"), true, "newest archive entries remain in context");
     assert.equal(firstPrompt.messages.filter((message) => messageContent(message)?.startsWith("count-context-")).length, 24);
 
-    const byteArchive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "prompt-bytes.json"), now: () => 4_500_000 });
+    const byteArchive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "prompt-bytes.json"), now: () => 4_500_000 });
     byteArchive.append([
       { turnId: "byte-old", role: "user", text: `byte-old:${"x".repeat(60_000)}` },
       { turnId: "byte-middle", role: "assistant", text: `byte-middle:${"y".repeat(60_000)}` },
@@ -236,7 +235,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
     assert.equal(byteRequests[0]!.messages.some((message) => messageContent(message)?.startsWith("byte-old:")), false, "oldest archive text is removed to meet the archived-context byte limit");
     assert.equal(byteRequests[0]!.messages.some((message) => messageContent(message)?.startsWith("byte-new:")), true);
 
-    const restartArchive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "restart.json"), now: () => 4_500_000 });
+    const restartArchive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "restart.json"), now: () => 4_500_000 });
     restartArchive.append([{ turnId: "turn-1", role: "user", text: "archive survives canonical turn-id reuse" }]);
     const restartRequests: PetAssistantTextModelRequest[] = [];
     const restartedService = new PetAssistantService({ generate: (request) => {
@@ -254,7 +253,7 @@ function messageContent(message: PetAssistantTextModelRequest["messages"][number
 {
   const root = temporaryDirectory();
   try {
-    const archive = new LocalPetAssistantConversationArchive({ archivePath: join(root, "tool-turn.json"), now: () => 5_000_000 });
+    const archive = new LocalPetAssistantConversationArchive({ encryption: testPrivateStorageEncryption, archivePath: join(root, "tool-turn.json"), now: () => 5_000_000 });
     const responses: readonly PetAssistantTextModelResponse[] = [
       { type: "tool-calls", toolCalls: [{ id: "tool-call", name: petAssistantToolName("missing.buddy", "run"), arguments: { secret: "provider-payload" } }] },
       { type: "text", text: "The capability was unavailable." },

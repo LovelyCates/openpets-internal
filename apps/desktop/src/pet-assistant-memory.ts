@@ -67,16 +67,18 @@ export class PetAssistantMemory {
   }
 
   getConversationHistory(): readonly PetAssistantArchivedMessage[] {
-    if (!this.#conversationArchive) return [];
+    if (!this.#conversationArchive) throw historyUnavailable();
     return this.#conversationArchive.list();
   }
 
   deleteConversationHistoryMessage(id: string): boolean {
-    return this.#conversationArchive?.deleteMessage(id) ?? false;
+    if (!this.#conversationArchive) throw historyUnavailable();
+    return this.#conversationArchive.deleteMessage(id);
   }
 
   clearConversationHistory(): void {
-    this.#conversationArchive?.clear();
+    if (!this.#conversationArchive) throw historyUnavailable();
+    this.#conversationArchive.clear();
   }
 
   #archiveTerminalText(
@@ -109,6 +111,10 @@ export class PetAssistantMemory {
       return [];
     }
   }
+}
+
+function historyUnavailable(): Error {
+  return new Error("Encrypted conversation history is unavailable. Check system keychain access or restore the original history file, then restart OpenPets. Existing messages have been preserved; new turns will not be saved to history during this session.");
 }
 
 function selectArchivedContext(messages: readonly PetAssistantArchivedMessage[], activeArchiveTurnIds: ReadonlySet<string>): PetAssistantMessage[] {

@@ -8,6 +8,11 @@ import {
   petActivityFrameHeight, petActivityFrameWidth, enumeratePetActivityAnimations, type PetActivity, type PetActivityAnimation,
 } from "../activities.js";
 import { readBoundedRegularFile } from "./files.js";
+import { inspectWebp } from "./webp.js";
+
+// Preserve published animated V1 atlases while bounding a complete RGBA decode.
+const maxV1Pages = 64;
+const maxV1DecodedBytes = 768 * 1024 * 1024;
 
 /** Image facts must describe the original encoded image, including animation markers. */
 export interface ImageMetadata {
@@ -47,21 +52,30 @@ export async function validateCodexPetSpritesheet(bytes: Uint8Array, metadata: P
     validateSvgSpritesheet(bytes, spec.width, spec.height);
     return;
   }
-  if (spec.version === 1) return;
-  await assertDecodableWebpAtlas(bytes, spec, "Codex V2 spritesheet", true, decoder);
+  await assertDecodableWebpAtlas(bytes, spec, `Codex V${spec.version} spritesheet`, spec.version === 2, decoder, spec.version === 1);
 }
 
 export async function validateCodexPetOutfitSpritesheet(bytes: Uint8Array, metadata: Pick<CodexPetMetadata, "spriteVersionNumber">, format: PetSpritesheetPath, decoder: ImageDecoder): Promise<void> {
   const formatMetadata = withAtlasFormat(metadata, format);
-  await validateCodexPetSpritesheet(bytes, formatMetadata, decoder);
   const spec = getPetSpritesheetSpec(formatMetadata);
-  if (format === "spritesheet.webp" && spec.version === 1) {
-    await assertDecodableWebpAtlas(bytes, spec, "Outfit spritesheet", false, decoder);
+  if (format === "spritesheet.svg") {
+    validateSvgSpritesheet(bytes, spec.width, spec.height);
+    return;
   }
+  await assertDecodableWebpAtlas(bytes, spec, "Outfit spritesheet", spec.version === 2, decoder);
 }
 
-async function assertDecodableWebpAtlas(bytes: Uint8Array, spec: { readonly width: number; readonly height: number }, label: string, requireAlpha: boolean, decoder: ImageDecoder): Promise<void> {
-  const image = decoder.open(bytes, 50_000_000);
+async function assertDecodableWebpAtlas(bytes: Uint8Array, spec: { readonly width: number; readonly height: number }, label: string, requireAlpha: boolean, decoder: ImageDecoder, allowV1Animation = false): Promise<void> {
+  const header = inspectWebp(bytes, label);
+  if (!allowV1Animation && (header.animated || header.pages !== 1)) throw new Error(`${label} must contain exactly one image.`);
+  if (header.width !== spec.width || header.height !== spec.height) {
+    throw new Error(`${label} must be exactly ${spec.width}x${spec.height}.`);
+  }
+  const decodedPixels = header.width * header.height * header.pages;
+  if (allowV1Animation && (header.pages > maxV1Pages || decodedPixels * 4 > maxV1DecodedBytes)) {
+    throw new Error(`${label} exceeds the frame count or decoded size limit.`);
+  }
+  const image = decoder.open(bytes, allowV1Animation ? maxV1DecodedBytes / 4 : 50_000_000);
   let metadata: ImageMetadata;
   try {
     metadata = await image.metadata();
@@ -70,8 +84,10 @@ async function assertDecodableWebpAtlas(bytes: Uint8Array, spec: { readonly widt
   }
   if (metadata.format !== "webp") throw new Error(`${label} must be WebP.`);
   if (requireAlpha && !metadata.hasAlpha) throw new Error(`${label} must include transparency.`);
-  if ((metadata.pages ?? 1) !== 1) throw new Error(`${label} must contain exactly one image.`);
-  if (metadata.width !== spec.width || metadata.height !== spec.height) {
+  if (!allowV1Animation && (metadata.pages ?? 1) !== 1) throw new Error(`${label} must contain exactly one image.`);
+  if ((metadata.pages ?? 1) !== header.pages || metadata.width !== spec.width
+    || metadata.height !== spec.height * header.pages
+    || (header.animated && metadata.pageHeight !== spec.height)) {
     throw new Error(`${label} must be exactly ${spec.width}x${spec.height}.`);
   }
   try {
@@ -186,6 +202,12 @@ export async function validatePetActivitySpritesheet(bytes: Buffer, activity: Pe
   if (bytes.byteLength === 0 || bytes.byteLength > maxPetActivitySpritesheetBytes) {
     throw new Error("Pet activity spritesheet size is invalid.");
   }
+  const header = inspectWebp(bytes, "Pet activity spritesheet");
+  if (header.animated) throw new Error("Pet activity spritesheet must be static, not animated WebP.");
+  const width = petActivityFrameWidth * activity.frameCount;
+  if (header.width !== width || header.height !== petActivityFrameHeight) {
+    throw new Error(`Pet activity spritesheet must be exactly ${width}x${petActivityFrameHeight}.`);
+  }
   const image = decoder.open(bytes, petActivityFrameWidth * maxPetActivityFrameCount * petActivityFrameHeight);
   try {
     const metadata = await image.metadata();
@@ -193,7 +215,6 @@ export async function validatePetActivitySpritesheet(bytes: Buffer, activity: Pe
     if ((metadata.pages ?? 1) !== 1 || metadata.loop !== undefined || metadata.delay !== undefined) {
       throw new Error("Pet activity spritesheet must be static, not animated WebP.");
     }
-    const width = petActivityFrameWidth * activity.frameCount;
     if (metadata.width !== width || metadata.height !== petActivityFrameHeight) {
       throw new Error(`Pet activity spritesheet must be exactly ${width}x${petActivityFrameHeight}.`);
     }
@@ -226,7 +247,7 @@ export async function validatePetActivitySpritesheet(bytes: Buffer, activity: Pe
   }
 }
 
-/** Outfit atlases follow the same per-format rules as the canonical base atlas names. */
+/** Select the canonical format name for an outfit's declared atlas path. */
 export function getOutfitAtlasFormat(outfit: PetOutfit): PetSpritesheetPath {
   return outfit.spritesheetPath.endsWith(".svg") ? "spritesheet.svg" : "spritesheet.webp";
 }

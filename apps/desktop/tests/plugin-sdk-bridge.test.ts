@@ -783,6 +783,12 @@ function assistantHandle(bridge: PluginSdkBridge, capabilityId: string) {
 
 async function scenario(name: string, run: (context: ScenarioContext) => Promise<void> | void): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "openpets-plugin-sdk-"));
+  // Exercise request validation behind the internal policy gate with fake IO.
+  // Individual transport scenarios install their own nested response fixtures.
+  const restoreNetwork = setPluginSdkNetworkTestHooks({
+    fetch: async () => { throw new Error("No fetch fixture installed for this scenario."); },
+    lookup: async () => { throw new Error("No DNS fixture installed for this scenario."); },
+  });
   try {
     const store = new PluginStateStore({ statePath: join(root, "state.json") });
     store.initialize();
@@ -812,6 +818,7 @@ async function scenario(name: string, run: (context: ScenarioContext) => Promise
     const api = bridge.createApi(record, manifest());
     await run({ api, bridge, store, capabilities, errors });
   } finally {
+    restoreNetwork();
     rmSync(root, { recursive: true, force: true });
   }
 }

@@ -9,7 +9,7 @@
 
 此流程是构建门槛设计，不是已验证的离线构建记录。`Test-WindowsBuild.ps1` 当前仅执行只读预检；通过预检也不能代替网络隔离、依赖审计、实际构建和运行时出站验证。构建机应由防火墙或 CI 网络策略限制到经过批准的内网镜像，不能依赖应用变量阻止任意依赖脚本访问公网。
 
-上游根 `package.json` 要求 Node.js `>=20`、`pnpm@11.0.8`。构建项目需要固定工具链、`pnpm-lock.yaml`、Git 基线和子模块提交。Windows 桌面打包由 `apps/desktop/electron-builder.yml` 管理，目标为 NSIS 安装包。上游 `pnpm release:desktop` 是依赖 GitHub Actions 和 SignPath 的公开发布流程，不用于内部发布。
+上游根 `package.json` 要求 Node.js `22.22.2+`、`24.15.0+` 或 `26+`（Release CI 使用 Node 24）、`pnpm@11.0.8`。构建项目需要固定工具链、`pnpm-lock.yaml`、Git 基线和子模块提交。Windows 桌面打包由 `apps/desktop/electron-builder.yml` 管理，目标为 NSIS 安装包。上游 `pnpm release:desktop` 是依赖 GitHub Actions 和 SignPath 的公开发布流程，不用于内部发布。
 
 ## 供应链准备
 

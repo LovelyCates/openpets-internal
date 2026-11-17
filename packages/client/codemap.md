@@ -16,7 +16,8 @@ Provides the foundational client library for all OpenPets integrations. Handles 
 
 **Discovery Layer** (`discovery.ts`):
 - Cross-platform discovery file path resolution (macOS, Windows, Linux/XDG)
-- File validation (size, permissions, symlink checks)
+- Bounded descriptor snapshot validation (identity, size, timestamps), rejecting file/runtime-directory symlinks and Windows UNC/device path overrides before reads
+- POSIX current-user ownership and private token-file/runtime-directory permissions; Windows ACL enforcement remains OS-owned
 - Endpoint validation: Unix sockets, Windows named pipes, TCP (IPv4)
 - TCP/WSL cross-platform support: Windows desktop → WSL client via private IPs
 - Native macOS local discovery accepts only Unix sockets and native Windows accepts only named pipes; TCP discovery is rejected on both

@@ -7,6 +7,7 @@ import { calculateMotionActivityDurationMs, enumerateMotionActivityAnimations, m
 import type { PetPackage, ValidatedPetPackage } from "../package-types.js";
 import { validatePetAtlases, type ImageDecoder } from "./atlas-validation.js";
 import { readBoundedRegularFile } from "./files.js";
+import { inspectWebp } from "./webp.js";
 
 // Safety ceilings, not a distribution or runtime performance budget.
 export const motionMaxTotalBytes = motionMaxClipBytes;
@@ -42,6 +43,11 @@ export async function validatePetPackageAssets(
     const bytes = await readBoundedRegularFile(join(clipsDirectory, clip.file.slice("clips/".length)), motionMaxClipBytes, `Motion clip ${name}`);
     totalBytes += bytes.byteLength;
     if (totalBytes > motionMaxTotalBytes) throw new Error("Motion clips exceed the aggregate size limit.");
+    const header = inspectWebp(bytes, `Motion clip ${name}`);
+    if (header.width !== metadata.geometry.width || header.height !== metadata.geometry.height
+      || header.pages !== clip.frames || header.width * header.height * header.pages > motionMaxDecodedPixels) {
+      throw new Error(`Motion clip ${name} has invalid dimensions or frame count.`);
+    }
     const image = decoder.open(bytes, motionMaxDecodedPixels);
     const facts = await image.metadata();
     if (facts.format !== "webp" || !facts.hasAlpha || facts.pages !== clip.frames

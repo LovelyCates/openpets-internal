@@ -156,13 +156,16 @@ async function createCodexThumbnailDataUrl(path: string, spriteLayout: CodexPetS
   const cached = codexThumbnailCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const image = sharp(spritesheet, { limitInputPixels: 50_000_000 });
-  const metadata = await image.metadata();
-  if (!metadata.width || !metadata.height) return "";
-  const width = Math.min(spriteLayout.frameWidth, metadata.width);
-  const height = Math.min(spriteLayout.frameHeight, metadata.height);
+  // The shared validator has checked format, exact atlas geometry and every
+  // encoded frame. Decode only the first validated frame for a small preview.
+  const width = spriteLayout.frameWidth;
+  const height = spriteLayout.frameHeight;
   const left = spriteLayout.neutralPose ? spriteLayout.neutralPose.column * spriteLayout.frameWidth : 0;
-  const thumbnail = await sharp(spritesheet, { limitInputPixels: 50_000_000 })
+  const thumbnail = await sharp(spritesheet, {
+    animated: false,
+    failOn: "error",
+    limitInputPixels: 50_000_000,
+  })
     .extract({ left, top: 0, width, height })
     .resize(54, 58, { fit: "fill" })
     .png()

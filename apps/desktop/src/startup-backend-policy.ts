@@ -6,6 +6,16 @@ export type LinuxBackendBootstrapPlan =
 
 export type ReplacementProcessMode = "detached" | "supervised";
 
+/** Production private data always uses the real OS store, never Chromium's test keychain. */
+export function configurePrivateStorageBackend(
+  commandLine: { appendSwitch(name: string, value?: string): void },
+  platform: NodeJS.Platform,
+  desktop: string | undefined,
+): void {
+  if (platform !== "linux") return;
+  commandLine.appendSwitch("password-store", (desktop ?? "").toLowerCase().includes("kde") ? "kwallet6" : "gnome-libsecret");
+}
+
 export function selectReplacementProcessMode(isPackaged: boolean): ReplacementProcessMode {
   return isPackaged ? "detached" : "supervised";
 }

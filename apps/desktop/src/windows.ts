@@ -599,7 +599,7 @@ export function installInternalUiHandlers(): void {
     assertAllowedSender(event, ["control-center"]);
     if (typeof enabled !== "boolean") throw new Error("Invalid launch-at-login value.");
     if (!isLaunchAtLoginSupported()) return getLaunchAtLoginState();
-    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
+    app.setLoginItemSettings({ openAtLogin: enabled });
     return getLaunchAtLoginState();
   });
 

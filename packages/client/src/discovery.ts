@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -42,17 +42,10 @@ export function getDiscoveryFilePath(): string {
 export function readDiscoveryFile(path = getDiscoveryFilePath()): OpenPetsDiscoveryFile {
   let raw: string;
   try {
-    const stat = statSync(path);
-    if (!stat.isFile()) throw new OpenPetsClientError("invalid_discovery", "OpenPets discovery path is not a file.");
-    if (stat.size > maxIpcMessageBytes) throw new OpenPetsClientError("invalid_discovery", "OpenPets discovery file is too large.");
-    raw = readFileSync(path, "utf8");
+    raw = readTrustedDiscoverySnapshot(path);
   } catch (error) {
     if (error instanceof OpenPetsClientError) throw error;
     throw new OpenPetsClientError("unavailable", `OpenPets discovery file is unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
-  }
-
-  if (Buffer.byteLength(raw, "utf8") > maxIpcMessageBytes) {
-    throw new OpenPetsClientError("invalid_discovery", "OpenPets discovery file is too large.");
   }
 
   try {
@@ -61,6 +54,81 @@ export function readDiscoveryFile(path = getDiscoveryFilePath()): OpenPetsDiscov
     if (error instanceof OpenPetsClientError) throw error;
     throw new OpenPetsClientError("invalid_discovery", "OpenPets discovery file is malformed JSON.");
   }
+}
+
+function readTrustedDiscoverySnapshot(path: string): string {
+  // An override is still local input. In particular, do not let a Windows UNC
+  // path contact SMB before we have even read and validated the endpoint.
+  if (/^[\\/]{2}/.test(path) || /^[\\/](?:\?\?|device|global\?\?|dosdevices)(?:[\\/]|$)/i.test(path)) {
+    throw new OpenPetsClientError("invalid_discovery", "Discovery must use a local filesystem path.");
+  }
+
+  const parentPath = dirname(path);
+  const parentBefore = lstatSync(parentPath);
+  assertTrustedDiscoveryMetadata(parentBefore, "directory");
+  const before = lstatSync(path);
+  assertTrustedDiscoveryMetadata(before, "file");
+
+  // Windows does not provide O_NOFOLLOW or POSIX ownership/mode semantics.
+  // It still gets lstat symlink/junction checks and opened-descriptor identity.
+  const flags = constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const descriptor = openSync(path, flags);
+  try {
+    const opened = fstatSync(descriptor);
+    assertTrustedDiscoveryMetadata(opened, "file");
+    if (!sameDiscoverySnapshot(before, opened)) {
+      throw new OpenPetsClientError("invalid_discovery", "Discovery changed while opening it.");
+    }
+
+    // A file that grows after lstat must never turn this into an unbounded read.
+    const buffer = Buffer.alloc(maxIpcMessageBytes + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(descriptor, buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (count === 0) break;
+      bytesRead += count;
+    }
+
+    const after = fstatSync(descriptor);
+    const linked = lstatSync(path);
+    const parentAfter = lstatSync(parentPath);
+    assertTrustedDiscoveryMetadata(after, "file");
+    assertTrustedDiscoveryMetadata(linked, "file");
+    assertTrustedDiscoveryMetadata(parentAfter, "directory");
+    if (bytesRead !== opened.size || !sameDiscoverySnapshot(opened, after) || !sameDiscoverySnapshot(after, linked)
+      || parentBefore.dev !== parentAfter.dev || parentBefore.ino !== parentAfter.ino) {
+      throw new OpenPetsClientError("invalid_discovery", "Discovery changed while reading it.");
+    }
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function assertTrustedDiscoveryMetadata(stat: Stats, kind: "file" | "directory"): void {
+  if (stat.isSymbolicLink() || (kind === "file" ? !stat.isFile() : !stat.isDirectory())) {
+    throw new OpenPetsClientError("invalid_discovery", `Discovery ${kind} must not be a symlink and must be a regular ${kind}.`);
+  }
+  if (kind === "file" && (stat.size < 1 || stat.size > maxIpcMessageBytes)) {
+    throw new OpenPetsClientError("invalid_discovery", "Discovery file size is invalid.");
+  }
+  if (process.platform !== "win32") {
+    if (typeof process.getuid !== "function" || stat.uid !== process.getuid()) {
+      throw new OpenPetsClientError("invalid_discovery", `Discovery ${kind} must be owned by the current user.`);
+    }
+    // The token is private; its containing directory must not allow replacement
+    // by another user. Defaults remain file 0600 and runtime directory 0700.
+    const forbiddenPermissions = kind === "file" ? 0o077 : 0o022;
+    if ((stat.mode & forbiddenPermissions) !== 0) {
+      throw new OpenPetsClientError("invalid_discovery", `Discovery ${kind} permissions are unsafe.`);
+    }
+  }
+}
+
+function sameDiscoverySnapshot(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && left.uid === right.uid && left.mode === right.mode
+    && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
 export function validateDiscovery(value: unknown): OpenPetsDiscoveryFile {

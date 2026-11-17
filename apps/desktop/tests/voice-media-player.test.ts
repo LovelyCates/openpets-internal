@@ -36,7 +36,7 @@ const electronMock = `
     isDestroyed() { return this.destroyed; }
     destroy() { this.destroyed = true; this.resolveLoad?.(); this.resolveWait?.(); }
   }
-  export const session = { fromPartition: (partition) => sessions.get(partition) ?? (() => { const value = { setPermissionRequestHandler: () => {}, setPermissionCheckHandler: () => {} }; sessions.set(partition, value); return value; })() };
+  export const session = { fromPartition: (partition) => sessions.get(partition) ?? (() => { const value = { setPermissionRequestHandler: () => {}, setPermissionCheckHandler: () => {}, webRequest: { onBeforeRequest: () => {} } }; sessions.set(partition, value); return value; })() };
 `;
 const electronUrl = `data:text/javascript,${encodeURIComponent(electronMock)}`;
 register(`data:text/javascript,${encodeURIComponent(`

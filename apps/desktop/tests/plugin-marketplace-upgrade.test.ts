@@ -58,6 +58,7 @@ for (const outage of ["offline", 404, 500] as const) {
   };
   const service = new PluginService({
     userDataPath, seedBundledPlugins: false, jsHost, fetchImpl, currentAppVersion: "2.0.0",
+    allowUnreviewedPluginsInTests: true,
     petApi: { speak() {}, react() {}, moveBy() {}, wander() {}, moveToHome() {} },
     confirmPermissions: async () => { prompts += 1; return false; },
   });

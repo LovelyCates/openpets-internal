@@ -796,7 +796,7 @@ async function withPluginIpc(run: (
       appVersion: "test",
       pid: process.pid,
       platform: process.platform,
-    })}\n`);
+    })}\n`, { mode: 0o600 });
     process.env.OPENPETS_DISCOVERY_FILE = discoveryPath;
     const waitForIpc = (predicate: (request: IpcRequest) => boolean): Promise<void> => {
       if (requests.some(predicate)) return Promise.resolve();

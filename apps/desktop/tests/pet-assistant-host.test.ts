@@ -1,3 +1,4 @@
+import { testPrivateStorageEncryption } from "./helpers/private-storage.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import { getPetAssistantConversationController, getPetAssistantService, onPetAss
 import { petAssistantToolName } from "../src/pet-assistant-tools.js";
 import { initializePluginPlatformSettings, createProviderProfile, selectProviderProfile } from "../src/plugin-platform-settings.js";
 import type { PluginSecretsStore } from "../src/plugin-secrets.js";
+import { HostProviderService } from "../src/provider-service.js";
 
 const userDataPath = mkdtempSync(join(tmpdir(), "openpets-pet-assistant-host-"));
 const previousFetch = globalThis.fetch;
@@ -36,7 +38,7 @@ const runtime = {
 };
 
 try {
-  initializePluginPlatformSettings(userDataPath);
+  initializePluginPlatformSettings(userDataPath, { encryption: testPrivateStorageEncryption });
   createProviderProfile({ id: "host-test", label: "Host test", adapter: "openai-compatible-text", model: "host-test", baseUrl: "https://host.test/v1", secretRef: "host-test" });
   selectProviderProfile("text", "host-test");
   let fetchCount = 0;
@@ -52,7 +54,10 @@ try {
   const secrets = { get: async () => "host-test-key" } as unknown as PluginSecretsStore;
   let readyController: unknown;
   const removeReadyListener = onPetAssistantConversationControllerReady((controller) => { readyController = controller; });
-  startPetAssistantHost(pluginService, secrets, { compositionProvider: () => ({}) });
+  startPetAssistantHost(pluginService, secrets, {
+    compositionProvider: () => ({}),
+    providerOperations: new HostProviderService(secrets, { allowNetworkInTests: true }),
+  });
   assert.equal(readyController, getPetAssistantConversationController());
   removeReadyListener();
   const assistant = getPetAssistantService();

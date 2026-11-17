@@ -5,6 +5,7 @@ import { assertPetPackageFiles } from "install-pet/spritesheet";
 import { getAppStateSnapshot, installPetState, removePetState, setDefaultPet, upsertPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { getCatalogPet } from "./catalog.js";
 import { publicNetworkEnabled, publicNetworkDisabledMessage } from "./internal-network-policy.js";
+import { assertLocalFilesystemPath } from "./local-file-path.js";
 import { maxCodexPetJsonBytes } from "@open-pets/pet-format/metadata";
 import { validatePetLibraryMetadata, type PetLibraryMetadata } from "@open-pets/pet-format/library-metadata";
 import { validatePetPackageMetadata } from "@open-pets/pet-format/package";
@@ -179,6 +180,7 @@ export async function installPetFromZipFile(zipPath: string, options: LocalPetIn
 
 export async function installPetFromZipFileWithResult(zipPath: string, options: LocalPetInstallOptions = {}): Promise<LocalPetInstallResult> {
   const { origin, libraryMetadata } = readLocalInstallOptions(options);
+  assertLocalFilesystemPath(zipPath);
   const archivePath = resolve(zipPath);
   if (origin === "codex" && await realpath(archivePath) !== archivePath) {
     throw new Error("Codex pet archive path is not canonical.");
@@ -256,6 +258,7 @@ export async function installPetFromFolderWithResult(
   options: LocalPetInstallOptions = {},
 ): Promise<LocalPetInstallResult> {
   const { origin, libraryMetadata } = readLocalInstallOptions(options);
+  assertLocalFilesystemPath(folderPath);
   const sourceDir = resolve(folderPath);
   const sourceStats = await lstat(sourceDir);
   if (sourceStats.isSymbolicLink()) throw new Error("Pet folder cannot be a symlink.");

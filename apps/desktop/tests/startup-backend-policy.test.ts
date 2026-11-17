@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   planLinuxBackendBootstrap,
+  configurePrivateStorageBackend,
   readOzonePlatformSwitch,
   selectReplacementProcessMode,
   superviseReplacement,
@@ -12,6 +13,21 @@ import {
 
 const executable = "/Applications/OpenPets App/electron";
 const appPath = "/Applications/OpenPets App/resources/app.asar";
+
+describe("production private storage backend", () => {
+  it("keeps native macOS and Windows stores and explicitly selects real Linux keyrings", () => {
+    for (const platform of ["darwin", "win32"] as const) {
+      const switches: string[][] = [];
+      configurePrivateStorageBackend({ appendSwitch: (name, value) => switches.push([name, value ?? ""]) }, platform, "KDE");
+      assert.deepEqual(switches, []);
+    }
+    for (const [desktop, backend] of [["KDE", "kwallet6"], ["GNOME", "gnome-libsecret"]]) {
+      const switches: string[][] = [];
+      configurePrivateStorageBackend({ appendSwitch: (name, value) => switches.push([name, value ?? ""]) }, "linux", desktop);
+      assert.deepEqual(switches, [["password-store", backend]]);
+    }
+  });
+});
 
 describe("replacement process mode", () => {
   it("supervises unpackaged launches, including SSH development, and detaches packaged launches", () => {

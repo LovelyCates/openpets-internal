@@ -31,6 +31,12 @@ const electronMock = `data:text/javascript,${encodeURIComponent(`
   export const shell = { openPath: async () => "" };
   export default { app, net, powerMonitor, screen, shell };
 `)}`;
+// The catalog response below is an in-memory ZIP fixture. Only this isolated
+// transport test opts in; production's internal network policy stays disabled.
+const networkPolicyMock = `data:text/javascript,${encodeURIComponent(`
+  export const publicNetworkEnabled = true;
+  export const publicNetworkDisabledMessage = "Public network disabled in fixture.";
+`)}`;
 const petPathsMock = `data:text/javascript,${encodeURIComponent(`
   import { join, resolve, sep } from "node:path";
   export function getPetsRoot() { return ${JSON.stringify(petsRoot)}; }
@@ -53,6 +59,9 @@ const petPathsMock = `data:text/javascript,${encodeURIComponent(`
 register(`data:text/javascript,${encodeURIComponent(`
   export async function resolve(specifier, context, nextResolve) {
     if (specifier === "electron") return { url: ${JSON.stringify(electronMock)}, shortCircuit: true };
+    if (specifier === "./internal-network-policy.js" && context.parentURL.endsWith("/pet-installation.js")) {
+      return { url: ${JSON.stringify(networkPolicyMock)}, shortCircuit: true };
+    }
     if (specifier === "./pet-paths.js" && context.parentURL.includes("/apps/desktop/.test-dist/src/")) {
       return { url: ${JSON.stringify(petPathsMock)}, shortCircuit: true };
     }

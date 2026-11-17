@@ -256,8 +256,11 @@ if (-not $node) {
     Add-Issue '未找到 Node.js。'
 } else {
     $nodeVersion = (& node --version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 20) {
-        Add-Issue "Node.js 版本不满足上游要求 >=20：$nodeVersion"
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(\d+\.\d+\.\d+)' -or
+        -not (([version]$Matches[1] -ge [version]'22.22.2' -and [version]$Matches[1] -lt [version]'23.0.0') -or
+              ([version]$Matches[1] -ge [version]'24.15.0' -and [version]$Matches[1] -lt [version]'25.0.0') -or
+              [version]$Matches[1] -ge [version]'26.0.0')) {
+        Add-Issue "Node.js 版本不满足构建要求 22.22.2+ / 24.15.0+ / 26+：$nodeVersion"
     }
 }
 

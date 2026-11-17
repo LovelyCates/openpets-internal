@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getDiscoveryFilePath, parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
+import { getDiscoveryFilePath, parseIpcEndpoint, readDiscoveryFile, validateDiscovery } from "../src/discovery.js";
 import { createOpenPetsClient, parsePetInstallResult, parsePetListResult, validateTokenRateUpdate } from "../src/index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
 import { maxRemoteMessageBytes, parseRemoteEndpoint, validateRemoteMessage, validateRemoteToken } from "../src/remote-protocol.js";
@@ -19,6 +20,65 @@ const baseDiscovery = {
 };
 
 validateDiscovery(baseDiscovery);
+
+// Only a private, stable regular file may supply the bearer token. All fixtures
+// live in a disposable directory; no user profile or real discovery is touched.
+const discoveryRoot = mkdtempSync(join(tmpdir(), "openpets-discovery-"));
+try {
+  const path = join(discoveryRoot, "ipc.json");
+  const writeDiscovery = (target: string, value: unknown = baseDiscovery) => {
+    writeFileSync(target, JSON.stringify(value), { mode: 0o600 });
+  };
+  writeDiscovery(path);
+  assert.deepEqual(readDiscoveryFile(path), baseDiscovery);
+
+  // The server updates discovery by atomic rename, which remains readable.
+  const replacement = join(discoveryRoot, "replacement.json");
+  const updated = { ...baseDiscovery, token: "y".repeat(32) };
+  writeDiscovery(replacement, updated);
+  renameSync(replacement, path);
+  assert.deepEqual(readDiscoveryFile(path), updated);
+
+  writeFileSync(path, "x".repeat(16 * 1024 + 1));
+  assertRejects(() => readDiscoveryFile(path));
+  writeFileSync(path, "");
+  assertRejects(() => readDiscoveryFile(path));
+  writeDiscovery(path);
+  assertRejects(() => readDiscoveryFile(discoveryRoot));
+
+  if (process.platform !== "win32") {
+    // POSIX group/other read access leaks the token even without write access.
+    for (const mode of [0o644, 0o620, 0o666]) {
+      chmodSync(path, mode);
+      assertRejects(() => readDiscoveryFile(path));
+    }
+    chmodSync(path, 0o600);
+    chmodSync(discoveryRoot, 0o770);
+    assertRejects(() => readDiscoveryFile(path));
+    chmodSync(discoveryRoot, 0o700);
+
+    const linkedFile = join(discoveryRoot, "linked.json");
+    symlinkSync(path, linkedFile);
+    assertRejects(() => readDiscoveryFile(linkedFile));
+  }
+
+  const privateDirectory = join(discoveryRoot, "private");
+  mkdirSync(privateDirectory, { mode: 0o700 });
+  writeDiscovery(join(privateDirectory, "ipc.json"));
+  const linkedDirectory = join(discoveryRoot, "linked-directory");
+  symlinkSync(privateDirectory, linkedDirectory, process.platform === "win32" ? "junction" : "dir");
+  assertRejects(() => readDiscoveryFile(join(linkedDirectory, "ipc.json")));
+  assert.deepEqual(readDiscoveryFile(path), baseDiscovery);
+
+  // Lexical rejection runs on macOS/Linux too, so Windows namespaces cannot
+  // silently regress just because the contract runs on a different host.
+  for (const networkPath of ["//example.invalid/share/ipc.json", "\\\\example.invalid\\share\\ipc.json", "\\\\?\\UNC\\example.invalid\\share\\ipc.json", "\\??\\C:\\ipc.json"]) {
+    assert.throws(() => readDiscoveryFile(networkPath), (error: unknown) => error instanceof OpenPetsClientError && error.code === "invalid_discovery");
+  }
+} finally {
+  rmSync(discoveryRoot, { recursive: true, force: true });
+}
+
 if (process.platform === "win32" || process.platform === "darwin") {
   assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" }));
   assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://192.168.1.100:37645" }));

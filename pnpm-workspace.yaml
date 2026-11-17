@@ -1,6 +1,8 @@
 packages:
   - "apps/*"
   - "packages/*"
+# Integration hosts are supplied by their owning applications, never bundled peers.
+autoInstallPeers: false
 supportedArchitectures:
   os:
     - darwin
@@ -12,6 +14,7 @@ supportedArchitectures:
   libc:
     - glibc
 allowBuilds:
+  '@scarf/scarf': false
   '@google/genai': true
   '@vscode/vsce-sign': true
   electron-winstaller: false
@@ -26,3 +29,11 @@ allowBuilds:
   sharp: true
   tree-sitter-bash: false
   workerd: true
+minimumReleaseAgeExclude:
+  - electron@45.3.3
+  - minimatch@11.0.9
+overrides:
+  'glob@>=9 <14.0.2': 14.0.6
+  'minimatch@>=7 <11.0.1': 11.0.9
+  '@vercel/routing-utils>path-to-regexp': 6.3.0
+  '@tailwindcss/typography>postcss-selector-parser': 6.1.5
